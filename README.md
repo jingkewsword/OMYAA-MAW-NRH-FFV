@@ -15,12 +15,25 @@ MAW 是一个以 API 转写为主的字幕生成与编辑工作流。它提供 W
 
 ## 快速开始
 
-1. [下载最新版](https://github.com/Moyf/moys-asr-workflow/releases/latest)。默认下载带 FFmpeg 的 `MAW-Windows-x64-v*.zip`；如果已安装 `ffmpeg` / `ffprobe`，也可以选择体积更小的 `MAW-lite-Windows-x64-v*.zip`，macOS 下载对应的 `MAW.app` 或 `MAW-lite.app`。
-2. 解压并启动 `MAW.exe` 或 `MAW.app`。
+1. [下载最新版](https://github.com/Moyf/moys-asr-workflow/releases/latest)。默认下载带 FFmpeg 的 `MAW-Windows-x64-v*.zip`；如果已安装 `ffmpeg` / `ffprobe`，也可以选择体积更小的 `MAW-lite-Windows-x64-v*.zip`，macOS 下载对应的 `MAW.app` 或 `MAW-lite.app`，Linux 下载 `MAW-Linux-x86_64.AppImage`。
+2. 解压并启动 `MAW.exe` 或 `MAW.app`；Linux 下 `chmod +x MAW-Linux-x86_64.AppImage && ./MAW-Linux-x86_64.AppImage`。
 3. 在 Launcher 配置转写服务的 API Key，选择媒体并点击生成。
 4. 在 MAWE 中检查、编辑字幕，导出 SRT 或其他格式。
 
 第一次使用、API 配置、编辑和排错：请从[完整工作流](docs/WORKFLOW.md)开始。
+
+### Linux 系统要求
+
+| 要求 | 说明 |
+|------|------|
+| 架构 | x86_64 |
+| glibc | ≥ 2.35（Ubuntu 22.04+、Debian 12+、Fedora 38+、Arch/Manjaro） |
+| 桌面环境 | X11（XWayland 支持 Wayland） |
+| FUSE | 运行 AppImage 需要 `libfuse2`；Docker/WSL 中可用 `APPIMAGE_EXTRACT_AND_RUN=1` 替代 |
+
+**已验证发行版：** Ubuntu 22.04+、Debian 12+、Fedora 38+、Arch/Manjaro、SteamOS 3.x、NixOS
+
+**不支持：** Ubuntu 20.04/Debian 11（glibc 2.31 过低）；建议升级系统或从源码运行
 
 ## 核心能力
 
