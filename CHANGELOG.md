@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 🐛 修复
+
+- **后处理与工具箱报错友好化**：Launcher 前端新增 12 个错误码的中英文翻译（`postprocess_connection_failed`、`postprocess_models_failed`、`batch_items_*`、`mose_*`、`alignment_*`、`invalid_reasoning_mode` 等），覆盖 LLM 连接/模型获取、批量任务、MOSE 编辑器、口播对齐等场景；所有用户可见错误均通过红框错误卡片展示操作指引，不阻断底部状态栏，后端日志保持英文便于排查。
+
 ## [1.5.0-beta.9] - 2026-08-29
 
 ### ✨ 提升

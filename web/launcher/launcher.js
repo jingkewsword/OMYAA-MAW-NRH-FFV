@@ -612,7 +612,19 @@
       server_start_failed: (detail) => `编辑器服务器启动失败：${detail || "请查看下方日志。"}`,
       alignment_server_no_response: (detail) => `口播对齐 Server 没有响应：${detail || "请重试。"}`,
       alignment_server_start_failed: (detail) => `口播对齐 Server 启动失败：${detail || "请查看日志后重试。"}`,
-      sticker_dir_invalid: "表情包根目录不存在。"
+      sticker_dir_invalid: "表情包根目录不存在。",
+      postprocess_connection_failed: (detail) => `大模型连接测试失败：${detail || "请检查 API Key、API 地址和网络连接。"}`,
+      postprocess_models_failed: (detail) => `获取模型列表失败：${detail || "请检查 API Key 和 API 地址是否正确。"}`,
+      batch_items_invalid: "批量任务中存在无效项目，请检查媒体文件路径。",
+      batch_items_required: "请添加至少一个批量任务项目。",
+      mose_not_found: "未找到 MOSE 桌面编辑器，请确认 MAW 完整安装。",
+      mose_start_failed: "MOSE 桌面编辑器启动失败，请查看日志后重试。",
+      script_preview_failed: (detail) => `脚本预览失败：${detail || "请检查脚本文件格式。"}`,
+      script_preview_missing: "请先选择脚本文件。",
+      alignment_media_invalid: "口播对齐的媒体文件不存在或格式不支持。",
+      alignment_project_invalid: "口播对齐需要有效的 .mosp 或 .json 工程文件。",
+      alignment_script_missing: "口播对齐需要有效的脚本文件。",
+      invalid_reasoning_mode: (detail) => `推理模式设置无效：${detail || "请检查后处理配置。"}`,
     },
     en: {
       json_not_found: "Project file does not exist. Check the path.",
@@ -658,7 +670,19 @@
       server_start_failed: (detail) => `The editor server failed to start: ${detail || "check the logs below."}`,
       alignment_server_no_response: (detail) => `The speech-alignment server did not respond: ${detail || "retry the operation."}`,
       alignment_server_start_failed: (detail) => `The speech-alignment server failed to start: ${detail || "check the log and retry."}`,
-      sticker_dir_invalid: "Sticker root directory does not exist."
+      sticker_dir_invalid: "Sticker root directory does not exist.",
+      postprocess_connection_failed: (detail) => `LLM connection test failed: ${detail || "check the API key, URL, and network."}`,
+      postprocess_models_failed: (detail) => `Failed to get model list: ${detail || "check the API key and URL."}`,
+      batch_items_invalid: "Some batch items are invalid. Check the media file paths.",
+      batch_items_required: "Add at least one batch item.",
+      mose_not_found: "MOSE desktop editor was not found. Ensure MAW is fully installed.",
+      mose_start_failed: "MOSE desktop editor failed to start. Check the log and retry.",
+      script_preview_failed: (detail) => `Script preview failed: ${detail || "check the script file format."}`,
+      script_preview_missing: "Choose a script file first.",
+      alignment_media_invalid: "The speech-alignment media file does not exist or is unsupported.",
+      alignment_project_invalid: "Speech alignment requires a valid .mosp or .json project.",
+      alignment_script_missing: "Speech alignment requires a valid script file.",
+      invalid_reasoning_mode: (detail) => `Invalid reasoning mode: ${detail || "check the post-processing settings."}`,
     }
   };
   Object.assign(STRINGS.zh, {
