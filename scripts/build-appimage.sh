@@ -37,6 +37,8 @@ FFMPEG_CACHE_MANIFEST="$FFMPEG_DIR/.maw-ffmpeg-cache"
 # 解压缓存的目录名同时包含版本和归档 SHA256；更新任一项都会使用新的
 # 缓存，不能把旧版二进制静默复制进新 AppImage。清单还记录两个实际二进制
 # 的校验和，检测到不完整或被改动的缓存时会保留原目录供排查，再重新解压。
+# GitHub 托管 Release job 的工作区是全新的，通常不会走缓存复用分支；此处
+# 仍须覆盖开发机增量构建及持久工作区 / 自托管 runner 的旧缓存场景。
 # 升级时改 FFMPEG_VERSION / FFMPEG_URL / FFMPEG_SHA256 三处即可。
 # （checksums 见 https://github.com/BtbN/FFmpeg-Builds/releases/tag/autobuild-2026-08-28-17-08）。
 

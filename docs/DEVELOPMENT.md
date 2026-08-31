@@ -44,6 +44,30 @@ uv run python edit.py --blank
 
 覆盖保存工程时，服务器保留原扩展名并先创建同目录备份：`project.mosp.bak` 或 `project.json.bak`。`.workspace.json`、Resolve JSON 和保留区域 JSON 是交换/配置文件，不是字幕工程真源。
 
+## Linux AppImage 的 FFmpeg 缓存与发布核验
+
+`scripts/build-appimage.sh` 把随 AppImage 分发的 BtbN 静态 FFmpeg 固定到版本、下载地址和归档 SHA-256。解压缓存目录必须同时包含版本与归档哈希；复用前还会核对缓存清单中的版本、归档哈希以及 `ffmpeg`、`ffprobe` 两个二进制的 SHA-256。不要把它改回只检查 `bin/ffmpeg` 是否存在的固定目录：开发机增量构建或使用持久工作区的自托管 runner 否则可能把旧二进制静默带入新 AppImage。
+
+GitHub 托管 runner 的每个 job 都从新的工作区开始，当前正式发布工作流也不缓存 `build-appimage/`，因而不会留下这类旧解压目录；但这不是删去本地缓存校验的理由。发布包仍在 `ffmpeg/SOURCE.txt` 中写入固定版本、原始归档 URL 和归档 SHA-256，便于对成品做追溯。
+
+在 Linux 上核验下载的正式 AppImage 时，不必重新构建；从临时目录提取后检查内部 FFmpeg 和来源说明即可。以下命令保留临时目录，方便失败时留存证据：
+
+```bash
+APPIMAGE=/absolute/path/to/MAW-Linux-x86_64-vX.Y.Z.AppImage
+WORK_DIR="$(mktemp -d)"
+cp "$APPIMAGE" "$WORK_DIR/MAW.AppImage"
+(
+  cd "$WORK_DIR"
+  chmod +x MAW.AppImage
+  ./MAW.AppImage --appimage-extract
+  ./squashfs-root/ffmpeg/bin/ffmpeg -version
+  cat ./squashfs-root/ffmpeg/SOURCE.txt
+)
+echo "Extracted AppImage retained at: $WORK_DIR"
+```
+
+`ffmpeg -version` 必须包含当前构建脚本设定的 `FFMPEG_VERSION`；`SOURCE.txt` 中的归档 URL 与 SHA-256 必须与同一次构建所用脚本一致。这个检查直接验证发布二进制中的文件，而不是只验证 CI 配置。
+
 ## 工作区数据契约
 
 工作区 schema 是 `moy.asr.editor.workspace.v1`。一个工作区同时控制四个模块的摆放、分隔比例和显示状态：
