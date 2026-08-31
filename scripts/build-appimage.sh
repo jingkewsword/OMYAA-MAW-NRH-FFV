@@ -28,13 +28,41 @@ FFMPEG_VERSION="N-126308-gd411d9e752"
 FFMPEG_TARBALL="$BUILD_DIR/ffmpeg-${FFMPEG_VERSION}-linux64-gpl.tar.xz"
 FFMPEG_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-08-28-17-08/ffmpeg-${FFMPEG_VERSION}-linux64-gpl.tar.xz"
 FFMPEG_SHA256="980678387f826c27bc9e8e754e39cc1b1c8573e17a0b97effc148b9eab90bca9"
-FFMPEG_DIR="$BUILD_DIR/ffmpeg-static"
+FFMPEG_CACHE_ID="${FFMPEG_VERSION}-${FFMPEG_SHA256}"
+FFMPEG_DIR="$BUILD_DIR/ffmpeg-static-${FFMPEG_CACHE_ID}"
+FFMPEG_CACHE_MANIFEST="$FFMPEG_DIR/.maw-ffmpeg-cache"
 # 静态版自包含 libstdc++ 依赖，不受 PyInstaller 的 _internal 旧库污染；
 # 动态版 ffmpeg 若打进包内，AppRun 污染环境下照样会 GLIBCXX 报错。
-# BtbN autobuild 固定版本 + 写死 SHA256：版本与校验双固定，完全可复现；
-# 升级时改 FFMPEG_VERSION / FFMPEG_URL / FFMPEG_SHA256 三处即可
+# BtbN autobuild 固定版本 + 写死 SHA256：版本与校验双固定，完全可复现。
+# 解压缓存的目录名同时包含版本和归档 SHA256；更新任一项都会使用新的
+# 缓存，不能把旧版二进制静默复制进新 AppImage。清单还记录两个实际二进制
+# 的校验和，检测到不完整或被改动的缓存时会保留原目录供排查，再重新解压。
+# 升级时改 FFMPEG_VERSION / FFMPEG_URL / FFMPEG_SHA256 三处即可。
 # （checksums 见 https://github.com/BtbN/FFmpeg-Builds/releases/tag/autobuild-2026-08-28-17-08）。
-if [ ! -x "$FFMPEG_DIR/bin/ffmpeg" ]; then
+
+cache_manifest_value() {
+    local key="$1"
+    sed -n "s/^${key}=//p" "$FFMPEG_CACHE_MANIFEST"
+}
+
+cache_is_current() {
+    test -x "$FFMPEG_DIR/bin/ffmpeg" \
+        && test -x "$FFMPEG_DIR/bin/ffprobe" \
+        && test -f "$FFMPEG_CACHE_MANIFEST" \
+        && [ "$(cache_manifest_value version)" = "$FFMPEG_VERSION" ] \
+        && [ "$(cache_manifest_value archive_sha256)" = "$FFMPEG_SHA256" ] \
+        && [ "$(sha256sum "$FFMPEG_DIR/bin/ffmpeg" | awk '{print $1}')" = "$(cache_manifest_value ffmpeg_sha256)" ] \
+        && [ "$(sha256sum "$FFMPEG_DIR/bin/ffprobe" | awk '{print $1}')" = "$(cache_manifest_value ffprobe_sha256)" ]
+}
+
+if cache_is_current; then
+    echo "    复用已验证静态 ffmpeg 缓存：$FFMPEG_CACHE_ID"
+else
+    if [ -e "$FFMPEG_DIR" ]; then
+        FFMPEG_STALE_DIR="${FFMPEG_DIR}.invalid-$(date +%Y%m%d%H%M%S)-$$"
+        mv "$FFMPEG_DIR" "$FFMPEG_STALE_DIR"
+        echo "    警告：发现不完整或校验不符的 ffmpeg 缓存，已保留到：$FFMPEG_STALE_DIR" >&2
+    fi
     if [ ! -f "$FFMPEG_TARBALL" ]; then
         echo "    下载静态 ffmpeg..."
         curl -sL --retry 3 --retry-delay 2 -o "$FFMPEG_TARBALL" "$FFMPEG_URL"
@@ -45,9 +73,35 @@ if [ ! -x "$FFMPEG_DIR/bin/ffmpeg" ]; then
         rm -f "$FFMPEG_TARBALL"
         exit 1
     fi
-    mkdir -p "$FFMPEG_DIR"
-    tar -xf "$FFMPEG_TARBALL" -C "$FFMPEG_DIR" --strip-components=1
-    chmod +x "$FFMPEG_DIR/bin/ffmpeg" "$FFMPEG_DIR/bin/ffprobe"
+    FFMPEG_STAGE_DIR="${FFMPEG_DIR}.tmp-$$"
+    mkdir "$FFMPEG_STAGE_DIR"
+    tar -xf "$FFMPEG_TARBALL" -C "$FFMPEG_STAGE_DIR" --strip-components=1
+    chmod +x "$FFMPEG_STAGE_DIR/bin/ffmpeg" "$FFMPEG_STAGE_DIR/bin/ffprobe"
+    if ! test -x "$FFMPEG_STAGE_DIR/bin/ffmpeg" || ! test -x "$FFMPEG_STAGE_DIR/bin/ffprobe"; then
+        echo "错误：ffmpeg 归档缺少可执行的 ffmpeg 或 ffprobe：$FFMPEG_TARBALL" >&2
+        exit 1
+    fi
+    FFMPEG_REPORTED_VERSION="$("$FFMPEG_STAGE_DIR/bin/ffmpeg" -version 2>&1 || true)"
+    case "$FFMPEG_REPORTED_VERSION" in
+        *"$FFMPEG_VERSION"*) ;;
+        *)
+            echo "错误：解压出的 ffmpeg 版本与固定版本不符：预期 $FFMPEG_VERSION" >&2
+            exit 1
+            ;;
+    esac
+    FFMPEG_BINARY_SHA256="$(sha256sum "$FFMPEG_STAGE_DIR/bin/ffmpeg" | awk '{print $1}')"
+    FFPROBE_BINARY_SHA256="$(sha256sum "$FFMPEG_STAGE_DIR/bin/ffprobe" | awk '{print $1}')"
+    cat > "$FFMPEG_STAGE_DIR/.maw-ffmpeg-cache" <<EOF
+version=$FFMPEG_VERSION
+archive_sha256=$FFMPEG_SHA256
+ffmpeg_sha256=$FFMPEG_BINARY_SHA256
+ffprobe_sha256=$FFPROBE_BINARY_SHA256
+EOF
+    mv "$FFMPEG_STAGE_DIR" "$FFMPEG_DIR"
+    if ! cache_is_current; then
+        echo "错误：ffmpeg 解压缓存校验失败：$FFMPEG_DIR" >&2
+        exit 1
+    fi
 fi
 # 放入 PyInstaller onedir 产物：frozen 时 _bundled_ffmpeg_directory() 查
 # sys.executable.parent / ffmpeg / bin（即 dist/MAW/ffmpeg/bin）。BtbN 包内

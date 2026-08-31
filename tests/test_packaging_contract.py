@@ -405,6 +405,20 @@ class PackagingContractTests(unittest.TestCase):
         self.assertIn('Build provider: https://github.com/BtbN/FFmpeg-Builds', script)
         self.assertIn('Archive SHA-256: $FFMPEG_SHA256', script)
 
+    def test_appimage_ffmpeg_cache_is_versioned_and_verified(self) -> None:
+        """Given a reused local AppImage build directory, Then a stale FFmpeg extraction cannot bypass the pinned archive identity."""
+        script = read_text("scripts/build-appimage.sh")
+
+        self.assertIn('FFMPEG_CACHE_ID="${FFMPEG_VERSION}-${FFMPEG_SHA256}"', script)
+        self.assertIn('FFMPEG_DIR="$BUILD_DIR/ffmpeg-static-${FFMPEG_CACHE_ID}"', script)
+        self.assertIn('FFMPEG_CACHE_MANIFEST="$FFMPEG_DIR/.maw-ffmpeg-cache"', script)
+        self.assertIn("cache_is_current()", script)
+        self.assertIn('archive_sha256=$FFMPEG_SHA256', script)
+        self.assertIn('ffmpeg_sha256=$FFMPEG_BINARY_SHA256', script)
+        self.assertIn('ffprobe_sha256=$FFPROBE_BINARY_SHA256', script)
+        self.assertIn('FFMPEG_STALE_DIR="${FFMPEG_DIR}.invalid-', script)
+        self.assertNotIn('FFMPEG_DIR="$BUILD_DIR/ffmpeg-static"', script)
+
     def test_local_build_script_invokes_uv_and_pyinstaller_for_maw_onedir(self) -> None:
         """Given a Windows developer build, When the script is read, Then it builds dist/MAW/MAW.exe."""
         script = read_text("scripts/build-windows.ps1")
