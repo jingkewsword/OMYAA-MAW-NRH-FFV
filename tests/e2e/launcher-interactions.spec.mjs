@@ -202,6 +202,64 @@ test('Custom provider labels and missing-key errors follow the selected language
   await expect(page.locator('#llmApiKeyError')).toHaveText('');
   await expect(page.locator('#llmApiKey')).not.toHaveClass(/invalid/);
 });
+
+test('LLM HTTP failures give provider-aware actions without showing the key', async ({ page }) => {
+  await openLauncher(page);
+  await page.locator('#toolboxLlmTab').click();
+  await page.locator('#openLlmSettings').click();
+  await page.locator('#llmApiKey').fill('test-only-key');
+  await page.evaluate(() => {
+    window.__llmFailureStatus = 401;
+    window.MAWLauncher.callBackend = async (method) => {
+      if (method === 'test_postprocess_connection') {
+        return {
+          ok: false,
+          field: 'postprocessProvider',
+          code: 'postprocess_connection_failed',
+          httpStatus: window.__llmFailureStatus,
+          providerId: 'deepseek',
+          operation: 'connection test',
+        };
+      }
+      if (method === 'get_postprocess_models') {
+        return {
+          ok: false,
+          field: 'postprocessModel',
+          code: 'postprocess_models_failed',
+          httpStatus: window.__llmFailureStatus,
+          providerId: 'deepseek',
+          operation: 'model list',
+        };
+      }
+      return { ok: true };
+    };
+  });
+
+  await page.locator('#testLlmConnection').click();
+  await expect(page.locator('#llmSettingsSaveStatus')).toContainText('认证失败（HTTP 401');
+  await expect(page.locator('#llmSettingsSaveStatus')).toContainText('当前供应商：DeepSeek');
+  await expect(page.locator('#llmSettingsSaveStatus')).toContainText('API URL');
+  await expect(page.locator('#llmSettingsSaveStatus')).toContainText('签发');
+  await expect(page.locator('#llmSettingsSaveStatus')).not.toContainText('test-only-key');
+
+  await page.evaluate(() => { window.__llmFailureStatus = 403; });
+  await page.locator('#testLlmConnection').click();
+  await expect(page.locator('#llmSettingsSaveStatus')).toContainText('供应商拒绝了请求（HTTP 403');
+  await expect(page.locator('#llmSettingsSaveStatus')).toContainText('账号或模型有权限');
+
+  await page.evaluate(() => { window.__llmFailureStatus = 404; });
+  await page.locator('#getLlmModels').click();
+  await expect(page.locator('#llmModelError')).toContainText('接口或模型不存在（HTTP 404');
+  await expect(page.locator('#llmModelError')).toContainText('/models');
+  await expect(page.locator('#llmModelError')).not.toContainText('test-only-key');
+
+  await page.evaluate(() => { window.__llmFailureStatus = 429; });
+  await page.locator('#getLlmModels').click();
+  await expect(page.locator('#llmModelError')).toContainText('请求被限流或额度暂时耗尽（HTTP 429');
+  await expect(page.locator('#llmModelError')).toContainText('稍后重试');
+  await expect(page.locator('#llmModelError')).not.toContainText('HTTP 404');
+});
+
 test('runtime errors show an actionable notice outside the log', async ({ page }) => {
   await page.goto(`file://${launcherPath}`);
   await page.waitForFunction(() => window.MAWLauncher?.config?.postprocessProviders?.length > 0);

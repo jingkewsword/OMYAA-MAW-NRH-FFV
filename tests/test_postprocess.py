@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import final
 from unittest import mock
 
+from requests.exceptions import HTTPError
+
 from maw.postprocess import (
     FixedProcessRequest,
     LlmPostprocessRequest,
@@ -916,6 +918,35 @@ class PostprocessTests(unittest.TestCase):
         )
         response.raise_for_status.assert_called_once_with()
 
+    def test_llm_connection_http_errors_keep_status_without_echoing_request_details(self) -> None:
+        settings = LlmSettings(
+            provider_id="custom",
+            api_key="test-only-key",
+            base_url="https://example.com/v1",
+            model="custom-model",
+        )
+
+        for status_code in (401, 403):
+            with self.subTest(status_code=status_code):
+                response = mock.Mock(status_code=status_code)
+                response.raise_for_status.side_effect = HTTPError(
+                    f"HTTP {status_code} for url: https://example.com/v1?api_key=test-only-key",
+                    response=response,
+                )
+                session = mock.MagicMock()
+                session.__enter__.return_value = session
+                session.post.return_value = response
+
+                with mock.patch("maw.postprocess_llm.requests.Session", return_value=session):
+                    with self.assertRaises(LlmClientError) as context:
+                        check_llm_connection(settings)
+
+                self.assertEqual(context.exception.status_code, status_code)
+                self.assertEqual(context.exception.operation, "connection test")
+                self.assertIn(f"HTTP {status_code}", str(context.exception))
+                self.assertNotIn("test-only-key", str(context.exception))
+                self.assertNotIn("https://example.com", str(context.exception))
+
     def test_llm_model_listing_parses_openai_compatible_response(self) -> None:
         settings = LlmSettings(
             provider_id="custom",
@@ -946,6 +977,35 @@ class PostprocessTests(unittest.TestCase):
             timeout=(10, 30),
         )
         response.raise_for_status.assert_called_once_with()
+
+    def test_llm_model_listing_http_errors_keep_status_without_echoing_request_details(self) -> None:
+        settings = LlmSettings(
+            provider_id="custom",
+            api_key="test-only-key",
+            base_url="https://example.com/v1",
+            model="manual-model",
+        )
+
+        for status_code in (404, 429):
+            with self.subTest(status_code=status_code):
+                response = mock.Mock(status_code=status_code)
+                response.raise_for_status.side_effect = HTTPError(
+                    f"HTTP {status_code} for url: https://example.com/v1?api_key=test-only-key",
+                    response=response,
+                )
+                session = mock.MagicMock()
+                session.__enter__.return_value = session
+                session.get.return_value = response
+
+                with mock.patch("maw.postprocess_llm.requests.Session", return_value=session):
+                    with self.assertRaises(LlmClientError) as context:
+                        list_llm_models(settings)
+
+                self.assertEqual(context.exception.status_code, status_code)
+                self.assertEqual(context.exception.operation, "model list")
+                self.assertIn(f"HTTP {status_code}", str(context.exception))
+                self.assertNotIn("test-only-key", str(context.exception))
+                self.assertNotIn("https://example.com", str(context.exception))
 
     def test_llm_model_listing_accepts_models_name_shape_and_rejects_empty(self) -> None:
         settings = LlmSettings("custom", "sk-test", "https://example.com/v1/chat/completions", "manual-model")

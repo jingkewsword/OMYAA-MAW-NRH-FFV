@@ -829,7 +829,14 @@ class LauncherApi:
             test_llm_connection(settings)
         except LlmClientError as error:
             detail = str(error)
-            return {"ok": False, "field": "postprocessProvider", "code": "postprocess_connection_failed", "detail": detail, "error": detail}
+            return _llm_error_result(
+                "postprocessProvider",
+                "postprocess_connection_failed",
+                detail,
+                error,
+                provider_id=preset.id,
+                operation="connection",
+            )
         if bool(payload.get("save")):
             saved = self.save_postprocess_settings({
                 "providerId": preset.id,
@@ -879,7 +886,14 @@ class LauncherApi:
             models = list_llm_models(settings)
         except LlmClientError as error:
             detail = str(error)
-            return {"ok": False, "field": "postprocessModel", "code": "postprocess_models_failed", "detail": detail, "error": detail}
+            return _llm_error_result(
+                "postprocessModel",
+                "postprocess_models_failed",
+                detail,
+                error,
+                provider_id=preset.id,
+                operation="model_list",
+            )
         return {"ok": True, "providerId": preset.id, "models": models}
 
     def run_fixed_process(self, payload: Mapping[str, object]) -> dict[str, object]:
@@ -2852,6 +2866,26 @@ def _free_local_port() -> int:
 
 def _error_result(field: str, code: str, detail: str = "") -> dict[str, object]:
     return {"ok": False, "field": field, "code": code, "detail": detail, "error": ERROR_MESSAGES.get(code, detail or code)}
+
+
+def _llm_error_result(
+    field: str,
+    code: str,
+    detail: str,
+    error: LlmClientError,
+    *,
+    provider_id: str,
+    operation: str,
+) -> dict[str, object]:
+    result = _error_result(field, code, detail)
+    if error.status_code is not None:
+        # The UI only needs non-secret routing metadata to choose guidance.
+        result.update(
+            httpStatus=error.status_code,
+            providerId=provider_id,
+            operation=error.operation or operation,
+        )
+    return result
 
 
 def _optional_path(value: object) -> Path | None:
