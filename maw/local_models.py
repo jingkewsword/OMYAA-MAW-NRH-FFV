@@ -192,6 +192,21 @@ def inspect_local_model(
                 runtime_source,
                 runtime_python,
             )
+        missing_refs = _missing_required_model_refs(model, model_cache_root)
+        if missing_refs:
+            return LocalModelStatus(
+                model.id,
+                model.engine,
+                model.model_ref,
+                "partial",
+                True,
+                False,
+                str(explicit),
+                "缺少模型组件：" + "、".join(missing_refs),
+                model.required_model_refs,
+                runtime_source,
+                runtime_python,
+            )
         detail = "已使用指定的模型目录。"
         if model.engine == "firered" and _find_ct_punc_model(model_cache_root) is None:
             detail = "已检测到 FireRed CTC；可选 FunASR ct-punc 尚未准备，选择“不使用”仍可运行。"
@@ -819,11 +834,7 @@ def _find_model_paths(
         main = _find_hub_model(model.model_ref, model_cache_root)
         if main is None:
             return None
-        missing = [
-            ref for ref in model.required_model_refs
-            if _find_hub_model(ref, model_cache_root) is None
-        ]
-        return main, missing
+        return main, _missing_required_model_refs(model, model_cache_root)
     if model.engine in {"funasr", "fun-asr"}:
         for ref in (model.model_ref, *model.cache_refs):
             main = _find_modelscope_model(ref, model_cache_root)
@@ -844,6 +855,18 @@ def _modelscope_ref_candidates(model_ref: str) -> list[str]:
     if mapped != model_ref:
         refs.append(mapped)
     return refs
+
+
+def _missing_required_model_refs(
+    model: ModelConfig,
+    model_cache_root: str | Path | None = None,
+) -> list[str]:
+    if model.engine not in {"qwen-asr", "qwen", "qwen3-asr", "moss", "whisper"}:
+        return []
+    return [
+        ref for ref in model.required_model_refs
+        if _find_hub_model(ref, model_cache_root) is None
+    ]
 
 
 def _find_huggingface_model(

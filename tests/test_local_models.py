@@ -106,6 +106,36 @@ class LocalModelDiscoveryTests(unittest.TestCase):
         self.assertEqual(status.status, "installed")
         self.assertTrue(status.installed)
         self.assertEqual(Path(status.path).resolve(), main.resolve())
+    def test_explicit_qwen_folder_requires_forced_aligner_from_cache(self) -> None:
+        model = local_model("qwen3-asr-local")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            manual = root / "manual-qwen"
+            manual.mkdir()
+            (manual / "model.safetensors").write_bytes(b"weights")
+            cache = root / "cache"
+            aligner = cache / "models--Qwen--Qwen3-ForcedAligner-0.6B" / "snapshots" / "align"
+
+            with mock.patch("maw.local_models._huggingface_cache_roots", return_value=[cache]):
+                with mock.patch("maw.local_models.importlib.util.find_spec", return_value=mock.Mock()):
+                    missing = inspect_local_model(model, manual, model_cache_root=cache)
+                    missing_payload = local_model_payload(model, manual, model_cache_root=cache)
+                    aligner.mkdir(parents=True)
+                    (aligner / "model.safetensors").write_bytes(b"weights")
+                    installed = inspect_local_model(model, manual, model_cache_root=cache)
+
+        self.assertEqual(missing.status, "partial")
+        self.assertFalse(missing.installed)
+        self.assertEqual(Path(missing.path).resolve(), manual.resolve())
+        self.assertIn("Qwen/Qwen3-ForcedAligner-0.6B", missing.detail)
+        self.assertEqual(installed.status, "installed")
+        self.assertTrue(installed.installed)
+        self.assertEqual(Path(installed.path).resolve(), manual.resolve())
+        self.assertEqual(installed.required_model_refs, model.required_model_refs)
+        self.assertTrue(missing_payload["manualPathSupported"])
+        self.assertTrue(missing_payload["canPrepare"])
+        self.assertFalse(missing_payload["installed"])
+
     def test_payload_exposes_allowlisted_sources_and_required_components(self) -> None:
         qwen = local_model("qwen3-asr-local")
         qwen_status = LocalModelStatus(
