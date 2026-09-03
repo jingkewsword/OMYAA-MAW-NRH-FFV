@@ -259,6 +259,7 @@ test('Qwen CUDA loading errors offer CPU validation without hiding the technical
   await page.goto(`file://${launcherPath}`);
   await page.waitForFunction(() => window.MAWLauncher?.config?.postprocessProviders?.length > 0);
   await page.locator('#provider').selectOption('local');
+  await page.locator('#advancedToggle').click();
   await expect(page.locator('#localDeviceField')).toBeVisible();
 
   await page.evaluate(() => window.MAWLauncher.onBackendEvent({
