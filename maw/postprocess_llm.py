@@ -42,6 +42,8 @@ class LlmSettings:
 @dataclass(frozen=True, slots=True)
 class LlmClientError(RuntimeError):
     message: str
+    status_code: int | None = None
+    operation: str = ""
 
     def __str__(self) -> str:
         return self.message
@@ -56,6 +58,27 @@ _REASONING_ALIASES: Final[dict[str, str]] = {
     "none": "off",
     "minimal": "low",
 }
+
+
+def _http_status(error: BaseException) -> int | None:
+    response = getattr(error, "response", None)
+    status_code = getattr(response, "status_code", None)
+    if not isinstance(status_code, int):
+        status_code = getattr(error, "status_code", None)
+    if isinstance(status_code, int) and 100 <= status_code <= 599:
+        return status_code
+    return None
+
+
+def _request_error(operation: str, error: RequestException) -> LlmClientError:
+    status_code = _http_status(error)
+    if status_code is not None:
+        # Do not include the exception text here: HTTPError may echo a URL
+        # containing a query token or other provider-specific secret.
+        message = f"LLM {operation} request failed (HTTP {status_code})"
+    else:
+        message = f"LLM {operation} request failed: {error}"
+    return LlmClientError(message, status_code=status_code, operation=operation)
 
 
 PRESETS: Final[tuple[LlmProviderPreset, ...]] = (
@@ -185,8 +208,10 @@ def _request_completion(
                     response.close()
             else:
                 body = response.json()
-    except (RequestException, JSONDecodeError) as error:
-        raise LlmClientError(f"LLM request failed: {error}") from error
+    except JSONDecodeError as error:
+        raise LlmClientError(f"LLM request failed: {error}", operation="completion") from error
+    except RequestException as error:
+        raise _request_error("completion", error) from error
     if not isinstance(body, dict):
         raise LlmClientError("LLM response must be a JSON object")
     return body
@@ -251,7 +276,7 @@ def test_llm_connection(settings: LlmSettings) -> None:
             )
             response.raise_for_status()
     except RequestException as error:
-        raise LlmClientError(f"LLM connection test failed: {error}") from error
+        raise _request_error("connection test", error) from error
 
 
 def list_llm_models(settings: LlmSettings) -> list[str]:
@@ -266,8 +291,10 @@ def list_llm_models(settings: LlmSettings) -> list[str]:
             )
             response.raise_for_status()
             body = response.json()
-    except (RequestException, JSONDecodeError) as error:
-        raise LlmClientError(f"LLM model list request failed: {error}") from error
+    except JSONDecodeError as error:
+        raise LlmClientError(f"LLM model list request failed: {error}", operation="model_list") from error
+    except RequestException as error:
+        raise _request_error("model list", error) from error
 
     if not isinstance(body, dict):
         raise LlmClientError("LLM model list must be a JSON object")

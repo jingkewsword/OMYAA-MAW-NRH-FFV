@@ -604,6 +604,13 @@
     llm_models_loaded: "已获取 {count} 个模型，可在上方快速选择",
     llm_models_empty: "供应商没有返回可用模型。",
     llm_model_choices_title: "展开已获取模型列表",
+    llm_provider_unknown: "当前选择的供应商",
+    llm_http_unauthorized: "认证失败（HTTP 401，{operation}）。当前供应商：{provider}。请核对供应商、API URL 是否属于同一服务，并确认 API Key 由该服务签发；不要在错误报告中粘贴 Key。",
+    llm_http_forbidden: "供应商拒绝了请求（HTTP 403，{operation}）。当前供应商：{provider}。请核对供应商、API URL 与 API Key 签发方是否一致，并确认账号或模型有权限；不要在错误报告中粘贴 Key。",
+    llm_http_not_found: "接口或模型不存在（HTTP 404，{operation}）。请检查 API URL 的兼容路径和模型 ID；获取模型时还要确认该供应商提供 /models 接口。这个状态通常不是 API Key 问题。",
+    llm_http_rate_limited: "请求被限流或额度暂时耗尽（HTTP 429，{operation}）。请稍后重试，降低请求频率或批次大小，并检查当前供应商的额度与限流策略。",
+    llm_http_connection_operation: "连接测试",
+    llm_http_model_list_operation: "获取模型",
     llm_quick_actions: "快捷功能",
     llm_connection_testing: "正在测试连接……",
     llm_connection_success: "连接成功。",
@@ -645,6 +652,13 @@
     llm_models_loaded: "Fetched {count} models; choose one above.",
     llm_models_empty: "The provider returned no usable models.",
     llm_model_choices_title: "Show fetched model list",
+    llm_provider_unknown: "the selected provider",
+    llm_http_unauthorized: "Authentication failed (HTTP 401, {operation}). Current provider: {provider}. Compare the provider, API URL, and the issuer of the API key; never paste the key into an error report.",
+    llm_http_forbidden: "The provider rejected the request (HTTP 403, {operation}). Current provider: {provider}. Compare the provider, API URL, and the issuer of the API key, then confirm that the account or model is allowed; never paste the key into an error report.",
+    llm_http_not_found: "The endpoint or model was not found (HTTP 404, {operation}). Check the compatible API URL path and model ID; when fetching models, confirm that the provider exposes /models. This is usually not an API-key problem.",
+    llm_http_rate_limited: "The request was rate-limited or the quota is temporarily exhausted (HTTP 429, {operation}). Wait and retry, reduce request frequency or batch size, and check the current provider's quota and rate-limit policy.",
+    llm_http_connection_operation: "connection test",
+    llm_http_model_list_operation: "model lookup",
     llm_quick_actions: "Quick actions",
     llm_connection_testing: "Testing connection…",
     llm_connection_success: "Connection successful.",
@@ -1124,7 +1138,35 @@
 
   const t = (key) => STRINGS[state.lang][key] || key;
   function compactDetail(detail) { return String(detail || "").replace(/\s+/g, " ").trim(); }
-  function errText(code, detail) { const entry = ERROR_TEXT[state.lang][code]; const compact = compactDetail(detail); if (typeof entry === "function") return entry(compact); return entry || compact || t("failed"); }
+  function llmProviderLabel(providerId) {
+    const id = String(providerId || "").trim();
+    const item = state.config?.postprocessProviders?.find((candidate) => candidate.id === id);
+    if (id === "custom" && item?.displayName) return item.displayName;
+    const labels = state.lang === "en"
+      ? { deepseek: "DeepSeek", zhipu: "Zhipu Coding Plan", qwen: "Alibaba Qwen", custom: "Custom (OpenAI-compatible)" }
+      : { deepseek: "DeepSeek", zhipu: "智谱 Coding Plan", qwen: "阿里云 Qwen", custom: "自定义（兼容 OpenAI）" };
+    return labels[id] || item?.label || t("llm_provider_unknown");
+  }
+  function llmHttpErrorText(status, context = {}) {
+    const keys = { 401: "llm_http_unauthorized", 403: "llm_http_forbidden", 404: "llm_http_not_found", 429: "llm_http_rate_limited" };
+    const key = keys[Number(status)];
+    if (!key) return "";
+    const isModelList = String(context?.operation || "").toLowerCase().includes("model");
+    const operation = t(isModelList ? "llm_http_model_list_operation" : "llm_http_connection_operation");
+    return t(key)
+      .replaceAll("{provider}", llmProviderLabel(context?.providerId))
+      .replaceAll("{operation}", operation);
+  }
+  function errText(code, detail, context = {}) {
+    const compact = compactDetail(detail);
+    if (["postprocess_connection_failed", "postprocess_models_failed"].includes(code)) {
+      const guidance = llmHttpErrorText(context?.httpStatus, context);
+      if (guidance) return guidance;
+    }
+    const entry = ERROR_TEXT[state.lang][code];
+    if (typeof entry === "function") return entry(compact);
+    return entry || compact || t("failed");
+  }
   const ext = (path) => (path.match(/\.[^.\\/]+$/)?.[0] || "").toLowerCase();
   const provider = () => state.config.providers.find((item) => item.id === $("provider").value) || state.config.providers[0];
   const selectedModel = () => provider().models.find((item) => item.id === $("model").value) || provider().models[0];

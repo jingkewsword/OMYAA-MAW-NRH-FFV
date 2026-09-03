@@ -480,6 +480,29 @@ class GuiWebBridgeTests(unittest.TestCase):
         self.assertEqual(result["code"], "postprocess_connection_failed")
         self.assertFalse(self.env_path.exists())
 
+    def test_postprocess_connection_http_failure_returns_non_secret_guidance_metadata(self) -> None:
+        error = LlmClientError(
+            "LLM connection test request failed (HTTP 401)",
+            status_code=401,
+            operation="connection test",
+        )
+        with mock.patch("maw.gui_web.test_llm_connection", side_effect=error):
+            result = self.api.test_postprocess_connection({
+                "providerId": "custom",
+                "apiKey": "test-only-key",
+                "baseUrl": "https://example.com/v1",
+                "model": "custom-model",
+                "save": True,
+            })
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["code"], "postprocess_connection_failed")
+        self.assertEqual(result["httpStatus"], 401)
+        self.assertEqual(result["providerId"], "custom")
+        self.assertEqual(result["operation"], "connection test")
+        self.assertNotIn("test-only-key", str(result))
+        self.assertFalse(self.env_path.exists())
+
     def test_postprocess_models_use_form_values_without_writing_config(self) -> None:
         with mock.patch("maw.gui_web.list_llm_models", return_value=["model-a", "model-b"]) as list_models:
             result = self.api.get_postprocess_models({
@@ -496,6 +519,28 @@ class GuiWebBridgeTests(unittest.TestCase):
         self.assertEqual(settings.api_key, "sk-entered")
         self.assertEqual(settings.base_url, "https://example.com/v1")
         self.assertEqual(settings.model, "custom-model")
+        self.assertFalse(self.env_path.exists())
+
+    def test_postprocess_models_http_failure_returns_non_secret_status_metadata(self) -> None:
+        error = LlmClientError(
+            "LLM model list request failed (HTTP 404)",
+            status_code=404,
+            operation="model list",
+        )
+        with mock.patch("maw.gui_web.list_llm_models", side_effect=error):
+            result = self.api.get_postprocess_models({
+                "providerId": "custom",
+                "apiKey": "test-only-key",
+                "baseUrl": "https://example.com/v1",
+                "model": "custom-model",
+            })
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["code"], "postprocess_models_failed")
+        self.assertEqual(result["httpStatus"], 404)
+        self.assertEqual(result["providerId"], "custom")
+        self.assertEqual(result["operation"], "model list")
+        self.assertNotIn("test-only-key", str(result))
         self.assertFalse(self.env_path.exists())
 
     def test_legacy_setting_bridges_return_structured_errors_for_invalid_values(self) -> None:
@@ -3116,6 +3161,10 @@ class LauncherAssetContractTests(unittest.TestCase):
         self.assertIn('toolbox_saved: "LLM settings saved."', launcher_script)
         self.assertIn('llm_connection_saved: "连接成功（已自动保存到本地环境）"', launcher_script)
         self.assertIn('llm_connection_saved: "Connection successful (saved to local environment automatically)."', launcher_script)
+        self.assertIn('llm_http_unauthorized:', launcher_script)
+        self.assertIn('llm_http_forbidden:', launcher_script)
+        self.assertIn('llm_http_not_found:', launcher_script)
+        self.assertIn('llm_http_rate_limited:', launcher_script)
         self.assertIn('llm_custom_provider: "自定义（兼容 OpenAI）"', launcher_script)
         self.assertIn('llm_custom_provider: "Custom (OpenAI-compatible)"', launcher_script)
         self.assertIn('toolbox_key_loaded: "已从本地环境读取密钥 {key}"', launcher_script)
@@ -3124,12 +3173,14 @@ class LauncherAssetContractTests(unittest.TestCase):
         self.assertIn('field.value = result.apiKey || "";', script)
         self.assertIn('void loadPostprocessApiKey(item.id, item.maskedApiKey || "");', script)
         self.assertIn('function postprocessErrorText(result)', script)
-        self.assertIn('window.MAWLauncher.errorText(result?.code || "", detail)', script)
+        self.assertIn('window.MAWLauncher.errorText(result?.code || "", detail, result)', script)
         self.assertIn('function postprocessFieldId(field)', script)
         self.assertIn('function renderSettingsError(result)', script)
         self.assertIn('setFieldError(field, message);\n      setSettingsSaveStatus("", "", 0);', script)
         self.assertIn('function clearSettingsErrors()', script)
         self.assertIn('postprocessApiKey: "llmApiKey"', script)
+        self.assertIn('context?.httpStatus', launcher_script)
+        self.assertIn('Compare the provider, API URL, and the issuer of the API key', launcher_script)
         self.assertIn('save: true,', script)
         self.assertIn('setSettingsSaveStatus(result.saved ? t("llm_connection_saved") : t("llm_connection_success"), "success");', script)
         self.assertNotIn("autoTest", script)
