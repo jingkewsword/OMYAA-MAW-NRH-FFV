@@ -11,23 +11,35 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from maw.gui_web import LauncherApi, LauncherPaths
 from maw.local_runtime_diagnostics import collect_runtime_diagnostics, redact_path
 from maw.runtimes import LOCAL, MOSS
 from maw.runtimes.base import RuntimeStatus
 
 
-def _probe_output(*, torch_imported: bool = True, ctranslate2_imported: bool = True, cuda_available: bool | None = True) -> str:
+def _probe_output(
+    *,
+    torch_imported: bool = True,
+    ctranslate2_imported: bool = True,
+    cuda_available: bool | None = True,
+    cuda_handshake_code: str | None = None,
+    cuda_handshake_detail: str | None = None,
+) -> str:
+    torch = {
+        "imported": torch_imported,
+        "version": "2.13.0",
+        "cudaVersion": "13.0",
+        "cudaAvailable": cuda_available if torch_imported else None,
+        "deviceCount": 1 if torch_imported else None,
+    }
+    if cuda_handshake_code:
+        status = "pass" if cuda_handshake_code == "torch_cuda_handshake_ready" else "error"
+        torch["cudaHandshake"] = {"status": status, "code": cuda_handshake_code}
+        if cuda_handshake_detail:
+            torch["cudaHandshake"]["detail"] = cuda_handshake_detail
     return json.dumps(
         {
             "pythonVersion": "3.11.9",
-            "torch": {
-                "imported": torch_imported,
-                "version": "2.13.0",
-                "cudaVersion": "13.0",
-                "cudaAvailable": cuda_available if torch_imported else None,
-                "deviceCount": 1 if torch_imported else None,
-            },
+            "torch": torch,
             "ctranslate2": {"imported": ctranslate2_imported, "version": "4.6.0"},
             "fasterWhisper": {"imported": ctranslate2_imported, "version": "1.2.0"},
         }
@@ -115,13 +127,99 @@ class LocalRuntimeDiagnosticsTests(unittest.TestCase):
 
     def test_gpu_probe_missing_reports_observed_failure_without_raising(self) -> None:
         with mock.patch("maw.runtime_diagnostics.shutil.which", return_value=None):
-            report = collect_runtime_diagnostics(runtime_keys=())
+            report = collect_runtime_diagnostics("win32", runtime_keys=())
 
         gpu = report["gpu"]
         self.assertFalse(gpu["nvidiaSmiAvailable"])
         self.assertFalse(gpu["available"])
         self.assertEqual(gpu["code"], "gpu_not_detected")
         json.dumps(report)
+
+    def test_windows_torch_cuda_handshake_ready_is_reported_without_model_loading(self) -> None:
+        status = RuntimeStatus(
+            status="ready",
+            ready=True,
+            path="runtime",
+            python_path="runtime/python.exe",
+            detail="",
+            runtime_version=LOCAL.spec.runtime_version,
+        )
+        completed = SimpleNamespace(
+            returncode=0,
+            stdout=_probe_output(cuda_handshake_code="torch_cuda_handshake_ready"),
+        )
+        gpu = {
+            "status": "pass", "code": "gpu_detected", "available": True, "detected": True,
+            "nvidiaSmiAvailable": True, "names": ["NVIDIA RTX Test"], "name": "NVIDIA RTX Test",
+            "observedReason": "", "note": {"zh": "已探测。", "en": "Detected."},
+        }
+        with mock.patch.object(LOCAL, "status", return_value=status), mock.patch.object(LOCAL, "environment", return_value={}):
+            with mock.patch("maw.runtime_diagnostics._probe_gpu", return_value=gpu):
+                with mock.patch("maw.runtime_diagnostics.subprocess.run", return_value=completed) as run:
+                    report = collect_runtime_diagnostics("win32", runtime_keys=("local",))
+
+        local = report["runtimes"]["local"]
+        expected = {"status": "pass", "code": "torch_cuda_handshake_ready"}
+        self.assertEqual(local["torch"]["cudaHandshake"], expected)
+        self.assertEqual(local["torchCudaHandshake"], expected)
+        self.assertTrue(any(item["code"] == "torch_cuda_handshake_ready" for item in local["diagnostics"]))
+        probe_script = run.call_args.args[0][2]
+        self.assertIn("windows_nvidia_probe = True", probe_script)
+        self.assertIn('if windows_nvidia_probe and torch_result["cudaAvailable"] is True:', probe_script)
+        self.assertIn('torch.zeros(1, device="cuda").item()', probe_script)
+        self.assertNotIn("from_pretrained", probe_script)
+
+    def test_windows_torch_cuda_handshake_failure_is_structured_without_exception_text(self) -> None:
+        status = RuntimeStatus(
+            status="ready",
+            ready=True,
+            path="runtime",
+            python_path="runtime/python.exe",
+            detail="",
+            runtime_version=LOCAL.spec.runtime_version,
+        )
+        completed = SimpleNamespace(
+            returncode=0,
+            stdout=_probe_output(
+                cuda_handshake_code="torch_cuda_handshake_failed",
+                cuda_handshake_detail="RuntimeError: CUDA SECRET traceback text",
+            ),
+        )
+        gpu = {
+            "status": "pass", "code": "gpu_detected", "available": True, "detected": True,
+            "nvidiaSmiAvailable": True, "names": ["NVIDIA RTX Test"], "name": "NVIDIA RTX Test",
+            "observedReason": "", "note": {"zh": "已探测。", "en": "Detected."},
+        }
+        with mock.patch.object(LOCAL, "status", return_value=status), mock.patch.object(LOCAL, "environment", return_value={}):
+            with mock.patch("maw.runtime_diagnostics._probe_gpu", return_value=gpu):
+                with mock.patch("maw.runtime_diagnostics.subprocess.run", return_value=completed):
+                    report = collect_runtime_diagnostics("win32", runtime_keys=("local",))
+
+        local = report["runtimes"]["local"]
+        expected = {"status": "error", "code": "torch_cuda_handshake_failed"}
+        self.assertEqual(local["torch"]["cudaHandshake"], expected)
+        self.assertEqual(local["torchCudaHandshake"], expected)
+        self.assertTrue(any(item["code"] == "torch_cuda_handshake_failed" for item in local["diagnostics"]))
+        exported = json.dumps(report, ensure_ascii=False)
+        self.assertNotIn("RuntimeError", exported)
+        self.assertNotIn("CUDA SECRET", exported)
+        self.assertNotIn("traceback text", exported)
+
+    def test_non_windows_gpu_probe_is_not_applicable_without_nvidia_smi_or_subprocess(self) -> None:
+        for platform_name in ("linux", "darwin"):
+            with self.subTest(platform_name=platform_name):
+                with mock.patch("maw.runtime_diagnostics.shutil.which", side_effect=AssertionError("which must not run")) as which:
+                    with mock.patch("maw.runtime_diagnostics.subprocess.run", side_effect=AssertionError("run must not run")) as run:
+                        report = collect_runtime_diagnostics(platform_name, runtime_keys=())
+
+                gpu = report["gpu"]
+                self.assertEqual(gpu["status"], "not_applicable")
+                self.assertEqual(gpu["code"], "windows_nvidia_probe_not_applicable")
+                self.assertFalse(gpu["nvidiaSmiAvailable"])
+                self.assertEqual(report["summary"]["counts"]["warning"], 0)
+                self.assertEqual(report["summary"]["counts"]["error"], 0)
+                which.assert_not_called()
+                run.assert_not_called()
 
     def test_torch_cuda_unavailable_is_distinct_from_torch_import_failure(self) -> None:
         status = RuntimeStatus(
@@ -204,6 +302,8 @@ class LocalRuntimeDiagnosticsTests(unittest.TestCase):
         self.assertEqual(redact_path("https://user:secret@example.invalid/runtime"), "<redacted-path>")
 
     def test_launcher_api_returns_report_at_top_level_and_in_envelope(self) -> None:
+        from maw.gui_web import LauncherApi, LauncherPaths
+
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             paths = LauncherPaths(root=root, env_path=root / ".env", launcher_html=root / "launcher.html")

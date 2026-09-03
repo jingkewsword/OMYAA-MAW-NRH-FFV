@@ -65,9 +65,14 @@ def import_package(module_name, distribution):
     return {"imported": True, "version": package_version(module, distribution)}
 
 
+windows_nvidia_probe = __MAW_WINDOWS_NVIDIA_PROBE__
+handshake = {
+    "status": "not_checked" if windows_nvidia_probe else "not_applicable",
+    "code": "torch_cuda_handshake_not_checked" if windows_nvidia_probe else "windows_nvidia_probe_not_applicable",
+}
 result = {
     "pythonVersion": platform.python_version(),
-    "torch": {"imported": False, "version": None, "cudaVersion": None, "cudaAvailable": None, "deviceCount": None},
+    "torch": {"imported": False, "version": None, "cudaVersion": None, "cudaAvailable": None, "deviceCount": None, "cudaHandshake": handshake},
     "ctranslate2": import_package("ctranslate2", "ctranslate2"),
     "fasterWhisper": import_package("faster_whisper", "faster-whisper"),
 }
@@ -92,12 +97,30 @@ else:
         torch_result["deviceCount"] = int(torch.cuda.device_count())
     except BaseException:
         torch_result["deviceCount"] = None
+    if windows_nvidia_probe and torch_result["cudaAvailable"] is True:
+        try:
+            torch.zeros(1, device="cuda").item()
+        except BaseException:
+            torch_result["cudaHandshake"] = {"status": "error", "code": "torch_cuda_handshake_failed"}
+        else:
+            torch_result["cudaHandshake"] = {"status": "pass", "code": "torch_cuda_handshake_ready"}
 
 print(json.dumps(result, ensure_ascii=True, separators=(",", ":")))
 '''
 
 
+def _host_platform(platform_name: str | None) -> str:
+    value = str(platform_name or sys.platform).strip().casefold()
+    return value or "unknown"
+
+
+def _probe_script(*, platform_name: str) -> str:
+    enabled = "True" if _host_platform(platform_name) == "win32" else "False"
+    return _PROBE_SCRIPT.replace("__MAW_WINDOWS_NVIDIA_PROBE__", enabled)
+
+
 def collect_runtime_diagnostics(
+    platform_name: str | None = None,
     *,
     runtime_keys: Sequence[str] = ("local", "moss"),
     runtime_roots: Mapping[str, str | Path] | None = None,
@@ -112,7 +135,8 @@ def collect_runtime_diagnostics(
     each :class:`ManagedRuntime` resolve its configured path instead.
     """
 
-    gpu = _probe_gpu()
+    host_platform = _host_platform(platform_name)
+    gpu = _probe_gpu(platform_name=host_platform)
     runtime_reports: dict[str, object] = {}
     all_items: list[Mapping[str, object]] = []
     for key in runtime_keys:
@@ -122,7 +146,7 @@ def collect_runtime_diagnostics(
         try:
             runtime = get_runtime(runtime_key)
         except KeyError:
-            runtime_reports[runtime_key] = _unknown_runtime_report(runtime_key)
+            runtime_reports[runtime_key] = _unknown_runtime_report(runtime_key, platform_name=host_platform)
             continue
         root = runtime_roots.get(runtime_key) if runtime_roots else None
         report = diagnose_runtime(
@@ -130,6 +154,7 @@ def collect_runtime_diagnostics(
             runtime_root=root,
             model_cache_root=model_cache_root,
             gpu=gpu,
+            platform_name=host_platform,
         )
         runtime_reports[runtime_key] = report
         items = report.get("diagnostics")
@@ -154,7 +179,7 @@ def collect_runtime_diagnostics(
         "generatedAt": timestamp.isoformat(timespec="seconds").replace("+00:00", "Z"),
         "application": {"name": "MAW Launcher", "version": safe_app_version},
         "system": {
-            "platform": _safe_atom(sys.platform, fallback="unknown"),
+            "platform": _safe_atom(host_platform, fallback="unknown"),
             "os": _safe_atom(platform.system(), fallback="unknown"),
             "architecture": _safe_atom(platform.machine(), fallback="unknown"),
             "pythonVersion": _safe_version(platform.python_version()) or "unknown",
@@ -178,18 +203,20 @@ def diagnose_runtime(
     runtime_root: str | Path | None = None,
     model_cache_root: str | Path | None = None,
     gpu: Mapping[str, object] | None = None,
+    platform_name: str | None = None,
 ) -> dict[str, object]:
     """Diagnose one runtime without raising optional-import failures."""
 
     try:
         status = runtime.status(runtime_root=runtime_root, model_cache_root=model_cache_root)
     except Exception:  # noqa: BLE001 - diagnostics must not crash the GUI.
-        return _runtime_failure_report(runtime, code="runtime_status_unavailable")
+        return _runtime_failure_report(runtime, code="runtime_status_unavailable", platform_name=platform_name)
 
-    runtime_gpu = dict(gpu) if gpu is not None else _probe_gpu()
+    host_platform = _host_platform(platform_name)
+    runtime_gpu = dict(gpu) if gpu is not None else _probe_gpu(platform_name=host_platform)
     item_list: list[dict[str, object]] = []
     item_list.append(_runtime_status_item(status))
-    python_result = _probe_python(runtime, status, runtime_root)
+    python_result = _probe_python(runtime, status, runtime_root, platform_name=host_platform)
     item_list.append(_python_item(python_result))
     item_list.append(_gpu_item(runtime_gpu))
 
@@ -200,7 +227,7 @@ def diagnose_runtime(
     ctranslate2 = _package_mapping(package_probe.get("ctranslate2"))
     faster_whisper = _package_mapping(package_probe.get("fasterWhisper"))
 
-    torch_result = _torch_result(torch, python_result)
+    torch_result = _torch_result(torch, python_result, platform_name=host_platform)
     item_list.extend(torch_result["items"])
     if runtime.spec.key == "local":
         item_list.append(_optional_package_item("ctranslate2", ctranslate2, python_result))
@@ -233,6 +260,7 @@ def diagnose_runtime(
         "torchCudaVersion": torch_result["payload"].get("cudaVersion"),
         "torchCudaAvailable": torch_result["payload"].get("cudaAvailable"),
         "torchDeviceCount": torch_result["payload"].get("deviceCount"),
+        "torchCudaHandshake": torch_result["payload"].get("cudaHandshake"),
         "ctranslate2": _package_payload(ctranslate2, python_result, applicable=runtime.spec.key == "local"),
         "fasterWhisper": _package_payload(faster_whisper, python_result, applicable=runtime.spec.key == "local"),
         "diagnostics": item_list,
@@ -276,7 +304,7 @@ def redact_path(value: str | Path | None) -> str:
     return normalized
 
 
-def _unknown_runtime_report(runtime_key: str) -> dict[str, object]:
+def _unknown_runtime_report(runtime_key: str, *, platform_name: str | None = None) -> dict[str, object]:
     item = _item(
         "runtime",
         "runtime_missing",
@@ -294,19 +322,23 @@ def _unknown_runtime_report(runtime_key: str) -> dict[str, object]:
         "configuredRuntimeVersion": "unknown",
         "runtimeVersion": "unknown",
         "python": {"status": "not_checked", "code": "runtime_missing", "version": None},
-        "gpu": _probe_gpu(),
-        "torch": _empty_package_payload("torch", "runtime_missing"),
+        "gpu": _probe_gpu(platform_name=platform_name),
+        "torch": {
+            **_empty_package_payload("torch", "runtime_missing"),
+            "cudaHandshake": _not_applicable_or_not_checked(platform_name),
+        },
         "torchVersion": None,
         "torchCudaVersion": None,
         "torchCudaAvailable": None,
         "torchDeviceCount": None,
+        "torchCudaHandshake": _not_applicable_or_not_checked(platform_name),
         "ctranslate2": _empty_package_payload("ctranslate2", "runtime_missing"),
         "fasterWhisper": _empty_package_payload("faster-whisper", "runtime_missing"),
         "diagnostics": [item],
     }
 
 
-def _runtime_failure_report(runtime: ManagedRuntime, *, code: str) -> dict[str, object]:
+def _runtime_failure_report(runtime: ManagedRuntime, *, code: str, platform_name: str | None = None) -> dict[str, object]:
     item = _item(
         "runtime",
         code,
@@ -324,12 +356,16 @@ def _runtime_failure_report(runtime: ManagedRuntime, *, code: str) -> dict[str, 
         "configuredRuntimeVersion": _safe_version(runtime.spec.runtime_version) or "unknown",
         "runtimeVersion": "unknown",
         "python": {"status": "not_checked", "code": code, "version": None},
-        "gpu": _probe_gpu(),
-        "torch": _empty_package_payload("torch", code),
+        "gpu": _probe_gpu(platform_name=platform_name),
+        "torch": {
+            **_empty_package_payload("torch", code),
+            "cudaHandshake": _not_applicable_or_not_checked(platform_name),
+        },
         "torchVersion": None,
         "torchCudaVersion": None,
         "torchCudaAvailable": None,
         "torchDeviceCount": None,
+        "torchCudaHandshake": _not_applicable_or_not_checked(platform_name),
         "ctranslate2": _empty_package_payload("ctranslate2", code),
         "fasterWhisper": _empty_package_payload("faster-whisper", code),
         "diagnostics": [item],
@@ -340,6 +376,8 @@ def _probe_python(
     runtime: ManagedRuntime,
     status: RuntimeStatus,
     runtime_root: str | Path | None,
+    *,
+    platform_name: str | None = None,
 ) -> dict[str, object]:
     python_path = str(status.python_path or "").strip()
     if not python_path:
@@ -347,7 +385,7 @@ def _probe_python(
     try:
         environment = runtime.environment(runtime_root or status.path)
         result = subprocess.run(
-            [python_path, "-c", _PROBE_SCRIPT],
+            [python_path, "-c", _probe_script(platform_name=_host_platform(platform_name))],
             env=environment,
             capture_output=True,
             text=True,
@@ -384,7 +422,16 @@ def _parse_probe_output(output: str) -> dict[str, object] | None:
     return None
 
 
-def _probe_gpu() -> dict[str, object]:
+def _probe_gpu(*, platform_name: str | None = None) -> dict[str, object]:
+    if _host_platform(platform_name) != "win32":
+        return _gpu_payload(
+            False,
+            False,
+            (),
+            "windows_nvidia_probe_not_applicable",
+            "non_windows",
+            applicable=False,
+        )
     executable = shutil.which("nvidia-smi")
     if not executable:
         return _gpu_payload(False, False, (), "gpu_not_detected", "nvidia_smi_missing")
@@ -410,16 +457,25 @@ def _probe_gpu() -> dict[str, object]:
     return _gpu_payload(True, True, names, "gpu_detected", "")
 
 
+def _not_applicable_or_not_checked(platform_name: str | None) -> dict[str, str]:
+    if _host_platform(platform_name) != "win32":
+        return {"status": "not_applicable", "code": "windows_nvidia_probe_not_applicable"}
+    return {"status": "not_checked", "code": "torch_cuda_handshake_not_checked"}
+
+
 def _gpu_payload(
     detected: bool,
     nvidia_smi_available: bool,
     names: Sequence[str],
     code: str,
     reason: str,
+    *,
+    applicable: bool = True,
 ) -> dict[str, object]:
     values = list(names)
+    status = "pass" if detected else ("warning" if applicable else "not_applicable")
     return {
-        "status": "pass" if detected else "warning",
+        "status": status,
         "code": code,
         "available": detected,
         "detected": detected,
@@ -428,8 +484,24 @@ def _gpu_payload(
         "name": values[0] if values else "",
         "observedReason": reason,
         "note": {
-            "zh": "已从 nvidia-smi 读到 GPU 名称；这只是当前观测结果。" if detected else "未从 nvidia-smi 读到可用 GPU；这不等于驱动或 CUDA 一定不兼容。",
-            "en": "GPU name was read from nvidia-smi; this is an observation only." if detected else "No usable GPU was reported by nvidia-smi; this does not by itself prove driver or CUDA incompatibility.",
+            "zh": (
+                "已从 nvidia-smi 读到 GPU 名称；这只是当前观测结果。"
+                if detected
+                else (
+                    "Windows NVIDIA 专项探测仅适用于 Windows；当前平台不适用。"
+                    if not applicable
+                    else "未从 nvidia-smi 读到可用 GPU；这不等于驱动或 CUDA 一定不兼容。"
+                )
+            ),
+            "en": (
+                "GPU name was read from nvidia-smi; this is an observation only."
+                if detected
+                else (
+                    "The Windows NVIDIA probe does not apply on this platform."
+                    if not applicable
+                    else "No usable GPU was reported by nvidia-smi; this does not by itself prove driver or CUDA incompatibility."
+                )
+            ),
         },
     }
 
@@ -457,17 +529,77 @@ def _python_item(result: Mapping[str, object]) -> dict[str, object]:
 
 def _gpu_item(gpu: Mapping[str, object]) -> dict[str, object]:
     code = str(gpu.get("code") or "gpu_not_detected")
+    if code == "windows_nvidia_probe_not_applicable" or gpu.get("status") == "not_applicable":
+        return _item(
+            "gpu",
+            "windows_nvidia_probe_not_applicable",
+            "not_applicable",
+            "Windows NVIDIA 专项探测不适用于当前平台。",
+            "The Windows NVIDIA probe does not apply on this platform.",
+        )
     if bool(gpu.get("detected")):
         return _item("gpu", code, "pass", "已探测到 NVIDIA GPU。", "An NVIDIA GPU was detected.")
     return _item("gpu", "gpu_not_detected", "warning", "未探测到可用的 NVIDIA GPU；这只是观测结果。", "No usable NVIDIA GPU was detected; this is an observation only.")
 
 
+def _torch_cuda_handshake(torch: Mapping[str, object], *, platform_name: str | None = None) -> dict[str, str]:
+    if _host_platform(platform_name) != "win32":
+        return {"status": "not_applicable", "code": "windows_nvidia_probe_not_applicable"}
+    value = torch.get("cudaHandshake")
+    if isinstance(value, Mapping):
+        code = str(value.get("code") or "")
+        if code == "torch_cuda_handshake_ready":
+            return {"status": "pass", "code": code}
+        if code == "torch_cuda_handshake_failed":
+            return {"status": "error", "code": code}
+    return {"status": "not_checked", "code": "torch_cuda_handshake_not_checked"}
+
+
+def _torch_cuda_handshake_item(handshake: Mapping[str, object]) -> dict[str, object]:
+    code = str(handshake.get("code") or "torch_cuda_handshake_not_checked")
+    status = str(handshake.get("status") or "not_checked")
+    if code == "torch_cuda_handshake_ready":
+        return _item(
+            "torch-cuda-handshake",
+            code,
+            "pass",
+            "Torch CUDA 轻量握手成功。",
+            "The lightweight Torch CUDA handshake succeeded.",
+        )
+    if code == "torch_cuda_handshake_failed":
+        return _item(
+            "torch-cuda-handshake",
+            code,
+            "error",
+            "Torch CUDA 轻量握手失败；这只是当前观测结果，请按诊断说明手动检查。",
+            "The lightweight Torch CUDA handshake failed; this is an observation only. Review the diagnostic guidance manually.",
+        )
+    if code == "windows_nvidia_probe_not_applicable":
+        return _item(
+            "torch-cuda-handshake",
+            code,
+            "not_applicable",
+            "Windows NVIDIA 专项握手不适用于当前平台。",
+            "The Windows NVIDIA handshake does not apply on this platform.",
+        )
+    return _item(
+        "torch-cuda-handshake",
+        "torch_cuda_handshake_not_checked",
+        "not_checked",
+        "尚未执行 Torch CUDA 轻量握手。",
+        "The lightweight Torch CUDA handshake was not run.",
+    )
+
+
 def _torch_result(
     torch: Mapping[str, object],
     python_result: Mapping[str, object],
+    *,
+    platform_name: str | None = None,
 ) -> dict[str, object]:
     imported = bool(torch.get("imported"))
     python_code = str(python_result.get("code") or "python_unavailable")
+    handshake = _torch_cuda_handshake(torch, platform_name=platform_name)
     if imported:
         version = _safe_version(str(torch.get("version") or "")) or None
         cuda_version = _safe_version(str(torch.get("cudaVersion") or "")) or None
@@ -482,6 +614,7 @@ def _torch_result(
             items.append(_item("torch-cuda", "torch_cuda_unavailable", "warning", "Torch 报告 CUDA 当前不可用；这不等于驱动一定不兼容。", "Torch reports CUDA unavailable right now; this does not by itself prove driver incompatibility."))
         else:
             items.append(_item("torch-cuda", "torch_cuda_probe_failed", "warning", "无法完成 Torch CUDA 状态探测。", "Torch CUDA state could not be probed."))
+        items.append(_torch_cuda_handshake_item(handshake))
         payload = {
             "status": "pass",
             "code": "torch_ready",
@@ -489,6 +622,7 @@ def _torch_result(
             "cudaVersion": cuda_version,
             "cudaAvailable": cuda_available,
             "deviceCount": device_count,
+            "cudaHandshake": handshake,
         }
         return {"payload": payload, "items": items}
     code = "torch_import_failed" if python_code == "python_ready" else python_code
@@ -503,8 +637,13 @@ def _torch_result(
             "cudaVersion": None,
             "cudaAvailable": None,
             "deviceCount": None,
+            "cudaHandshake": handshake,
         },
-        "items": [_item("torch", code, status, message_zh, message_en), _item("torch-cuda", code, "not_checked", message_zh, message_en)],
+        "items": [
+            _item("torch", code, status, message_zh, message_en),
+            _item("torch-cuda", code, "not_checked", message_zh, message_en),
+            _torch_cuda_handshake_item(handshake),
+        ],
     }
 
 
