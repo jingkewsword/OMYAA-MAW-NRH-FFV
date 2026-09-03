@@ -360,7 +360,9 @@
     open_folder_hint: "点击打开所在文件夹",
     local_runtime_install_done: "本地模型支持已安装完成",
     local_runtime_install_failed: "本地运行环境安装失败",
-    local_runtime_cancelled: "本地运行环境安装已取消"
+    local_runtime_cancelled: "本地运行环境安装已取消",
+    qwen_cuda_use_cpu: "切换到 CPU 验证",
+    qwen_cuda_cpu_selected: "已切换为 CPU；请重新点击“开始生成”验证本地模型。"
   });
   Object.assign(STRINGS.en, {
     auto_postprocess_title: "3️⃣ Post-transcription processing (Beta)",
@@ -439,7 +441,9 @@
     open_folder_hint: "Click to open this folder",
     local_runtime_install_done: "Local model support is ready",
     local_runtime_install_failed: "Local runtime installation failed",
-    local_runtime_cancelled: "Local runtime installation was cancelled"
+    local_runtime_cancelled: "Local runtime installation was cancelled",
+    qwen_cuda_use_cpu: "Switch to CPU for validation",
+    qwen_cuda_cpu_selected: "Device switched to CPU. Click Generate again to validate the local model."
   });
   Object.assign(STRINGS.zh, {
     advanced_params: "识别参数",
@@ -770,6 +774,7 @@
     model_cache_path_invalid: "模型缓存目录不能是一个文件。",
       local_prepare_running: "本地模型正在准备中，请等待完成。",
       local_prepare_failed: (detail) => `本地模型准备失败：${detail || "请查看日志。"}`,
+      local_qwen_cuda_load_failed: (detail) => `Qwen 本地模型在 CUDA/GPU 加载阶段失败。请先把“设备”改为“自动”或“CPU”验证模型和文件；如果可以运行，再检查 GPU 运行环境与 PyTorch、CUDA/cuDNN、驱动的兼容性。退出码不能确定具体 CUDA 版本原因。原始错误：${detail || "请查看日志。"}`,
       ocr_runtime_missing: "OCR 支持尚未安装。请打开设置下载安装。",
       ocr_runtime_install_failed: (detail) => `OCR 运行环境安装失败：${detail || "请查看日志后重试。"}`,
       ocr_runtime_cancelled: "OCR 运行环境安装已取消。",
@@ -821,6 +826,7 @@
     model_cache_path_invalid: "The model storage path cannot point to a file.",
       local_prepare_running: "The local model is being prepared. Please wait.",
       local_prepare_failed: (detail) => `Local model preparation failed: ${detail || "check the log."}`,
+      local_qwen_cuda_load_failed: (detail) => `The Qwen local model failed during CUDA/GPU loading. First switch Device to Auto or CPU to validate the model and files; if that works, check GPU runtime compatibility across PyTorch, CUDA/cuDNN, and the driver. The exit code cannot identify one definite CUDA-version cause. Original error: ${detail || "check the log."}`,
       ocr_runtime_missing: "OCR support is not installed. Open Settings to download it.",
       ocr_runtime_install_failed: (detail) => `OCR runtime installation failed: ${detail || "check the log and retry."}`,
       ocr_runtime_cancelled: "OCR runtime installation was cancelled.",
@@ -1222,6 +1228,10 @@
     if (code === "ffmpeg_missing") {
       notice.dataset.action = "ffmpeg-settings";
       action.textContent = t("error_open_ffmpeg_settings");
+      action.classList.remove("hidden");
+    } else if (code === "local_qwen_cuda_load_failed") {
+      notice.dataset.action = "qwen-cuda-cpu";
+      action.textContent = t("qwen_cuda_use_cpu");
       action.classList.remove("hidden");
     } else {
       notice.dataset.action = "";
@@ -2034,6 +2044,13 @@
   $("errorNoticeAction").addEventListener("click", () => {
     const action = $("errorNotice").dataset.action;
     if (action === "ffmpeg-settings") openSettings("ffmpegSettingsSection", "ffmpegPath");
+    if (action === "qwen-cuda-cpu") {
+      $("localDevice").value = "cpu";
+      $("advancedCard").classList.remove("collapsed");
+      renderChevron("advancedCard");
+      setStatus(t("qwen_cuda_cpu_selected"));
+      $("localDevice").focus();
+    }
   });
   $("provider").addEventListener("change", () => applyProvider(true)); $("model").addEventListener("change", () => { applySelectedModel(true); if (isLocalProvider()) { void refreshLocalRuntime(); void refreshLocalModels(); } }); $("language").addEventListener("change", () => savePrefsDebounced({ language: languageValue() })); $("region").addEventListener("change", syncWorkspace); $("advancedToggle").addEventListener("click", () => toggle("advancedCard"));
   $("testRun").addEventListener("change", syncTestRun);

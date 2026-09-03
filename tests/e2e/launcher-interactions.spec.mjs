@@ -255,6 +255,33 @@ test('runtime errors show an actionable notice outside the log', async ({ page }
   await expect(page.locator('#status')).toContainText('未找到 FFmpeg / FFprobe');
 });
 
+test('Qwen CUDA loading errors offer CPU validation without hiding the technical detail', async ({ page }) => {
+  await page.goto(`file://${launcherPath}`);
+  await page.waitForFunction(() => window.MAWLauncher?.config?.postprocessProviders?.length > 0);
+  await page.locator('#provider').selectOption('local');
+  await expect(page.locator('#localDeviceField')).toBeVisible();
+
+  await page.evaluate(() => window.MAWLauncher.onBackendEvent({
+    type: 'error',
+    code: 'local_qwen_cuda_load_failed',
+    detail: 'Transcription failed with exit code 1: RuntimeError: CUDA error: no kernel image is available for execution on the device',
+  }));
+
+  const notice = page.locator('#errorNotice');
+  await expect(notice).toBeVisible();
+  await expect(notice).toContainText('Qwen 本地模型在 CUDA/GPU 加载阶段失败');
+  await expect(notice).toContainText('自动');
+  await expect(notice).toContainText('具体 CUDA 版本原因');
+  await expect(notice).toContainText('CUDA error: no kernel image');
+  await expect(page.locator('#errorNoticeAction')).toHaveText('切换到 CPU 验证');
+  await expect(page.locator('#errorNoticeIssue')).toBeHidden();
+
+  await page.locator('#errorNoticeAction').click();
+  await expect(page.locator('#localDevice')).toHaveValue('cpu');
+  await expect(notice).toBeVisible();
+  await expect(page.locator('#status')).toContainText('已切换为 CPU');
+});
+
 test('error notice and status remain above the fixed footer at desktop and narrow widths', async ({ page }) => {
   const measure = () => page.evaluate(() => {
     const box = (selector) => {
