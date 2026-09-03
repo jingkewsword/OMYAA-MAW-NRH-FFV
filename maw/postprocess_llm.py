@@ -45,6 +45,7 @@ class LlmClientError(RuntimeError):
     category: str = "client"
     status_code: int | None = None
     diagnostic: str = ""
+    operation: str = ""
 
     def __post_init__(self) -> None:
         # LLM errors cross the GUI bridge and may be copied into logs or an
@@ -192,7 +193,7 @@ def _request_completion(
             try:
                 response.raise_for_status()
             except HTTPError as error:
-                raise _provider_response_error(response, settings=settings) from error
+                raise _provider_response_error(response, settings=settings, operation="completion") from error
             if streaming:
                 try:
                     body = _read_stream_response(response, on_delta, settings=settings)
@@ -207,12 +208,14 @@ def _request_completion(
         raise LlmClientError(
             f"LLM response was not valid JSON: {detail or 'invalid JSON'}",
             category="protocol",
+            operation="completion",
         ) from error
     except RequestException as error:
         detail = _bound_diagnostic(str(error), settings=settings)
         raise LlmClientError(
             f"LLM network request failed: {detail or 'request failed'}",
             category="network",
+            operation="completion",
         ) from error
     if not isinstance(body, dict):
         raise LlmClientError("LLM response must be a JSON object")
@@ -279,7 +282,7 @@ def test_llm_connection(settings: LlmSettings) -> None:
             try:
                 response.raise_for_status()
             except HTTPError as error:
-                raise _provider_response_error(response, settings=settings) from error
+                raise _provider_response_error(response, settings=settings, operation="connection test") from error
     except LlmClientError:
         raise
     except RequestException as error:
@@ -287,6 +290,7 @@ def test_llm_connection(settings: LlmSettings) -> None:
         raise LlmClientError(
             f"LLM network connection test failed: {detail or 'request failed'}",
             category="network",
+            operation="connection test",
         ) from error
 
 
@@ -303,7 +307,7 @@ def list_llm_models(settings: LlmSettings) -> list[str]:
             try:
                 response.raise_for_status()
             except HTTPError as error:
-                raise _provider_response_error(response, settings=settings) from error
+                raise _provider_response_error(response, settings=settings, operation="model list") from error
             body = response.json()
     except LlmClientError:
         raise
@@ -312,12 +316,14 @@ def list_llm_models(settings: LlmSettings) -> list[str]:
         raise LlmClientError(
             f"LLM model list response was not valid JSON: {detail or 'invalid JSON'}",
             category="protocol",
+            operation="model list",
         ) from error
     except RequestException as error:
         detail = _bound_diagnostic(str(error), settings=settings)
         raise LlmClientError(
             f"LLM network model-list request failed: {detail or 'request failed'}",
             category="network",
+            operation="model list",
         ) from error
 
     if not isinstance(body, dict):
@@ -528,6 +534,7 @@ def _provider_response_error(
     response: requests.Response,
     *,
     settings: LlmSettings | None = None,
+    operation: str = "",
 ) -> LlmClientError:
     status_code = _response_status_code(response)
     diagnostic = _extract_server_diagnostic(response, settings=settings)
@@ -541,6 +548,7 @@ def _provider_response_error(
         category="provider_response",
         status_code=status_code,
         diagnostic=diagnostic,
+        operation=operation,
     )
 
 
