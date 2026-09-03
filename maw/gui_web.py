@@ -829,7 +829,14 @@ class LauncherApi:
         try:
             test_llm_connection(settings)
         except LlmClientError as error:
-            return _llm_error_result("postprocessProvider", "postprocess_connection_failed", error)
+            return _llm_error_result(
+                "postprocessProvider",
+                "postprocess_connection_failed",
+                error,
+                provider_id=preset.id,
+                operation="connection test",
+                preserve_provider_response_code=False,
+            )
         if bool(payload.get("save")):
             saved = self.save_postprocess_settings({
                 "providerId": preset.id,
@@ -878,7 +885,14 @@ class LauncherApi:
         try:
             models = list_llm_models(settings)
         except LlmClientError as error:
-            return _llm_error_result("postprocessModel", "postprocess_models_failed", error)
+            return _llm_error_result(
+                "postprocessModel",
+                "postprocess_models_failed",
+                error,
+                provider_id=preset.id,
+                operation="model list",
+                preserve_provider_response_code=False,
+            )
         return {"ok": True, "providerId": preset.id, "models": models}
 
     def run_fixed_process(self, payload: Mapping[str, object]) -> dict[str, object]:
@@ -2889,11 +2903,23 @@ def _error_result(field: str, code: str, detail: str = "") -> dict[str, object]:
     return {"ok": False, "field": field, "code": code, "detail": detail, "error": ERROR_MESSAGES.get(code, detail or code)}
 
 
-def _llm_error_result(field: str, fallback_code: str, error: LlmClientError) -> dict[str, object]:
+def _llm_error_result(
+    field: str,
+    fallback_code: str,
+    error: LlmClientError,
+    *,
+    provider_id: str = "",
+    operation: str = "",
+    preserve_provider_response_code: bool = True,
+) -> dict[str, object]:
     """Return a safe bridge error while preserving provider classification metadata."""
 
     category = str(getattr(error, "category", "") or "")
-    code = "postprocess_provider_response" if category == "provider_response" else fallback_code
+    code = (
+        "postprocess_provider_response"
+        if preserve_provider_response_code and category == "provider_response"
+        else fallback_code
+    )
     result: dict[str, object] = {
         "ok": False,
         "field": field,
@@ -2904,6 +2930,9 @@ def _llm_error_result(field: str, fallback_code: str, error: LlmClientError) -> 
     status_code = getattr(error, "status_code", None)
     if isinstance(status_code, int):
         result["httpStatus"] = status_code
+        if provider_id:
+            result["providerId"] = provider_id
+        result["operation"] = str(getattr(error, "operation", "") or operation)
     diagnostic = str(getattr(error, "diagnostic", "") or "")
     if diagnostic:
         result["diagnostic"] = diagnostic
@@ -2942,7 +2971,6 @@ def _postprocess_pipeline_error_event(
     if diagnostic:
         event["diagnostic"] = diagnostic
     return event
-
 
 def _optional_path(value: object) -> Path | None:
     text = str(value or "").strip()
