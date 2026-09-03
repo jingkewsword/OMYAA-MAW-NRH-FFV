@@ -46,6 +46,14 @@ class LlmClientError(RuntimeError):
     status_code: int | None = None
     diagnostic: str = ""
 
+    def __post_init__(self) -> None:
+        # LLM errors cross the GUI bridge and may be copied into logs or an
+        # error report.  Keep the exception itself safe even when a caller
+        # constructs one from a provider/transport exception directly.
+        object.__setattr__(self, "message", _sanitize_error_text(self.message))
+        object.__setattr__(self, "diagnostic", _bound_diagnostic(self.diagnostic))
+        RuntimeError.__init__(self, self.message)
+
     def __str__(self) -> str:
         return self.message
 
@@ -184,10 +192,10 @@ def _request_completion(
             try:
                 response.raise_for_status()
             except HTTPError as error:
-                raise _provider_response_error(response) from error
+                raise _provider_response_error(response, settings=settings) from error
             if streaming:
                 try:
-                    body = _read_stream_response(response, on_delta)
+                    body = _read_stream_response(response, on_delta, settings=settings)
                 finally:
                     response.close()
             else:
@@ -195,9 +203,17 @@ def _request_completion(
     except LlmClientError:
         raise
     except JSONDecodeError as error:
-        raise LlmClientError(f"LLM response was not valid JSON: {error}", category="protocol") from error
+        detail = _bound_diagnostic(str(error), settings=settings)
+        raise LlmClientError(
+            f"LLM response was not valid JSON: {detail or 'invalid JSON'}",
+            category="protocol",
+        ) from error
     except RequestException as error:
-        raise LlmClientError(f"LLM network request failed: {error}", category="network") from error
+        detail = _bound_diagnostic(str(error), settings=settings)
+        raise LlmClientError(
+            f"LLM network request failed: {detail or 'request failed'}",
+            category="network",
+        ) from error
     if not isinstance(body, dict):
         raise LlmClientError("LLM response must be a JSON object")
     return body
@@ -263,11 +279,15 @@ def test_llm_connection(settings: LlmSettings) -> None:
             try:
                 response.raise_for_status()
             except HTTPError as error:
-                raise _provider_response_error(response) from error
+                raise _provider_response_error(response, settings=settings) from error
     except LlmClientError:
         raise
     except RequestException as error:
-        raise LlmClientError(f"LLM network connection test failed: {error}", category="network") from error
+        detail = _bound_diagnostic(str(error), settings=settings)
+        raise LlmClientError(
+            f"LLM network connection test failed: {detail or 'request failed'}",
+            category="network",
+        ) from error
 
 
 def list_llm_models(settings: LlmSettings) -> list[str]:
@@ -283,14 +303,22 @@ def list_llm_models(settings: LlmSettings) -> list[str]:
             try:
                 response.raise_for_status()
             except HTTPError as error:
-                raise _provider_response_error(response) from error
+                raise _provider_response_error(response, settings=settings) from error
             body = response.json()
     except LlmClientError:
         raise
     except JSONDecodeError as error:
-        raise LlmClientError(f"LLM model list response was not valid JSON: {error}", category="protocol") from error
+        detail = _bound_diagnostic(str(error), settings=settings)
+        raise LlmClientError(
+            f"LLM model list response was not valid JSON: {detail or 'invalid JSON'}",
+            category="protocol",
+        ) from error
     except RequestException as error:
-        raise LlmClientError(f"LLM network model-list request failed: {error}", category="network") from error
+        detail = _bound_diagnostic(str(error), settings=settings)
+        raise LlmClientError(
+            f"LLM network model-list request failed: {detail or 'request failed'}",
+            category="network",
+        ) from error
 
     if not isinstance(body, dict):
         raise LlmClientError("LLM model list must be a JSON object")
@@ -406,7 +434,12 @@ def _request_headers(settings: LlmSettings, *, streaming: bool) -> dict[str, str
     return headers
 
 
-def _read_stream_response(response: requests.Response, on_delta: LlmDelta | None) -> dict[str, JsonValue]:
+def _read_stream_response(
+    response: requests.Response,
+    on_delta: LlmDelta | None,
+    *,
+    settings: LlmSettings | None = None,
+) -> dict[str, JsonValue]:
     if on_delta is None:
         raise AssertionError("stream callback is required for an SSE response")
     content_parts: list[str] = []
@@ -422,7 +455,7 @@ def _read_stream_response(response: requests.Response, on_delta: LlmDelta | None
             continue
         error = chunk.get("error")
         if isinstance(error, dict):
-            diagnostic = _bound_diagnostic(_extract_diagnostic_fields(error))
+            diagnostic = _bound_diagnostic(_extract_diagnostic_fields(error), settings=settings)
             message = diagnostic or "LLM stream failed"
             raise LlmClientError(
                 f"LLM provider stream returned an error: {message}",
@@ -491,9 +524,13 @@ def _stream_text(value: JsonValue) -> str:
     return "".join(parts)
 
 
-def _provider_response_error(response: requests.Response) -> LlmClientError:
+def _provider_response_error(
+    response: requests.Response,
+    *,
+    settings: LlmSettings | None = None,
+) -> LlmClientError:
     status_code = _response_status_code(response)
-    diagnostic = _extract_server_diagnostic(response)
+    diagnostic = _extract_server_diagnostic(response, settings=settings)
     status_text = f"HTTP {status_code}" if status_code is not None else "an HTTP error"
     detail = f"{status_text}: {diagnostic}" if diagnostic else status_text
     message = (
@@ -516,7 +553,7 @@ def _response_status_code(response: object) -> int | None:
     return status_code if 100 <= status_code <= 599 else None
 
 
-def _extract_server_diagnostic(response: object) -> str:
+def _extract_server_diagnostic(response: object, *, settings: LlmSettings | None = None) -> str:
     """Extract a short, redacted provider message without retaining request data."""
 
     try:
@@ -524,9 +561,9 @@ def _extract_server_diagnostic(response: object) -> str:
     except (AttributeError, TypeError, ValueError):
         body = getattr(response, "text", "")
     if isinstance(body, Mapping):
-        return _bound_diagnostic(_extract_diagnostic_fields(body))
+        return _bound_diagnostic(_extract_diagnostic_fields(body), settings=settings)
     if isinstance(body, str):
-        return _bound_diagnostic(body)
+        return _bound_diagnostic(body, settings=settings)
     return ""
 
 
@@ -554,24 +591,54 @@ def _extract_diagnostic_fields(value: Mapping[object, object], *, depth: int = 0
     return " | ".join(unique)
 
 
-def _bound_diagnostic(value: str) -> str:
+def _sanitize_error_text(value: object, *, settings: LlmSettings | None = None) -> str:
     compact = re.sub(r"[\x00-\x1f\x7f]+", " ", str(value))
     compact = re.sub(r"\s+", " ", compact).strip()
-    compact = _redact_diagnostic(compact)
+    return _redact_diagnostic(compact, settings=settings)
+
+
+def _bound_diagnostic(value: str, *, settings: LlmSettings | None = None) -> str:
+    compact = _sanitize_error_text(value, settings=settings)
     if len(compact) <= MAX_PROVIDER_DIAGNOSTIC_CHARS:
         return compact
     return f"{compact[:MAX_PROVIDER_DIAGNOSTIC_CHARS - 1]}…"
 
 
-def _redact_diagnostic(value: str) -> str:
+def _redact_diagnostic(value: str, *, settings: LlmSettings | None = None) -> str:
+    redacted = value
+    if settings is not None:
+        # Requests can include the configured endpoint and key in transport
+        # exception text.  Replace those exact values before generic URL and
+        # header redaction; this also covers non-standard key formats.
+        parsed = urlparse(settings.base_url.strip())
+        settings_values = (
+            settings.api_key,
+            settings.base_url,
+            parsed.netloc,
+            parsed.hostname or "",
+        )
+        for secret in settings_values:
+            normalized = str(secret).strip()
+            if normalized:
+                redacted = re.sub(re.escape(normalized), "[REDACTED]", redacted, flags=re.IGNORECASE)
+
+    # Never expose an endpoint, including its path or query string.  Provider
+    # diagnostics remain useful because their non-URL message/code fields are
+    # retained below.
+    redacted = re.sub(r"(?i)\bhttps?://[^\s<>'\"`]+", "[REDACTED_URL]", redacted)
     redacted = re.sub(
-        r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+",
-        "Bearer [REDACTED]",
-        value,
+        r"(?i)(\b(?:authorization|proxy-authorization)\b\s*['\"]?\s*[:=]\s*['\"]?)(?!\[REDACTED(?:_[A-Z]+)?\])[^'\"\r\n,;}\]]+",
+        r"\1[REDACTED]",
+        redacted,
+    )
+    redacted = re.sub(
+        r"(?i)\b(?:bearer|basic|token)\s+(?!\[REDACTED(?:_[A-Z]+)?\])[^\s,;}\]]+",
+        lambda match: f"{match.group(0).split(None, 1)[0]} [REDACTED]",
+        redacted,
     )
     redacted = re.sub(r"\bsk-[A-Za-z0-9_-]{4,}\b", "[REDACTED_API_KEY]", redacted)
     return re.sub(
-        r"(?i)(\b(?:authorization|api[-_ ]?key|access[-_ ]?token|api[-_ ]?token|token|key|password|secret)\b\s*[:=]\s*)(['\"]?)[^'\"\s,;}\]]+\2",
+        r"(?i)(\b(?:api[-_ ]?key|access[-_ ]?token|api[-_ ]?token|token|key|password|secret)\b\s*['\"]?\s*[:=]\s*['\"]?)(?!\[REDACTED(?:_[A-Z]+)?\])[^'\"\s,;}\]]+",
         r"\1[REDACTED]",
         redacted,
     )
