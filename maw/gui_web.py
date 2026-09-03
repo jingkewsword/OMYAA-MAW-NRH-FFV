@@ -106,6 +106,11 @@ ERROR_MESSAGES: Final[dict[str, str]] = {
     "model_cache_path_invalid": "模型缓存目录不能是一个文件。",
     "local_prepare_running": "本地模型正在准备中。",
     "local_prepare_failed": "本地模型准备失败。",
+    "local_qwen_cuda_load_failed": (
+        "Qwen 本地模型在 CUDA/GPU 加载阶段失败。请先用自动或 CPU 设备验证模型和文件；"
+        "如果可以运行，再检查 GPU 运行环境与 PyTorch、CUDA/cuDNN、驱动的兼容性。"
+        "退出码不能确定具体 CUDA 版本原因，原始错误已保留在日志中。"
+    ),
     "ocr_runtime_missing": "OCR 支持尚未安装，请打开设置下载安装。",
     "ocr_runtime_install_failed": "OCR 运行环境安装失败。",
     "ocr_runtime_cancelled": "OCR 运行环境安装已取消。",
@@ -197,6 +202,52 @@ def _is_ffmpeg_missing_failure(lines: Sequence[str]) -> bool:
         marker in detail for marker in ("ffmpeg", "ffprobe", "get_duration_sec")
     )
     return explicit or legacy_winerror
+
+
+def _is_qwen_cuda_load_failure(model: str, lines: Sequence[str]) -> bool:
+    """Recognise a Qwen CUDA failure that happened before the model finished loading.
+
+    The child process only exposes output and an exit code at this boundary.  Keep
+    this classifier deliberately narrow: a Qwen model name, a CUDA/GPU marker,
+    and an explicit loading marker are all required.  In particular, an error
+    after ``QwenASR loaded`` or an otherwise unknown transcription failure must
+    retain the generic failure behaviour.
+    """
+    model_text = str(model or "").casefold()
+    if "qwen" not in model_text:
+        return False
+    detail = "\n".join(str(line) for line in lines).casefold()
+    if "qwenasr loaded" in detail:
+        return False
+    has_cuda_marker = any(
+        marker in detail
+        for marker in ("cuda", "cublas", "cudnn", "nvidia", "gpu")
+    )
+    has_load_marker = any(
+        marker in detail
+        for marker in (
+            "loading qwen",
+            "from_pretrained",
+            "load_state_dict",
+            "device_map",
+            "forcedaligner",
+            "forced aligner",
+            "加载 qwen",
+            "加载模型",
+        )
+    )
+    return has_cuda_marker and has_load_marker
+
+
+def _process_failure_detail(error: TranscriptionProcessError, lines: Sequence[str]) -> str:
+    """Keep a bounded tail of synthetic child output beside the process error."""
+    detail = str(error)
+    evidence = " | ".join(line.strip() for line in lines if line.strip())
+    if len(evidence) > 2000:
+        evidence = evidence[-2000:]
+    if evidence and evidence not in detail:
+        return f"{detail}: {evidence}"
+    return detail
 
 
 def _registered_mose_executable() -> Path | None:
@@ -2146,6 +2197,12 @@ class LauncherApi:
                     "type": "error",
                     "code": "ffmpeg_start_failed",
                     "detail": str(error),
+                })
+            elif request.provider == "local" and _is_qwen_cuda_load_failure(request.model, child_output):
+                self._emit({
+                    "type": "error",
+                    "code": "local_qwen_cuda_load_failed",
+                    "detail": _process_failure_detail(error, child_output),
                 })
             else:
                 self._emit({"type": "error", "code": "transcription_failed", "detail": str(error)})

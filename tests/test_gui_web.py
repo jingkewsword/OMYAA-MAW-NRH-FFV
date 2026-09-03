@@ -18,7 +18,7 @@ from urllib.error import URLError
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from maw.gui_web import EventPump, LauncherApi, LauncherPaths, PreflightError, SERVER_START_TIMEOUT, _emoji_font_urls, _find_mose_executable, _is_ffmpeg_missing_failure, _is_ffmpeg_start_failure, _is_ffprobe_start_failure, _open_existing_path, _open_external, _port, _register_mosp_association, _request_from_payload, _route_dropped_path, _valid_emoji_font, default_paths, download_emoji_font, run_app  # noqa: E402
+from maw.gui_web import EventPump, LauncherApi, LauncherPaths, PreflightError, SERVER_START_TIMEOUT, _emoji_font_urls, _find_mose_executable, _is_ffmpeg_missing_failure, _is_ffmpeg_start_failure, _is_ffprobe_start_failure, _is_qwen_cuda_load_failure, _open_existing_path, _open_external, _port, _register_mosp_association, _request_from_payload, _route_dropped_path, _valid_emoji_font, default_paths, download_emoji_font, run_app  # noqa: E402
 from maw.gui_workflow import TranscriptionCancelledError, TranscriptionProcessError, TranscriptionRequest, TranscriptionResult  # noqa: E402
 from maw.ffmpeg import FfmpegTools  # noqa: E402
 from maw.local_log import LocalLogSink, TeeWriter  # noqa: E402
@@ -2547,6 +2547,34 @@ class GuiWebBridgeTests(unittest.TestCase):
             "returned non-zero exit status 1.",
         ]))
 
+    def test_qwen_cuda_load_failure_requires_loading_evidence(self) -> None:
+        self.assertTrue(_is_qwen_cuda_load_failure(
+            "Qwen/Qwen3-ASR-0.6B",
+            [
+                "[local] loading QwenASR: Qwen/Qwen3-ASR-0.6B (cuda)",
+                "RuntimeError: CUDA error: no kernel image is available for execution on the device",
+            ],
+        ))
+        self.assertFalse(_is_qwen_cuda_load_failure(
+            "Qwen/Qwen3-ASR-0.6B",
+            [
+                "[local] loading QwenASR: Qwen/Qwen3-ASR-0.6B (cuda)",
+                "[local] QwenASR loaded",
+                "RuntimeError: CUDA error while transcribing",
+            ],
+        ))
+        self.assertFalse(_is_qwen_cuda_load_failure(
+            "Qwen/Qwen3-ASR-0.6B",
+            ["RuntimeError: transcription failed"],
+        ))
+        self.assertFalse(_is_qwen_cuda_load_failure(
+            "OpenMOSS-Team/MOSS-Transcribe-Diarize",
+            [
+                "[local] loading model (cuda)",
+                "RuntimeError: CUDA error while loading",
+            ],
+        ))
+
     def test_launcher_api_queues_started_event_and_shutdown_flushes(self) -> None:
         self.api._emit({"type": "log", "message": "queued"})
 
@@ -2615,6 +2643,55 @@ class GuiWebBridgeTests(unittest.TestCase):
 
         self.assertTrue(self.window.scripts)
         self.assertIn('"code": "ffmpeg_missing"', self.window.scripts[-1])
+
+    def test_worker_emits_recoverable_error_for_qwen_cuda_load_failure(self) -> None:
+        request = TranscriptionRequest(
+            media_path=self.root / "clip.wav",
+            srt_path=self.root / "clip.srt",
+            model="Qwen/Qwen3-ASR-0.6B",
+            provider="local",
+            engine="qwen-asr",
+            device="cuda",
+        )
+
+        def fail_with_qwen_cuda_output(*_args: object, **kwargs: object) -> None:
+            callback = kwargs["on_event"]
+            assert callable(callback)
+            callback("[local] loading QwenASR: Qwen/Qwen3-ASR-0.6B (cuda)")
+            callback("RuntimeError: CUDA error: no kernel image is available for execution on the device")
+            raise TranscriptionProcessError(1)
+
+        with mock.patch("maw.gui_web.run_transcription", side_effect=fail_with_qwen_cuda_output):
+            self.api._worker_main(request, threading.Event())
+
+        self.assertTrue(self.window.scripts)
+        event_script = self.window.scripts[-1]
+        self.assertIn('"code": "local_qwen_cuda_load_failed"', event_script)
+        self.assertIn("CUDA error: no kernel image", event_script)
+        self.assertNotIn('"code": "transcription_failed"', event_script)
+
+    def test_worker_keeps_unknown_qwen_transcription_failure_generic(self) -> None:
+        request = TranscriptionRequest(
+            media_path=self.root / "clip.wav",
+            srt_path=self.root / "clip.srt",
+            model="Qwen/Qwen3-ASR-0.6B",
+            provider="local",
+            engine="qwen-asr",
+        )
+
+        def fail_with_unknown_output(*_args: object, **kwargs: object) -> None:
+            callback = kwargs["on_event"]
+            assert callable(callback)
+            callback("RuntimeError: transcription failed after audio decoding")
+            raise TranscriptionProcessError(1)
+
+        with mock.patch("maw.gui_web.run_transcription", side_effect=fail_with_unknown_output):
+            self.api._worker_main(request, threading.Event())
+
+        self.assertTrue(self.window.scripts)
+        event_script = self.window.scripts[-1]
+        self.assertIn('"code": "transcription_failed"', event_script)
+        self.assertNotIn('"code": "local_qwen_cuda_load_failed"', event_script)
 
     def test_worker_emits_cancellation_error_for_cancelled_transcription(self) -> None:
         request = TranscriptionRequest(
