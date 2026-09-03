@@ -210,6 +210,7 @@ test('LLM HTTP failures give provider-aware actions without showing the key', as
   await page.locator('#llmApiKey').fill('test-only-key');
   await page.evaluate(() => {
     window.__llmFailureStatus = 401;
+    window.__llmFailureProvider = 'deepseek';
     window.MAWLauncher.callBackend = async (method) => {
       if (method === 'test_postprocess_connection') {
         return {
@@ -217,7 +218,7 @@ test('LLM HTTP failures give provider-aware actions without showing the key', as
           field: 'postprocessProvider',
           code: 'postprocess_connection_failed',
           httpStatus: window.__llmFailureStatus,
-          providerId: 'deepseek',
+          providerId: window.__llmFailureProvider,
           operation: 'connection test',
         };
       }
@@ -227,7 +228,7 @@ test('LLM HTTP failures give provider-aware actions without showing the key', as
           field: 'postprocessModel',
           code: 'postprocess_models_failed',
           httpStatus: window.__llmFailureStatus,
-          providerId: 'deepseek',
+          providerId: window.__llmFailureProvider,
           operation: 'model list',
         };
       }
@@ -240,6 +241,8 @@ test('LLM HTTP failures give provider-aware actions without showing the key', as
   await expect(page.locator('#llmSettingsSaveStatus')).toContainText('当前供应商：DeepSeek');
   await expect(page.locator('#llmSettingsSaveStatus')).toContainText('API URL');
   await expect(page.locator('#llmSettingsSaveStatus')).toContainText('签发');
+  await expect(page.locator('#llmSettingsSaveStatus')).toContainText('官方控制台');
+  await expect(page.locator('#llmSettingsSaveStatus')).toContainText('自定义（兼容 OpenAI）');
   await expect(page.locator('#llmSettingsSaveStatus')).not.toContainText('test-only-key');
 
   await page.evaluate(() => { window.__llmFailureStatus = 403; });
@@ -258,6 +261,12 @@ test('LLM HTTP failures give provider-aware actions without showing the key', as
   await expect(page.locator('#llmModelError')).toContainText('请求被限流或额度暂时耗尽（HTTP 429');
   await expect(page.locator('#llmModelError')).toContainText('稍后重试');
   await expect(page.locator('#llmModelError')).not.toContainText('HTTP 404');
+
+  await page.evaluate(() => { window.__llmFailureStatus = 401; window.__llmFailureProvider = 'custom'; });
+  await page.locator('#testLlmConnection').click();
+  await expect(page.locator('#llmSettingsSaveStatus')).toContainText('认证失败（HTTP 401');
+  await expect(page.locator('#llmSettingsSaveStatus')).toContainText('API URL');
+  await expect(page.locator('#llmSettingsSaveStatus')).not.toContainText('官方控制台');
 });
 
 test('runtime errors show an actionable notice outside the log', async ({ page }) => {

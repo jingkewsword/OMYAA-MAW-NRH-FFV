@@ -605,6 +605,7 @@
     llm_models_empty: "供应商没有返回可用模型。",
     llm_model_choices_title: "展开已获取模型列表",
     llm_provider_unknown: "当前选择的供应商",
+    llm_builtin_provider_key_guidance: "{provider} 是内置供应商，请使用其官方控制台获取的 API Key。若 API Key 来自第三方平台，请选择“自定义（兼容 OpenAI）”，并按该平台官方文档配置 API URL。",
     llm_http_unauthorized: "认证失败（HTTP 401，{operation}）。当前供应商：{provider}。请核对供应商、API URL 是否属于同一服务，并确认 API Key 由该服务签发；不要在错误报告中粘贴 Key。",
     llm_http_forbidden: "供应商拒绝了请求（HTTP 403，{operation}）。当前供应商：{provider}。请核对供应商、API URL 与 API Key 签发方是否一致，并确认账号或模型有权限；不要在错误报告中粘贴 Key。",
     llm_http_not_found: "接口或模型不存在（HTTP 404，{operation}）。请检查 API URL 的兼容路径和模型 ID；获取模型时还要确认该供应商提供 /models 接口。这个状态通常不是 API Key 问题。",
@@ -653,6 +654,7 @@
     llm_models_empty: "The provider returned no usable models.",
     llm_model_choices_title: "Show fetched model list",
     llm_provider_unknown: "the selected provider",
+    llm_builtin_provider_key_guidance: "{provider} is a built-in provider. Use an API key obtained from its official console. If the API key came from a third-party platform, choose Custom (OpenAI-compatible) and configure the API URL according to that platform's official documentation.",
     llm_http_unauthorized: "Authentication failed (HTTP 401, {operation}). Current provider: {provider}. Compare the provider, API URL, and the issuer of the API key; never paste the key into an error report.",
     llm_http_forbidden: "The provider rejected the request (HTTP 403, {operation}). Current provider: {provider}. Compare the provider, API URL, and the issuer of the API key, then confirm that the account or model is allowed; never paste the key into an error report.",
     llm_http_not_found: "The endpoint or model was not found (HTTP 404, {operation}). Check the compatible API URL path and model ID; when fetching models, confirm that the provider exposes /models. This is usually not an API-key problem.",
@@ -1149,6 +1151,12 @@
       : { deepseek: "DeepSeek", zhipu: "智谱 Coding Plan", qwen: "阿里云 Qwen", custom: "自定义（兼容 OpenAI）" };
     return labels[id] || item?.label || t("llm_provider_unknown");
   }
+  function llmBuiltInProviderKeyGuidance(context = {}) {
+    const providerId = String(context?.providerId || "").trim();
+    if (!["deepseek", "zhipu", "qwen"].includes(providerId)) return "";
+    return t("llm_builtin_provider_key_guidance")
+      .replaceAll("{provider}", llmProviderLabel(providerId));
+  }
   function llmHttpErrorText(status, context = {}) {
     const keys = { 401: "llm_http_unauthorized", 403: "llm_http_forbidden", 404: "llm_http_not_found", 429: "llm_http_rate_limited" };
     const key = keys[Number(status)];
@@ -1161,13 +1169,16 @@
   }
   function errText(code, detail, context = {}) {
     const compact = compactDetail(detail);
+    const builtInGuidance = ["postprocess_connection_failed", "postprocess_models_failed"].includes(code)
+      ? llmBuiltInProviderKeyGuidance(context)
+      : "";
     if (["postprocess_connection_failed", "postprocess_models_failed"].includes(code)) {
       const guidance = llmHttpErrorText(context?.httpStatus, context);
-      if (guidance) return guidance;
+      if (guidance) return [guidance, builtInGuidance].filter(Boolean).join(" ");
     }
     const entry = ERROR_TEXT[state.lang][code];
-    if (typeof entry === "function") return entry(compact);
-    return entry || compact || t("failed");
+    const message = typeof entry === "function" ? entry(compact) : (entry || compact || t("failed"));
+    return [message, builtInGuidance].filter(Boolean).join(" ");
   }
   const ext = (path) => (path.match(/\.[^.\\/]+$/)?.[0] || "").toLowerCase();
   const provider = () => state.config.providers.find((item) => item.id === $("provider").value) || state.config.providers[0];
