@@ -26,7 +26,7 @@ def _canonical_test_path(value: str | os.PathLike[str]) -> str:
     """Compare paths after resolving platform-specific aliases and symlinks."""
     return os.path.normcase(os.path.realpath(os.fspath(value)))
 
-from maw.gui_web import EDITOR_HEALTH_PROBE_PATH, EDITOR_HEALTH_PROBE_TIMEOUT, EventPump, LauncherApi, LauncherPaths, PreflightError, SERVER_START_TIMEOUT, _emoji_font_urls, _find_mose_executable, _format_media_tool_progress, _is_ffmpeg_missing_failure, _is_ffmpeg_start_failure, _is_ffprobe_start_failure, _launcher_icon_path, _open_existing_path, _open_external, _port, _register_mosp_association, _request_from_payload, _route_dropped_path, _valid_emoji_font, _wait_for_server, default_paths, download_emoji_font, run_app  # noqa: E402
+from maw.gui_web import EDITOR_HEALTH_PROBE_PATH, EDITOR_HEALTH_PROBE_TIMEOUT, EventPump, LauncherApi, LauncherPaths, PreflightError, SERVER_START_TIMEOUT, _emoji_font_urls, _find_mose_executable, _format_media_tool_progress, _is_ffmpeg_missing_failure, _is_ffmpeg_start_failure, _is_ffprobe_start_failure, _is_windows_local_gpu_runtime_failure, _launcher_icon_path, _open_existing_path, _open_external, _port, _register_mosp_association, _request_from_payload, _route_dropped_path, _valid_emoji_font, _wait_for_server, default_paths, download_emoji_font, run_app  # noqa: E402
 from maw.gui_workflow import TranscriptionCancelledError, TranscriptionProcessError, TranscriptionRequest, TranscriptionResult  # noqa: E402
 from maw.ffmpeg import FfmpegTools  # noqa: E402
 from maw.local_log import LocalLogSink, TeeWriter  # noqa: E402
@@ -4280,6 +4280,77 @@ class GuiWebBridgeTests(unittest.TestCase):
         event_script = self.window.scripts[-1]
         self.assertIn('"code": "ffmpeg_start_failed"', event_script)
         self.assertIn('"detail": "Transcription failed with exit code 1"', event_script)
+
+    def test_windows_local_cuda_failure_uses_generic_nvidia_runtime_code(self) -> None:
+        request = TranscriptionRequest(
+            media_path=self.root / "clip.wav",
+            srt_path=self.root / "clip.srt",
+            provider="local",
+        )
+
+        def fail_with_cuda_output(*_args: object, **kwargs: object) -> None:
+            callback = kwargs["on_event"]
+            assert callable(callback)
+            callback("RuntimeError: CUDA initialization failed for GPU")
+            raise TranscriptionProcessError(1)
+
+        with mock.patch("maw.gui_web.sys.platform", "win32"):
+            with mock.patch("maw.gui_web.run_transcription", side_effect=fail_with_cuda_output):
+                self.api._worker_main(request, threading.Event())
+
+        self.assertTrue(_is_windows_local_gpu_runtime_failure(request, ("CUDA initialization failed",)))
+        event_script = self.window.scripts[-1]
+        self.assertIn('"code": "local_windows_nvidia_runtime_failed"', event_script)
+        self.assertIn('"detail": ""', event_script)
+        self.assertNotIn('"detail": "RuntimeError: CUDA initialization failed for GPU"', event_script)
+        self.assertNotIn("Qwen", event_script)
+
+    def test_non_windows_local_cuda_failure_stays_generic(self) -> None:
+        request = TranscriptionRequest(
+            media_path=self.root / "clip.wav",
+            srt_path=self.root / "clip.srt",
+            provider="local",
+        )
+
+        def fail_with_cuda_output(*_args: object, **kwargs: object) -> None:
+            callback = kwargs["on_event"]
+            assert callable(callback)
+            callback("CUDA initialization failed")
+            raise TranscriptionProcessError(1)
+
+        with mock.patch("maw.gui_web.sys.platform", "linux"):
+            with mock.patch("maw.gui_web.run_transcription", side_effect=fail_with_cuda_output):
+                self.api._worker_main(request, threading.Event())
+
+        event_script = self.window.scripts[-1]
+        self.assertIn('"code": "transcription_failed"', event_script)
+        self.assertNotIn('"code": "local_windows_nvidia_runtime_failed"', event_script)
+
+    def test_windows_gpu_failure_classifier_requires_local_cuda_capable_request(self) -> None:
+        lines = ("CUDA initialization failed",)
+        local_cpu = TranscriptionRequest(
+            media_path=self.root / "clip.wav",
+            srt_path=self.root / "clip.srt",
+            provider="local",
+            device="cpu",
+        )
+        cloud_cuda = TranscriptionRequest(
+            media_path=self.root / "clip.wav",
+            srt_path=self.root / "clip.srt",
+            provider="qwen",
+            device="cuda",
+        )
+        local_unknown = TranscriptionRequest(
+            media_path=self.root / "clip.wav",
+            srt_path=self.root / "clip.srt",
+            provider="local",
+            device="auto",
+        )
+
+        with mock.patch("maw.gui_web.sys.platform", "win32"):
+            self.assertFalse(_is_windows_local_gpu_runtime_failure(local_cpu, lines))
+            self.assertFalse(_is_windows_local_gpu_runtime_failure(cloud_cuda, lines))
+            self.assertFalse(_is_windows_local_gpu_runtime_failure(local_unknown, ("network request failed",)))
 
     def test_route_dropped_path_routes_json_media_and_hotword_file(self) -> None:
         """Given dropped paths, When routed, Then event type mirrors launcher drop behavior."""

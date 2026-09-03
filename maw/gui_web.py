@@ -173,6 +173,7 @@ ERROR_MESSAGES: Final[dict[str, str]] = {
     "local_runtime_missing": "本地模型运行时未安装。",
     "local_runtime_install_failed": "本地模型运行环境安装失败。",
     "local_runtime_cancelled": "本地模型运行环境安装已取消。",
+    "local_windows_nvidia_runtime_failed": "Windows NVIDIA 本地运行环境未能启动；MAW 没有自动替换依赖版本。",
     "local_model_missing": "尚未检测到本地模型，请先下载或选择模型目录。",
     "local_model_incomplete": "本地模型不完整，请先准备所需模型组件。",
     "local_model_path_invalid": "本地模型目录不存在，或所选路径不是文件夹。",
@@ -284,6 +285,29 @@ def _is_ffmpeg_missing_failure(lines: Sequence[str]) -> bool:
         marker in detail for marker in ("ffmpeg", "ffprobe", "get_duration_sec")
     )
     return explicit or legacy_winerror
+
+
+def _is_windows_local_gpu_runtime_failure(
+    request: TranscriptionRequest,
+    lines: Sequence[str],
+) -> bool:
+    """Recognise an explicit local CUDA/GPU failure on Windows only.
+
+    This deliberately stays provider- and platform-scoped.  A generic local
+    failure, a cloud-provider failure, or a failure on macOS/Linux keeps the
+    existing catch-all classification.  The marker check is only a routing
+    aid; it does not assert that a driver or CUDA version is incompatible.
+    """
+
+    if sys.platform != "win32" or str(request.provider or "").strip().casefold() != "local":
+        return False
+    if str(request.device or "").strip().casefold() not in {"auto", "cuda"}:
+        return False
+    observed = "\n".join(str(line) for line in lines).casefold()
+    return any(
+        marker in observed
+        for marker in ("cuda", "cublas", "cudnn", "nvidia", "gpu")
+    )
 
 
 def _registered_mose_executable() -> Path | None:
@@ -3213,6 +3237,12 @@ class LauncherApi:
                     "code": "ffmpeg_start_failed",
                     "detail": str(error),
                 })
+            elif _is_windows_local_gpu_runtime_failure(request, (*child_output, str(error))):
+                self._emit({
+                    "type": "error",
+                    "code": "local_windows_nvidia_runtime_failed",
+                    "detail": "",
+                })
             else:
                 self._emit({"type": "error", "code": "transcription_failed", "detail": str(error)})
             if self.worker is threading.current_thread():
@@ -3221,7 +3251,14 @@ class LauncherApi:
             return
         # The pywebview worker boundary must report every backend failure to JS.
         except Exception as error:  # noqa: BLE001
-            self._emit({"type": "error", "code": "transcription_failed", "detail": str(error)})
+            if _is_windows_local_gpu_runtime_failure(request, (*child_output, str(error))):
+                self._emit({
+                    "type": "error",
+                    "code": "local_windows_nvidia_runtime_failed",
+                    "detail": "",
+                })
+            else:
+                self._emit({"type": "error", "code": "transcription_failed", "detail": str(error)})
             if self.worker is threading.current_thread():
                 self.worker = None
             self.pump.flush()
