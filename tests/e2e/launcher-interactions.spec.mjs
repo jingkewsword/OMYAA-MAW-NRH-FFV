@@ -238,11 +238,11 @@ test('LLM HTTP failures give provider-aware actions without showing the key', as
 
   await page.locator('#testLlmConnection').click();
   await expect(page.locator('#llmSettingsSaveStatus')).toContainText('认证失败（HTTP 401');
-  await expect(page.locator('#llmSettingsSaveStatus')).toContainText('当前供应商：DeepSeek');
+  await expect(page.locator('#llmSettingsSaveStatus')).toContainText('当前供应商：DeepSeek 官网');
   await expect(page.locator('#llmSettingsSaveStatus')).toContainText('API URL');
-  await expect(page.locator('#llmSettingsSaveStatus')).toContainText('签发');
   await expect(page.locator('#llmSettingsSaveStatus')).toContainText('官方控制台');
   await expect(page.locator('#llmSettingsSaveStatus')).toContainText('自定义（兼容 OpenAI）');
+  await expect(page.locator('#llmSettingsSaveStatus')).not.toContainText('正确配置模型名');
   await expect(page.locator('#llmSettingsSaveStatus')).not.toContainText('test-only-key');
 
   await page.evaluate(() => { window.__llmFailureStatus = 403; });
@@ -265,7 +265,10 @@ test('LLM HTTP failures give provider-aware actions without showing the key', as
   await page.evaluate(() => { window.__llmFailureStatus = 401; window.__llmFailureProvider = 'custom'; });
   await page.locator('#testLlmConnection').click();
   await expect(page.locator('#llmSettingsSaveStatus')).toContainText('认证失败（HTTP 401');
-  await expect(page.locator('#llmSettingsSaveStatus')).toContainText('API URL');
+  await expect(page.locator('#llmSettingsSaveStatus')).toContainText('当前供应商：自定义（兼容 OpenAI）');
+  await expect(page.locator('#llmSettingsSaveStatus')).toContainText('API URL、API Key 是否来自同一服务商');
+  await expect(page.locator('#llmSettingsSaveStatus')).toContainText('正确配置模型名');
+  await expect(page.locator('#llmSettingsSaveStatus')).toContainText('请勿在错误报告中粘贴你的个人 API Key');
   await expect(page.locator('#llmSettingsSaveStatus')).not.toContainText('官方控制台');
 });
 

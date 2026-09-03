@@ -606,7 +606,9 @@
     llm_model_choices_title: "展开已获取模型列表",
     llm_provider_unknown: "当前选择的供应商",
     llm_builtin_provider_key_guidance: "{provider} 是内置供应商，请使用其官方控制台获取的 API Key。若 API Key 来自第三方平台，请选择“自定义（兼容 OpenAI）”，并按该平台官方文档配置 API URL。",
-    llm_http_unauthorized: "认证失败（HTTP 401，{operation}）。当前供应商：{provider}。请核对供应商、API URL 是否属于同一服务，并确认 API Key 由该服务签发；不要在错误报告中粘贴 Key。",
+    llm_http_unauthorized: "认证失败（HTTP 401，{operation}）。当前供应商：{provider}。请核对供应商 API URL、API Key 是否来自同一服务商，并正确配置模型名；请勿在错误报告中粘贴你的个人 API Key。",
+    llm_http_unauthorized_builtin: "认证失败（HTTP 401，{operation}）。当前供应商：{provider} 官网；请使用官方控制台获取的 API Key。若 API Key 来自第三方平台，请选择“自定义（兼容 OpenAI）”，并按该平台官方文档配置 API URL。",
+    llm_http_unauthorized_custom: "认证失败（HTTP 401，{operation}）。当前供应商：自定义（兼容 OpenAI）。请核对供应商 API URL、API Key 是否来自同一服务商，并正确配置模型名；请勿在错误报告中粘贴你的个人 API Key。",
     llm_http_forbidden: "供应商拒绝了请求（HTTP 403，{operation}）。当前供应商：{provider}。请核对供应商、API URL 与 API Key 签发方是否一致，并确认账号或模型有权限；不要在错误报告中粘贴 Key。",
     llm_http_not_found: "接口或模型不存在（HTTP 404，{operation}）。请检查 API URL 的兼容路径和模型 ID；获取模型时还要确认该供应商提供 /models 接口。这个状态通常不是 API Key 问题。",
     llm_http_rate_limited: "请求被限流或额度暂时耗尽（HTTP 429，{operation}）。请稍后重试，降低请求频率或批次大小，并检查当前供应商的额度与限流策略。",
@@ -655,7 +657,9 @@
     llm_model_choices_title: "Show fetched model list",
     llm_provider_unknown: "the selected provider",
     llm_builtin_provider_key_guidance: "{provider} is a built-in provider. Use an API key obtained from its official console. If the API key came from a third-party platform, choose Custom (OpenAI-compatible) and configure the API URL according to that platform's official documentation.",
-    llm_http_unauthorized: "Authentication failed (HTTP 401, {operation}). Current provider: {provider}. Compare the provider, API URL, and the issuer of the API key; never paste the key into an error report.",
+    llm_http_unauthorized: "Authentication failed (HTTP 401, {operation}). Current provider: {provider}. Check that the API URL and API key come from the same provider, and that the model name is configured correctly; never paste your personal API key into an error report.",
+    llm_http_unauthorized_builtin: "Authentication failed (HTTP 401, {operation}). Current provider: {provider} official service. Use an API key obtained from its official console. If the API key came from a third-party platform, choose Custom (OpenAI-compatible) and configure the API URL according to that platform's official documentation.",
+    llm_http_unauthorized_custom: "Authentication failed (HTTP 401, {operation}). Current provider: Custom (OpenAI-compatible). Check that the API URL and API key come from the same provider, and that the model name is configured correctly; never paste your personal API key into an error report.",
     llm_http_forbidden: "The provider rejected the request (HTTP 403, {operation}). Current provider: {provider}. Compare the provider, API URL, and the issuer of the API key, then confirm that the account or model is allowed; never paste the key into an error report.",
     llm_http_not_found: "The endpoint or model was not found (HTTP 404, {operation}). Check the compatible API URL path and model ID; when fetching models, confirm that the provider exposes /models. This is usually not an API-key problem.",
     llm_http_rate_limited: "The request was rate-limited or the quota is temporarily exhausted (HTTP 429, {operation}). Wait and retry, reduce request frequency or batch size, and check the current provider's quota and rate-limit policy.",
@@ -1158,8 +1162,12 @@
       .replaceAll("{provider}", llmProviderLabel(providerId));
   }
   function llmHttpErrorText(status, context = {}) {
+    const numericStatus = Number(status);
+    const providerId = String(context?.providerId || "").trim();
     const keys = { 401: "llm_http_unauthorized", 403: "llm_http_forbidden", 404: "llm_http_not_found", 429: "llm_http_rate_limited" };
-    const key = keys[Number(status)];
+    const key = numericStatus === 401 && ["deepseek", "zhipu", "qwen"].includes(providerId)
+      ? "llm_http_unauthorized_builtin"
+      : (numericStatus === 401 && providerId === "custom" ? "llm_http_unauthorized_custom" : keys[numericStatus]);
     if (!key) return "";
     const isModelList = String(context?.operation || "").toLowerCase().includes("model");
     const operation = t(isModelList ? "llm_http_model_list_operation" : "llm_http_connection_operation");
@@ -1169,7 +1177,7 @@
   }
   function errText(code, detail, context = {}) {
     const compact = compactDetail(detail);
-    const builtInGuidance = ["postprocess_connection_failed", "postprocess_models_failed"].includes(code)
+    const builtInGuidance = ["postprocess_connection_failed", "postprocess_models_failed"].includes(code) && Number(context?.httpStatus) !== 401
       ? llmBuiltInProviderKeyGuidance(context)
       : "";
     if (["postprocess_connection_failed", "postprocess_models_failed"].includes(code)) {
