@@ -8,6 +8,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from collections.abc import Mapping
 from pathlib import Path
 from types import SimpleNamespace
 from typing import final
@@ -159,6 +160,14 @@ class GuiWebBridgeTests(unittest.TestCase):
         self.assertNotIn("funasr-local", visible_ids)
         self.assertEqual(local["models"][2]["modelRef"], "iic/SenseVoiceSmall")
         self.assertEqual(local["models"][3]["id"], "moss-transcribe-diarize-local")
+        qwen_status = local["models"][0]["localStatus"]
+        self.assertEqual(qwen_status["modelSource"], "huggingface")
+        self.assertEqual(qwen_status["modelSourceUrl"], "https://huggingface.co/Qwen/Qwen3-ASR-0.6B")
+        self.assertEqual(qwen_status["modelComponents"][1]["ref"], "Qwen/Qwen3-ForcedAligner-0.6B")
+        self.assertTrue(qwen_status["manualPathSupported"])
+        sensevoice_status = local["models"][2]["localStatus"]
+        self.assertEqual(sensevoice_status["modelSource"], "modelscope")
+        self.assertEqual(sensevoice_status["modelComponents"][-1]["ref"], "fsmn-vad")
         whisper = local["models"][-1]
         self.assertEqual(whisper["id"], "whisper-large-v3-local")
         self.assertIn("用户自行安装 CUDA 12 和 cuDNN 9", whisper["note"])
@@ -3576,6 +3585,21 @@ class LauncherAssetContractTests(unittest.TestCase):
         self.assertIn("localModelPaths", script)
         self.assertIn("syncLocalModelPath(model)", script)
         self.assertIn('status.status === "path_mismatch"', script)
+
+    def test_local_model_self_service_guide_exposes_sources_and_fixed_components(self) -> None:
+        page = (ROOT / "web" / "launcher" / "index.html").read_text(encoding="utf-8")
+        script = (ROOT / "web" / "launcher" / "launcher.js").read_text(encoding="utf-8")
+        stylesheet = (ROOT / "web" / "launcher" / "launcher.css").read_text(encoding="utf-8")
+
+        self.assertIn('id="localModelGuide"', page)
+        self.assertIn('id="openLocalModelSource"', page)
+        self.assertIn('id="localModelComponents"', page)
+        self.assertIn('data-i18n="local_model_manual_hint"', page)
+        self.assertIn('data-i18n="local_model_no_http"', page)
+        self.assertIn("function renderLocalModelGuide(model, status)", script)
+        self.assertIn('bridge("open_url", { url: sourceUrl })', script)
+        self.assertIn("modelComponents", script)
+        self.assertIn(".local-model-component", stylesheet)
 
     def test_local_runtime_installation_has_separate_progress_and_repair_controls(self) -> None:
         page = (ROOT / "web" / "launcher" / "index.html").read_text(encoding="utf-8")

@@ -225,8 +225,54 @@ def local_model_payload(
         "engine": model.engine,
         "modelRef": model.model_ref,
         "requiredModelRefs": list(status.required_model_refs),
+        "modelSource": model.model_source,
+        "modelSourceUrl": model.model_source_url,
+        "modelComponents": _model_components(model),
+        "manualPathSupported": True,
         "canPrepare": status.runtime_available and status.status not in {"path_invalid", "path_mismatch", "installed"},
     }
+
+
+def _model_components(model: ModelConfig) -> list[dict[str, str]]:
+    """Return the fixed components that the selected Launcher entry prepares.
+
+    The payload is deliberately derived from the allow-listed ``ModelConfig``
+    entries.  It gives the UI enough information to guide a manual folder
+    selection without turning the Launcher into an arbitrary model/endpoint
+    registry.
+    """
+    components: list[dict[str, str]] = []
+    if model.model_ref:
+        components.append({
+            "role": "model",
+            "ref": model.model_ref,
+            "url": model.model_source_url,
+        })
+    for ref in model.required_model_refs:
+        components.append({
+            "role": "required",
+            "ref": ref,
+            "url": _model_ref_url(model.model_source, ref),
+        })
+    for ref in model.required_components:
+        components.append({
+            "role": "runtime",
+            "ref": ref,
+            "url": "",
+        })
+    return components
+
+
+def _model_ref_url(source: str, ref: str) -> str:
+    """Build a source link only for the two supported upstream repositories."""
+    normalized = ref.strip()
+    if not normalized or "/" not in normalized:
+        return ""
+    if source == "huggingface":
+        return f"https://huggingface.co/{normalized}"
+    if source == "modelscope":
+        return f"https://www.modelscope.cn/models/{normalized}"
+    return ""
 
 
 def prepare_local_model(

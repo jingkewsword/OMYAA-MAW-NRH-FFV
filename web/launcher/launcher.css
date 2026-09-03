@@ -532,6 +532,63 @@ label {
   background: linear-gradient(135deg, var(--accent-tint), transparent 75%), var(--bg-input);
 }
 
+.local-model-guide {
+  display: grid;
+  gap: 6px;
+  padding: 9px 10px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-raised) 65%, transparent);
+}
+
+.local-model-guide-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px 12px;
+}
+
+.local-model-guide-header strong,
+.local-model-components > strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.local-model-guide .hint {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.local-model-components {
+  display: grid;
+  gap: 4px;
+}
+
+.local-model-components ul {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.local-model-component {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.local-model-component code {
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.local-model-component .inline-link {
+  margin-left: 4px;
+}
+
 .local-runtime-panel {
   display: grid;
   gap: 8px;

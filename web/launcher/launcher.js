@@ -325,8 +325,22 @@
     open_editor: "🚀 打开字幕编辑器",
     server_refresh: "刷新",
     local_model_path: "已有模型目录（可选）",
+    local_model_path_hint: "只选择当前模型的实际目录，并确保其中包含模型权重；不要选择整个缓存根目录。",
     local_model_cache_path_label: "模型保存目录",
-    local_model_cache_path_hint: "默认使用本地环境的模型缓存目录；需要时可改到其他磁盘。",
+    local_model_cache_path_hint: "默认使用本地环境的模型缓存目录；需要时可改到其他磁盘。该目录同时供 Hugging Face 和 ModelScope 缓存使用。",
+    local_model_guide_title: "准备此模型",
+    local_model_open_source: "打开官方模型页 ↗",
+    local_model_open_source_title: "查看当前支持条目的官方模型来源",
+    local_model_managed_hint: "推荐：先点击“安装本地模型支持”，再点击“下载模型”。MAW 会按当前条目的固定模型和组件准备缓存。",
+    local_model_manual_hint: "也可以从官方模型页下载与当前条目完全对应的目录，再选择该目录；不保证任意权重、第三方改版或本地 HTTP 服务。",
+    local_model_components_title: "必需组件",
+    local_model_component_model: "主模型",
+    local_model_component_required: "必需模型组件",
+    local_model_component_forced_aligner: "Forced Aligner（Qwen 必需）",
+    local_model_component_runtime: "附加运行组件",
+    local_model_component_source: "打开来源 ↗",
+    local_model_component_separator: "：",
+    local_model_no_http: "本地推理直接由 MAW 或其独立运行环境执行，不需要 API Key 或本地 HTTP 端口。",
     local_refresh: "重新扫描",
     local_prepare: "下载模型",
     local_device: "设备",
@@ -338,7 +352,7 @@
     local_partial: "已检测到主模型，但仍缺少组件",
     local_installed: "已检测到本地模型",
     local_path_selected: "已使用指定的模型目录",
-    local_prepare_hint: "下载/准备会使用 QwenASR 或 FunASR 的上游缓存；模型文件不写入 MAW 工程。",
+    local_prepare_hint: "下载/准备会使用当前模型对应的上游加载器和模型缓存；模型文件不写入 MAW 工程。",
     local_prepare_running: "正在准备模型……",
     local_prepare_cancelling: "正在取消模型准备……",
     local_prepare_cancel: "取消准备",
@@ -404,8 +418,22 @@
     open_editor: "🚀 Open Subtitle Editor",
     server_refresh: "Refresh",
     local_model_path: "Existing model folder (optional)",
+    local_model_path_hint: "Choose the actual folder for this model and make sure it contains model weights; do not choose the whole cache root.",
     local_model_cache_path_label: "Model storage directory",
-    local_model_cache_path_hint: "The local environment cache is used by default; you can move it to another drive if needed.",
+    local_model_cache_path_hint: "The local environment cache is used by default; you can move it to another drive if needed. The same directory is used for Hugging Face and ModelScope caches.",
+    local_model_guide_title: "Prepare this model",
+    local_model_open_source: "Open official model page ↗",
+    local_model_open_source_title: "View the official source for this supported entry",
+    local_model_managed_hint: "Recommended: click “Install local model support”, then “Download model”. MAW prepares the fixed model and components for this entry.",
+    local_model_manual_hint: "You can also download the exact folder for this entry from the official model page and choose that folder; arbitrary weights, third-party variants, and local HTTP services are not guaranteed.",
+    local_model_components_title: "Required components",
+    local_model_component_model: "Main model",
+    local_model_component_required: "Required model component",
+    local_model_component_forced_aligner: "Forced Aligner (required for Qwen)",
+    local_model_component_runtime: "Additional runtime component",
+    local_model_component_source: "Open source ↗",
+    local_model_component_separator: ": ",
+    local_model_no_http: "Local inference runs in MAW or its managed runtime; it does not need an API key or a local HTTP port.",
     local_refresh: "Rescan",
     local_prepare: "Download model",
     local_device: "Device",
@@ -417,7 +445,7 @@
     local_partial: "Main model found, but components are missing",
     local_installed: "Local model detected",
     local_path_selected: "Using the selected model folder",
-    local_prepare_hint: "Download/preparation uses the QwenASR or FunASR upstream cache; model files are not written into the MAW project.",
+    local_prepare_hint: "Download/preparation uses the upstream loader and model cache for the selected entry; model files are not written into the MAW project.",
     local_prepare_running: "Preparing model…",
     local_prepare_cancelling: "Cancelling model preparation…",
     local_prepare_cancel: "Cancel preparation",
@@ -1025,11 +1053,11 @@
             multiLanguage: false,
             commonLanguages: ["", "zh", "en", "ja", "ko", "fr", "de", "es", "ru"],
             models: [
-              { id: "qwen3-asr-local", label: "Qwen3-ASR 0.6B（推荐）", envKey: "", note: "本地运行；首次准备会加载 Qwen3-ASR 与 Forced Aligner", supportsSpeaker: false, kind: "local", engine: "qwen-asr", modelRef: "Qwen/Qwen3-ASR-0.6B", languages: [{ id: "", label: "自动识别" }, { id: "zh", label: "中文 / Mandarin" }, { id: "en", label: "英语 / English" }], localStatus: { status: "missing", runtimeAvailable: true, installed: false, path: "", detail: "", canPrepare: true } },
-              { id: "qwen3-asr-1.7b-local", label: "Qwen3-ASR 1.7B", envKey: "", note: "更高识别质量；与 0.6B 共用 Qwen3 Forced Aligner", supportsSpeaker: false, kind: "local", engine: "qwen-asr", modelRef: "Qwen/Qwen3-ASR-1.7B", languages: [{ id: "", label: "自动识别" }, { id: "zh", label: "中文 / Mandarin" }, { id: "en", label: "英语 / English" }], localStatus: { status: "missing", runtimeAvailable: true, installed: false, path: "", detail: "", canPrepare: true } },
-              { id: "fun-asr-nano-local", label: "Fun-ASR-Nano 2512（GPU）", envKey: "", note: "LLM-ASR 路线；中英日及中文方言，建议使用 CUDA", supportsSpeaker: false, kind: "local", engine: "funasr", modelRef: "FunAudioLLM/Fun-ASR-Nano-2512", languages: [{ id: "", label: "自动识别" }, { id: "zh", label: "中文 / Chinese" }, { id: "yue", label: "粤语 / Cantonese" }, { id: "en", label: "英语 / English" }, { id: "ja", label: "日语 / Japanese" }], localStatus: { status: "missing", runtimeAvailable: true, installed: false, path: "", detail: "", canPrepare: true } },
-              { id: "funasr-local", label: "FunASR paraformer-zh", envKey: "", note: "中文向 FunASR 路线；保留作为兼容选项", supportsSpeaker: false, kind: "local", engine: "funasr", modelRef: "paraformer-zh", languages: [{ id: "", label: "自动识别" }, { id: "zh", label: "中文 / Chinese" }, { id: "en", label: "英语 / English" }], localStatus: { status: "missing", runtimeAvailable: true, installed: false, path: "", detail: "", canPrepare: true } },
-              { id: "sensevoice-small-local", label: "SenseVoice Small", envKey: "", note: "多语种本地识别；默认配合 FSMN-VAD，CPU/GPU 都可运行", supportsSpeaker: false, kind: "local", engine: "funasr", modelRef: "iic/SenseVoiceSmall", languages: [{ id: "", label: "自动识别" }, { id: "zh", label: "中文 / Chinese" }, { id: "yue", label: "粤语 / Cantonese" }, { id: "en", label: "英语 / English" }, { id: "ja", label: "日语 / Japanese" }, { id: "ko", label: "韩语 / Korean" }], localStatus: { status: "missing", runtimeAvailable: true, installed: false, path: "", detail: "", canPrepare: true } }
+              { id: "qwen3-asr-local", label: "Qwen3-ASR 0.6B（推荐）", envKey: "", note: "本地运行；首次准备会加载 Qwen3-ASR 与 Forced Aligner", supportsSpeaker: false, kind: "local", engine: "qwen-asr", modelRef: "Qwen/Qwen3-ASR-0.6B", requiredModelRefs: ["Qwen/Qwen3-ForcedAligner-0.6B"], languages: [{ id: "", label: "自动识别" }, { id: "zh", label: "中文 / Mandarin" }, { id: "en", label: "英语 / English" }], localStatus: { status: "missing", runtimeAvailable: true, installed: false, path: "", detail: "", canPrepare: true, modelSource: "huggingface", modelSourceUrl: "https://huggingface.co/Qwen/Qwen3-ASR-0.6B", modelComponents: [{ role: "model", ref: "Qwen/Qwen3-ASR-0.6B", url: "https://huggingface.co/Qwen/Qwen3-ASR-0.6B" }, { role: "required", ref: "Qwen/Qwen3-ForcedAligner-0.6B", url: "https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B" }] } },
+              { id: "qwen3-asr-1.7b-local", label: "Qwen3-ASR 1.7B", envKey: "", note: "更高识别质量；与 0.6B 共用 Qwen3 Forced Aligner", supportsSpeaker: false, kind: "local", engine: "qwen-asr", modelRef: "Qwen/Qwen3-ASR-1.7B", requiredModelRefs: ["Qwen/Qwen3-ForcedAligner-0.6B"], languages: [{ id: "", label: "自动识别" }, { id: "zh", label: "中文 / Mandarin" }, { id: "en", label: "英语 / English" }], localStatus: { status: "missing", runtimeAvailable: true, installed: false, path: "", detail: "", canPrepare: true, modelSource: "huggingface", modelSourceUrl: "https://huggingface.co/Qwen/Qwen3-ASR-1.7B", modelComponents: [{ role: "model", ref: "Qwen/Qwen3-ASR-1.7B", url: "https://huggingface.co/Qwen/Qwen3-ASR-1.7B" }, { role: "required", ref: "Qwen/Qwen3-ForcedAligner-0.6B", url: "https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B" }] } },
+              { id: "sensevoice-small-local", label: "SenseVoice Small", envKey: "", note: "多语种本地识别；默认配合 FSMN-VAD，CPU/GPU 都可运行", supportsSpeaker: false, kind: "local", engine: "funasr", modelRef: "iic/SenseVoiceSmall", languages: [{ id: "", label: "自动识别" }, { id: "zh", label: "中文 / Chinese" }, { id: "yue", label: "粤语 / Cantonese" }, { id: "en", label: "英语 / English" }, { id: "ja", label: "日语 / Japanese" }, { id: "ko", label: "韩语 / Korean" }], localStatus: { status: "missing", runtimeAvailable: true, installed: false, path: "", detail: "", canPrepare: true, modelSource: "modelscope", modelSourceUrl: "https://www.modelscope.cn/models/iic/SenseVoiceSmall", modelComponents: [{ role: "model", ref: "iic/SenseVoiceSmall", url: "https://www.modelscope.cn/models/iic/SenseVoiceSmall" }, { role: "runtime", ref: "fsmn-vad", url: "" }] } },
+              { id: "moss-transcribe-diarize-local", label: "MOSS Transcribe-Diarize 0.9B（无字词时间码）", envKey: "", note: "端到端转写与说话人分离；仅段级时间戳，无字词级时间码", supportsSpeaker: true, kind: "local", engine: "moss", modelRef: "OpenMOSS-Team/MOSS-Transcribe-Diarize", languages: [{ id: "", label: "自动识别" }, { id: "zh", label: "中文 / Mandarin" }, { id: "en", label: "英语 / English" }], localStatus: { status: "missing", runtimeAvailable: true, installed: false, path: "", detail: "", canPrepare: true, modelSource: "huggingface", modelSourceUrl: "https://huggingface.co/OpenMOSS-Team/MOSS-Transcribe-Diarize", modelComponents: [{ role: "model", ref: "OpenMOSS-Team/MOSS-Transcribe-Diarize", url: "https://huggingface.co/OpenMOSS-Team/MOSS-Transcribe-Diarize" }] } },
+              { id: "whisper-large-v3-local", label: "Faster-Whisper large-v3（实验）", envKey: "", note: "OpenAI Whisper 多语种本地识别；CTranslate2 运行时自带 VAD，无说话人分离", supportsSpeaker: false, kind: "local", engine: "whisper", modelRef: "Systran/faster-whisper-large-v3", languages: [{ id: "", label: "自动识别" }, { id: "zh", label: "中文 / Mandarin" }, { id: "en", label: "英语 / English" }], localStatus: { status: "missing", runtimeAvailable: true, installed: false, path: "", detail: "", canPrepare: true, modelSource: "huggingface", modelSourceUrl: "https://huggingface.co/Systran/faster-whisper-large-v3", modelComponents: [{ role: "model", ref: "Systran/faster-whisper-large-v3", url: "https://huggingface.co/Systran/faster-whisper-large-v3" }] } }
             ],
             regions: [],
             languages: [{ id: "", label: "自动识别" }, { id: "zh", label: "中文 / Mandarin" }, { id: "en", label: "英语 / English" }, { id: "ja", label: "日语 / Japanese" }]
@@ -1529,6 +1557,58 @@
     setStatus(t("saved"));
     return result;
   }
+  function localModelComponents(model, status) {
+    if (Array.isArray(status.modelComponents) && status.modelComponents.length) {
+      return status.modelComponents;
+    }
+    const components = [];
+    if (model?.modelRef) components.push({ role: "model", ref: model.modelRef, url: model.modelSourceUrl || "" });
+    for (const ref of model?.requiredModelRefs || []) components.push({ role: "required", ref, url: "" });
+    return components;
+  }
+  function localModelComponentLabel(component) {
+    const ref = String(component?.ref || "");
+    if (component?.role === "model") return t("local_model_component_model");
+    if (/forced[-_ ]?aligner/iu.test(ref)) return t("local_model_component_forced_aligner");
+    if (component?.role === "runtime") return t("local_model_component_runtime");
+    return t("local_model_component_required");
+  }
+  function renderLocalModelGuide(model, status) {
+    const container = $("localModelGuide");
+    if (!container) return;
+    const sourceButton = $("openLocalModelSource");
+    const sourceUrl = String(status.modelSourceUrl || model?.modelSourceUrl || "").trim();
+    sourceButton.classList.toggle("hidden", !sourceUrl);
+    sourceButton.onclick = (event) => {
+      event.preventDefault();
+      if (sourceUrl) void bridge("open_url", { url: sourceUrl });
+    };
+    $("localModelManagedHint").textContent = t("local_model_managed_hint");
+    const list = $("localModelComponents");
+    list.replaceChildren();
+    for (const component of localModelComponents(model, status)) {
+      const ref = String(component?.ref || "").trim();
+      if (!ref) continue;
+      const item = document.createElement("li");
+      item.className = "local-model-component";
+      item.append(document.createTextNode(`${localModelComponentLabel(component)}${t("local_model_component_separator")}`));
+      const code = document.createElement("code");
+      code.textContent = ref;
+      item.append(code);
+      const url = String(component?.url || "").trim();
+      if (url) {
+        const link = document.createElement("button");
+        link.type = "button";
+        link.className = "inline-link";
+        link.textContent = t("local_model_component_source");
+        link.title = t("local_model_open_source_title");
+        link.addEventListener("click", () => { void bridge("open_url", { url }); });
+        item.append(link);
+      }
+      list.append(item);
+    }
+    container.classList.remove("hidden");
+  }
   function renderLocalModelStatus() {
     if (!isLocalProvider()) { $("model").disabled = false; return; }
     const status = localStatus();
@@ -1539,6 +1619,7 @@
     target.textContent = t(preparing ? "local_prepare_running" : key);
     target.className = `local-status ${preparing ? "warn" : (status.status === "installed" ? "ready" : "warn")}`;
     $("localModelHint").textContent = status.detail || t("local_prepare_hint");
+    renderLocalModelGuide(selectedModel(), status);
     $("localModelPath").value = status.path || $("localModelPath").value || "";
     const canPrepare = Boolean(status.canPrepare) && !preparing;
     const button = $("prepareLocalModel");
