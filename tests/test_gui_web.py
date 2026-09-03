@@ -8,6 +8,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from collections.abc import Mapping
 from pathlib import Path
 from types import SimpleNamespace
 from typing import final
