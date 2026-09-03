@@ -675,6 +675,7 @@
     local_runtime_diagnostics_no_report: "请先点击“诊断本地运行环境”。",
     local_runtime_diagnostics_exported: "诊断报告已下载",
     local_runtime_diagnostics_export_failed: "诊断报告导出失败，请重试。",
+    local_runtime_diagnostics_manual_guidance: "手动配置提示：请先导出诊断报告，再按当前模型/后端要求自行核对并配置；MAW 不会自动替换依赖版本。CTranslate2 可能与 Torch 属于独立运行时，请分别核对。",
     local_runtime_diagnostics_status_pass: "正常",
     local_runtime_diagnostics_status_warning: "需留意",
     local_runtime_diagnostics_status_error: "异常",
@@ -840,6 +841,7 @@
     local_runtime_diagnostics_no_report: "Click “Diagnose local runtime” first.",
     local_runtime_diagnostics_exported: "Diagnostic report downloaded",
     local_runtime_diagnostics_export_failed: "The diagnostic report could not be exported. Try again.",
+    local_runtime_diagnostics_manual_guidance: "Manual configuration note: export the diagnostic report, then check and configure the selected model/backend yourself; MAW will not automatically replace dependency versions. CTranslate2 may be independent of Torch, so check them separately.",
     local_runtime_diagnostics_status_pass: "OK",
     local_runtime_diagnostics_status_warning: "Review",
     local_runtime_diagnostics_status_error: "Error",
@@ -1320,6 +1322,7 @@
       local_runtime_missing: "本地模型运行时未安装。请先安装本地 ASR 依赖。",
       local_runtime_install_failed: (detail) => `本地运行环境安装失败：${detail || "请查看日志后重试。"}`,
       local_runtime_cancelled: "本地运行环境安装已取消。",
+      local_windows_nvidia_runtime_failed: "Windows NVIDIA 本地运行环境未能启动；MAW 没有自动替换依赖版本。请查看本地运行环境诊断，并按当前模型/后端要求手动配置。",
       local_model_missing: "尚未检测到本地模型，请先点击“下载模型”或选择已有模型目录。",
       local_model_incomplete: "本地模型不完整，请先准备缺少的模型组件。",
       firered_punc_missing: "FireRed 的 ct-punc 尚未准备，请选择“不使用”或先下载 ct-punc。",
@@ -1397,6 +1400,7 @@
       local_runtime_missing: "The local ASR runtime is not installed. Install the local dependencies first.",
       local_runtime_install_failed: (detail) => `Local runtime installation failed: ${detail || "check the log and retry."}`,
       local_runtime_cancelled: "Local runtime installation was cancelled.",
+      local_windows_nvidia_runtime_failed: "The Windows NVIDIA local runtime failed to start; MAW did not automatically replace dependency versions. Check local runtime diagnostics and manually configure the selected model/backend.",
       local_model_missing: "No local model was detected. Download it or choose an existing model folder.",
       local_model_incomplete: "The local model is incomplete. Prepare the missing components first.",
       firered_punc_missing: "FireRed ct-punc is not ready. Choose \"Do not use\" or download ct-punc first.",
@@ -1483,6 +1487,7 @@
     error_notice_title: "任务未完成",
     error_notice_close: "关闭提示",
     error_open_ffmpeg_settings: "FFmpeg 配置项",
+    error_open_local_runtime_diagnostics: "查看本地运行环境诊断",
     error_open_faq: "查看常见问题",
     error_open_faq_failed: "无法打开常见问题，请查看下方日志。",
     error_open_issue: "打开项目主页",
@@ -1497,6 +1502,7 @@
     error_notice_title: "Task not completed",
     error_notice_close: "Dismiss message",
     error_open_ffmpeg_settings: "FFmpeg settings",
+    error_open_local_runtime_diagnostics: "View local runtime diagnostics",
     error_open_faq: "View FAQ",
     error_open_faq_failed: "Could not open the FAQ. Check the log below.",
     error_open_issue: "Open project homepage",
@@ -2219,6 +2225,10 @@
       notice.dataset.action = "ffmpeg-settings";
       action.textContent = t("error_open_ffmpeg_settings");
       action.classList.remove("hidden");
+    } else if (code === "local_windows_nvidia_runtime_failed") {
+      notice.dataset.action = "local-runtime-diagnostics";
+      action.textContent = t("error_open_local_runtime_diagnostics");
+      action.classList.remove("hidden");
     } else {
       notice.dataset.action = "";
       action.classList.add("hidden");
@@ -2912,6 +2922,18 @@
     const value = String(status || "not_checked");
     return t(`local_runtime_diagnostics_status_${value}`) || value;
   }
+  function diagnosticCodesForReport(report) {
+    const codes = new Set();
+    const runtimes = report && typeof report.runtimes === "object" ? report.runtimes : {};
+    Object.values(runtimes).forEach((runtime) => {
+      if (!runtime || typeof runtime !== "object") return;
+      const diagnostics = Array.isArray(runtime.diagnostics) ? runtime.diagnostics : [];
+      diagnostics.forEach((item) => {
+        if (item && typeof item === "object" && item.code) codes.add(String(item.code));
+      });
+    });
+    return codes;
+  }
   function renderLocalRuntimeDiagnostics() {
     const panel = $("localRuntimeDiagnosticsPanel");
     const diagnose = $("diagnoseLocalRuntime");
@@ -2944,6 +2966,10 @@
     $("localRuntimeDiagnosticsHint").textContent = t("local_runtime_diagnostics_observation");
     const list = $("localRuntimeDiagnosticsList");
     list.replaceChildren();
+    const diagnosticCodes = diagnosticCodesForReport(report);
+    const showWindowsManualGuidance = report.system?.platform === "win32"
+      && ["torch_import_failed", "torch_cuda_handshake_failed", "torch_cuda_unavailable", "ctranslate2_unavailable"]
+        .some((code) => diagnosticCodes.has(code));
     const runtimes = report.runtimes && typeof report.runtimes === "object" ? report.runtimes : {};
     Object.entries(runtimes).forEach(([key, runtime]) => {
       if (!runtime || typeof runtime !== "object") return;
@@ -2974,6 +3000,12 @@
       runtimeItem.append(itemList);
       list.append(runtimeItem);
     });
+    if (showWindowsManualGuidance) {
+      const guidance = document.createElement("li");
+      guidance.className = "runtime-diagnostics-guidance";
+      guidance.textContent = t("local_runtime_diagnostics_manual_guidance");
+      list.append(guidance);
+    }
   }
   async function diagnoseLocalRuntime() {
     if (!isLocalProvider() || state.localRuntimeDiagnosticsRunning) return;
@@ -4774,6 +4806,7 @@
   $("errorNoticeAction").addEventListener("click", () => {
     const action = $("errorNotice").dataset.action;
     if (action === "ffmpeg-settings") openSettings("ffmpegSettingsSection", "ffmpegPath");
+    if (action === "local-runtime-diagnostics") $("localRuntimePanel")?.scrollIntoView({ behavior: "smooth", block: "center" });
   });
   $("provider").addEventListener("change", () => applyProvider(true)); $("model").addEventListener("change", () => { applySelectedModel(true); if (isLocalProvider()) { void refreshLocalRuntime(); void refreshLocalModels(); } }); $("fireRedPunc").addEventListener("change", () => setError("fireRedPunc", "")); $("language").addEventListener("change", () => savePrefsDebounced({ language: languageValue() })); $("audioTrack").addEventListener("change", () => { const value = Number($("audioTrack").value); if (Number.isInteger(value) && value >= 0) state.audioTrack = value; }); $("advancedToggle").addEventListener("click", () => toggle("advancedCard"));
   $("testRun").addEventListener("change", syncTestRun);

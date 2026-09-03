@@ -839,6 +839,75 @@ test('local runtime diagnostics are opt-in, localized, and downloadable without 
   await expect(page.locator('#localRuntimeDiagnosticsList')).toContainText('The runtime was not found.');
 });
 
+test('Windows NVIDIA runtime failures point to diagnostics without bridge actions or CPU fallback', async ({ page }) => {
+  await page.goto(`file://${launcherPath}`);
+  await page.waitForFunction(() => window.MAWLauncher?.config?.postprocessProviders?.length > 0);
+  await page.locator('#provider').selectOption('local');
+  await page.evaluate(() => {
+    window.__localRuntimeDiagnosticsCalls = 0;
+    window.__openedRuntimeFolder = null;
+    window.__runtimePanelScrolls = [];
+    const panel = document.querySelector('#localRuntimePanel');
+    panel.scrollIntoView = (options) => window.__runtimePanelScrolls.push(options);
+    window.MAWLauncher.onBackendEvent({
+      type: 'error',
+      code: 'local_windows_nvidia_runtime_failed',
+      detail: 'CUDA driver failure with sensitive internal detail',
+    });
+  });
+
+  await expect(page.locator('#errorNotice')).toBeVisible();
+  await expect(page.locator('#errorNoticeMessage')).toContainText('Windows NVIDIA 本地运行环境未能启动');
+  await expect(page.locator('#errorNoticeMessage')).toContainText('MAW 没有自动替换依赖版本');
+  await expect(page.locator('#errorNoticeMessage')).not.toContainText('CUDA driver failure');
+  await expect(page.locator('#errorNoticeAction')).toHaveText('查看本地运行环境诊断');
+  await expect(page.locator('#errorNoticeIssue')).toBeHidden();
+
+  await page.locator('#errorNoticeAction').click();
+  await expect.poll(() => page.evaluate(() => window.__runtimePanelScrolls.length)).toBe(1);
+  expect(await page.evaluate(() => window.__runtimePanelScrolls[0])).toEqual({ behavior: 'smooth', block: 'center' });
+  expect(await page.evaluate(() => window.__localRuntimeDiagnosticsCalls || 0)).toBe(0);
+  expect(await page.evaluate(() => window.__openedRuntimeFolder)).toBeNull();
+});
+
+test('Windows runtime diagnostics add manual configuration guidance only for selected codes', async ({ page }) => {
+  await page.goto(`file://${launcherPath}`);
+  await page.waitForFunction(() => window.MAWLauncher?.config?.postprocessProviders?.length > 0);
+  await page.locator('#provider').selectOption('local');
+  const report = (platform) => ({
+    schemaVersion: '1',
+    generatedAt: '2026-01-01T00:00:00Z',
+    system: { platform },
+    summary: { status: 'warning', counts: { warning: 3, error: 1 } },
+    runtimes: {
+      local: {
+        runtimeKey: 'local',
+        status: 'ready',
+        diagnostics: [
+          { status: 'error', code: 'torch_import_failed', message: { zh: 'Torch 无法导入', en: 'Torch import failed' } },
+          { status: 'warning', code: 'torch_cuda_handshake_failed', message: { zh: 'Torch CUDA 握手失败', en: 'Torch CUDA handshake failed' } },
+          { status: 'warning', code: 'torch_cuda_unavailable', message: { zh: 'Torch CUDA 不可用', en: 'Torch CUDA unavailable' } },
+          { status: 'warning', code: 'ctranslate2_unavailable', message: { zh: '组件不可用', en: 'Component unavailable' } },
+        ],
+      },
+    },
+  });
+
+  await page.evaluate((diagnosticReport) => window.MAWLauncher.onBackendEvent({ type: 'localRuntimeDiagnostics', report: diagnosticReport }), report('win32'));
+  const guidance = page.locator('#localRuntimeDiagnosticsList .runtime-diagnostics-guidance');
+  await expect(guidance).toHaveCount(1);
+  await expect(guidance).toContainText('手动配置提示');
+  await expect(guidance).toContainText('MAW 不会自动替换依赖版本');
+  await expect(guidance).toContainText('CTranslate2');
+
+  await page.locator('#langToggle').click();
+  await expect(guidance).toContainText('Manual configuration note');
+  await expect(guidance).toContainText('MAW will not automatically replace dependency versions');
+
+  await page.evaluate((diagnosticReport) => window.MAWLauncher.onBackendEvent({ type: 'localRuntimeDiagnostics', report: diagnosticReport }), report('linux'));
+  await expect(page.locator('#localRuntimeDiagnosticsList .runtime-diagnostics-guidance')).toHaveCount(0);
+});
+
 test('Custom provider labels and missing-key errors follow the selected language', async ({ page }) => {
   await openLauncher(page);
 
