@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import final
 from unittest import mock
 
+from requests.exceptions import HTTPError
+
 from maw.postprocess import (
     FixedProcessRequest,
     LlmPostprocessRequest,
@@ -25,7 +27,7 @@ from maw.postprocess import (
 )
 from maw.postprocess_ffmpeg import AudioTrack, BurnSubtitleRequest, ExtractAudioRequest, FfconcatRequest, parse_ffconcat, probe_audio_tracks, run_burn_subtitles, run_extract_audio, run_ffconcat_rebuild
 from maw.postprocess_io import PostprocessFileError, _atomic_write, read_project, read_srt, render_srt
-from maw.postprocess_llm import LlmClientError, LlmSettings, _chat_endpoint, _models_endpoint, _reasoning_parameters, complete_subtitle_groups, list_llm_models, normalize_reasoning_mode, test_llm_connection as check_llm_connection
+from maw.postprocess_llm import MAX_PROVIDER_DIAGNOSTIC_CHARS, LlmClientError, LlmSettings, _chat_endpoint, _models_endpoint, _reasoning_parameters, complete_subtitle_groups, list_llm_models, normalize_reasoning_mode, test_llm_connection as check_llm_connection
 from maw.project_preview import JsonDict, JsonValue
 from maw.text_conversion import TextConversion
 
@@ -750,6 +752,43 @@ class PostprocessTests(unittest.TestCase):
         self.assertEqual(_chat_endpoint("http://localhost:11434/v1"), "http://localhost:11434/v1/chat/completions")
         with self.assertRaises(LlmClientError):
             _ = _chat_endpoint("http://example.com/v1")
+
+    def test_llm_http_400_is_provider_response_with_bounded_redacted_diagnostic(self) -> None:
+        settings = LlmSettings(
+            provider_id="custom",
+            api_key="sk-test",
+            base_url="https://example.com/v1",
+            model="custom-model",
+        )
+        response = mock.Mock()
+        response.status_code = 400
+        response.json.return_value = {
+            "error": {
+                "message": "invalid request: Bearer bearer-example-secret sk-example-secret " + ("detail " * 100),
+                "code": "invalid_request_error",
+                "prompt": "full subtitle payload that must not be retained",
+            },
+        }
+        response.raise_for_status.side_effect = HTTPError("400 Client Error")
+        session = mock.MagicMock()
+        session.__enter__.return_value = session
+        session.post.return_value = response
+
+        with mock.patch("maw.postprocess_llm.requests.Session", return_value=session):
+            with self.assertRaises(LlmClientError) as raised:
+                _ = complete_subtitle_groups(settings, "Return JSON.", [{"id": "c0001", "text": "原文"}])
+
+        error = raised.exception
+        self.assertEqual(error.category, "provider_response")
+        self.assertEqual(error.status_code, 400)
+        self.assertIn("HTTP 400", str(error))
+        self.assertIn("not a network outage", str(error))
+        self.assertIn("invalid request", error.diagnostic)
+        self.assertNotIn("bearer-example-secret", error.diagnostic)
+        self.assertNotIn("sk-example-secret", error.diagnostic)
+        self.assertNotIn("full subtitle payload", error.diagnostic)
+        self.assertLessEqual(len(error.diagnostic), MAX_PROVIDER_DIAGNOSTIC_CHARS)
+        session.post.assert_called_once()
 
     def test_reasoning_modes_normalize_and_map_by_provider(self) -> None:
         self.assertEqual(LlmSettings("custom", "key", "https://example.com", "local").reasoning_mode, "off")
