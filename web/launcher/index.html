@@ -1369,6 +1369,15 @@
           <button id="refreshLocalRuntime" class="ghost small" type="button" data-i18n="local_refresh">重新扫描</button>
         </div>
         <div id="localRuntimeInventory" class="runtime-inventory hidden" aria-live="polite"></div>
+        <div class="runtime-diagnostics-actions" data-i18n-aria-label="local_runtime_diagnostics_group" aria-label="本地运行环境诊断">
+          <button id="diagnoseLocalRuntime" class="ghost small" type="button" data-i18n="local_runtime_diagnose">诊断本地运行环境</button>
+          <button id="exportLocalRuntimeDiagnostics" class="ghost small" type="button" data-i18n="local_runtime_export_diagnostics" disabled>导出诊断报告</button>
+        </div>
+        <details id="localRuntimeDiagnosticsPanel" class="runtime-diagnostics hidden">
+          <summary id="localRuntimeDiagnosticsSummary" data-i18n="local_runtime_diagnostics_summary">诊断摘要</summary>
+          <p id="localRuntimeDiagnosticsHint" class="hint"></p>
+          <ul id="localRuntimeDiagnosticsList" class="runtime-diagnostics-list"></ul>
+        </details>
         <div id="localRuntimeProgress" class="task-progress hidden" aria-live="polite">
           <div class="task-progress-track"><span id="localRuntimeProgressBar"></span></div>
           <p id="localRuntimeProgressMessage" class="hint"></p>

@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -775,6 +776,49 @@ test('LLM settings refill the saved key and save only after a successful connect
   ]);
   expect(await page.evaluate(() => window.__llmCalls[0].payload.save)).toBe(true);
   await expect(page.locator('#llmApiKey')).toHaveValue('sk-entered-for-test');
+});
+
+test('local runtime diagnostics are opt-in, localized, and downloadable without identity data', async ({ page }) => {
+  await page.goto(`file://${launcherPath}`);
+  await page.waitForFunction(() => window.MAWLauncher?.config?.postprocessProviders?.length > 0);
+  await page.locator('#provider').selectOption('local');
+
+  const diagnose = page.locator('#diagnoseLocalRuntime');
+  const exportButton = page.locator('#exportLocalRuntimeDiagnostics');
+  const panel = page.locator('#localRuntimeDiagnosticsPanel');
+  await expect(diagnose).toBeVisible();
+  await expect(diagnose).toHaveText('诊断本地运行环境');
+  await expect(exportButton).toBeDisabled();
+  await expect(panel).toBeHidden();
+  await expect.poll(() => page.evaluate(() => window.__localRuntimeDiagnosticsCalls || 0)).toBe(0);
+
+  await diagnose.click();
+  await expect.poll(() => page.evaluate(() => window.__localRuntimeDiagnosticsCalls || 0)).toBe(1);
+  await expect(panel).toBeVisible();
+  await expect(page.locator('#localRuntimeDiagnosticsSummary')).toContainText('诊断摘要');
+  await expect(page.locator('#localRuntimeDiagnosticsHint')).toContainText('短探测');
+  await expect(page.locator('#localRuntimeDiagnosticsList')).toContainText('未找到运行环境');
+  await expect(exportButton).toBeEnabled();
+
+  const downloadPromise = page.waitForEvent('download');
+  await exportButton.click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(/^maw-local-runtime-diagnostics-\d{14}\.json$/);
+  const downloadPath = await download.path();
+  expect(downloadPath).toBeTruthy();
+  const rawReport = await readFile(downloadPath, 'utf8');
+  const report = JSON.parse(rawReport);
+  expect(report.schemaVersion).toBe('1');
+  expect(report.pathsRedacted).toBe(true);
+  expect(rawReport).not.toMatch(/https?:\/\//iu);
+  expect(rawReport).not.toMatch(/(?:sk-|api[_-]?key|authorization|traceback)/iu);
+  expect(rawReport).not.toContain('D:\\Users\\Demo');
+
+  await page.locator('#langToggle').click();
+  await expect(diagnose).toHaveText('Diagnose local runtime');
+  await expect(page.locator('#localRuntimeDiagnosticsSummary')).toContainText('Diagnostic summary');
+  await expect(page.locator('#localRuntimeDiagnosticsHint')).toContainText('short probes');
+  await expect(page.locator('#localRuntimeDiagnosticsList')).toContainText('The runtime was not found.');
 });
 
 test('Custom provider labels and missing-key errors follow the selected language', async ({ page }) => {

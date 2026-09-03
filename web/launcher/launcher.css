@@ -809,6 +809,80 @@ label {
   flex: 0 0 auto;
 }
 
+.runtime-diagnostics-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.runtime-diagnostics-actions > button {
+  flex: 0 0 auto;
+}
+
+.runtime-diagnostics {
+  margin-top: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+
+.runtime-diagnostics > summary {
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  list-style-position: inside;
+}
+
+.runtime-diagnostics > summary::marker {
+  color: var(--accent);
+}
+
+.runtime-diagnostics-list {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.runtime-diagnostics-runtime {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.runtime-diagnostics-runtime-title {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.runtime-diagnostics-items {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding-left: 16px;
+}
+
+.runtime-diagnostics-item {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.runtime-diagnostics-item.pass {
+  color: #8ecf9b;
+}
+
+.runtime-diagnostics-item.warning {
+  color: var(--amber-hover);
+}
+
+.runtime-diagnostics-item.error {
+  color: var(--danger, #e58b8b);
+}
+
 .task-progress {
   display: grid;
   gap: 5px;

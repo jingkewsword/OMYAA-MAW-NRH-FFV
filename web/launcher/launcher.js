@@ -649,7 +649,22 @@
     local_runtime_component_missing: "缺失",
     local_runtime_expected: "要求",
     local_runtime_installed: "已安装",
-    local_runtime_unknown: "未知"
+    local_runtime_unknown: "未知",
+    local_runtime_diagnose: "诊断本地运行环境",
+    local_runtime_export_diagnostics: "导出诊断报告",
+    local_runtime_diagnostics_group: "本地运行环境诊断",
+    local_runtime_diagnostics_summary: "诊断摘要",
+    local_runtime_diagnostics_running: "正在检查 local 与 MOSS 运行环境……",
+    local_runtime_diagnostics_ready: "诊断完成；结果是当前观测，不是确定的兼容性结论。",
+    local_runtime_diagnostics_observation: "以下结果来自当前环境的短探测，仅供排查参考，不代表确定的驱动、CUDA 或模型兼容性结论。",
+    local_runtime_diagnostics_no_report: "请先点击“诊断本地运行环境”。",
+    local_runtime_diagnostics_exported: "诊断报告已下载",
+    local_runtime_diagnostics_export_failed: "诊断报告导出失败，请重试。",
+    local_runtime_diagnostics_status_pass: "正常",
+    local_runtime_diagnostics_status_warning: "需留意",
+    local_runtime_diagnostics_status_error: "异常",
+    local_runtime_diagnostics_status_not_checked: "未检查",
+    local_runtime_diagnostics_status_not_applicable: "不适用"
   });
   Object.assign(STRINGS.en, {
     auto_postprocess_title: "3️⃣ Post-transcription processing",
@@ -784,7 +799,22 @@
     local_runtime_component_missing: "Missing",
     local_runtime_expected: "required",
     local_runtime_installed: "installed",
-    local_runtime_unknown: "unknown"
+    local_runtime_unknown: "unknown",
+    local_runtime_diagnose: "Diagnose local runtime",
+    local_runtime_export_diagnostics: "Export diagnostic report",
+    local_runtime_diagnostics_group: "Local runtime diagnostics",
+    local_runtime_diagnostics_summary: "Diagnostic summary",
+    local_runtime_diagnostics_running: "Checking the local and MOSS runtimes…",
+    local_runtime_diagnostics_ready: "Diagnostics complete; these are observations, not compatibility conclusions.",
+    local_runtime_diagnostics_observation: "These results come from short probes of the current environment. They are for troubleshooting only and do not prove driver, CUDA, or model compatibility.",
+    local_runtime_diagnostics_no_report: "Click “Diagnose local runtime” first.",
+    local_runtime_diagnostics_exported: "Diagnostic report downloaded",
+    local_runtime_diagnostics_export_failed: "The diagnostic report could not be exported. Try again.",
+    local_runtime_diagnostics_status_pass: "OK",
+    local_runtime_diagnostics_status_warning: "Review",
+    local_runtime_diagnostics_status_error: "Error",
+    local_runtime_diagnostics_status_not_checked: "Not checked",
+    local_runtime_diagnostics_status_not_applicable: "Not applicable"
   });
   Object.assign(STRINGS.zh, {
     advanced_params: "识别参数",
@@ -1504,7 +1534,7 @@
   const OPENAI_ASR_OFFICIAL_MODEL_IDS = new Set(["whisper-1", "gpt-transcribe", "gpt-4o-transcribe", "gpt-4o-mini-transcribe", "gpt-4o-transcribe-diarize", "whisper-large-v3-turbo", "whisper-large-v3"]);
   const SERVER_STATUS_MONITOR_INTERVAL_MS = 2000;
   const SERVER_STATUS_MONITOR_FAILURE_THRESHOLD = 2;
-  const state = { lang: "zh", serverRunning: false, serverStarting: false, serverStopping: false, serverProjectPath: "", moseStarting: false, running: false, localPreparing: false, localProgressMessage: "", localProgress: null, localModelId: "", localModelPaths: {}, alignmentPreparing: "", alignmentProgressMessage: "", alignmentModelSelection: "", alignmentModelManagementId: "", localRuntimeInstalling: false, localRuntimeProgress: 0, localRuntimeProgressMessage: "", localRuntimeInventoryOpen: false, localRuntimeInventory: null, localRuntimeInventoryError: "", ocrRuntimeInstalling: false, ocrRuntimeProgress: 0, ocrRuntimeProgressMessage: "", lastLogMessage: "", result: null, errorReport: null, errorCopyTimer: 0, config: null, srtAuto: true, testSuffixAdded: false, serverMediaOk: false, detectedServerUrl: "", dropTarget: "", theme: "system", toolboxBusy: false, toolboxOpen: false, audioTracks: [], audioTrack: null, audioTrackPath: "", audioTrackProbeToken: 0, audioTrackProbeTimer: 0, batchNotification: null };
+  const state = { lang: "zh", serverRunning: false, serverStarting: false, serverStopping: false, serverProjectPath: "", moseStarting: false, running: false, localPreparing: false, localProgressMessage: "", localProgress: null, localModelId: "", localModelPaths: {}, alignmentPreparing: "", alignmentProgressMessage: "", alignmentModelSelection: "", alignmentModelManagementId: "", localRuntimeDiagnostics: null, localRuntimeDiagnosticsRunning: false, localRuntimeInstalling: false, localRuntimeProgress: 0, localRuntimeProgressMessage: "", localRuntimeInventoryOpen: false, localRuntimeInventory: null, localRuntimeInventoryError: "", ocrRuntimeInstalling: false, ocrRuntimeProgress: 0, ocrRuntimeProgressMessage: "", lastLogMessage: "", result: null, errorReport: null, errorCopyTimer: 0, config: null, srtAuto: true, testSuffixAdded: false, serverMediaOk: false, detectedServerUrl: "", dropTarget: "", theme: "system", toolboxBusy: false, toolboxOpen: false, audioTracks: [], audioTrack: null, audioTrackPath: "", audioTrackProbeToken: 0, audioTrackProbeTimer: 0, batchNotification: null };
   const dragState = { depth: 0 };
   let api = null;
   let prefsTimer = 0;
@@ -1542,6 +1572,20 @@
       { id: "qwen3-forced-aligner-0.6b", modelId: "qwen3-forced-aligner-0.6b", engine: "qwen", modelRef: "Qwen/Qwen3-ForcedAligner-0.6B", label: "Qwen3-ForcedAligner 0.6B", note: "文本 + 音频输入，输出字词级时间码；复用 Qwen Local Hugging Face 缓存", estimatedSize: "1.7G+", deviceSupport: "gpu_preferred", resourceLevel: "medium", supportsWordTimestamps: true, installed: false, status: "missing", runtimeAvailable: false, detail: "" },
       { id: "firered-asr2-ctc", modelId: "firered-asr2-ctc", engine: "firered", modelRef: "sherpa-onnx-fire-red-asr2-ctc-zh_en-int8-2026-02-25", label: "FireRedASR2-CTC", note: "已知稿对齐；中英及多方言；CPU 可运行；字词时间码", estimatedSize: "0.9G", deviceSupport: "cpu", resourceLevel: "low", supportsWordTimestamps: true, installed: false, status: "missing", runtimeAvailable: false, detail: "" },
     ];
+    const mockDiagnosticItem = (id, code, status, zh, en) => ({ id, code, status, message: { zh, en }, note: { zh, en } });
+    const mockDiagnosticReport = () => ({
+      schemaVersion: "1",
+      generatedAt: "2026-01-01T00:00:00Z",
+      application: { name: "MAW Launcher", version: "1.5.3" },
+      system: { platform: "mock", os: "browser", architecture: "unknown", pythonVersion: "unknown" },
+      gpu: { status: "warning", code: "gpu_not_detected", available: false, detected: false, nvidiaSmiAvailable: false, names: [], name: "", observedReason: "mock", note: { zh: "演示模式未执行 GPU 探测。", en: "GPU probing is not run in demo mode." } },
+      runtimes: {
+        local: { runtimeKey: "local", status: state.config?.localRuntime?.status || "missing", ready: Boolean(state.config?.localRuntime?.ready), path: "<user-home>\\AppData\\Local\\MAW\\local-runtime", runtimePath: "<user-home>\\AppData\\Local\\MAW\\local-runtime", pythonPath: "", configuredRuntimeVersion: "6", runtimeVersion: "6", torchVersion: null, torchCudaVersion: null, torchCudaAvailable: null, torchDeviceCount: null, ctranslate2: { status: "not_checked", code: "runtime_missing", version: null, imported: false }, fasterWhisper: { status: "not_checked", code: "runtime_missing", version: null, imported: false }, diagnostics: [mockDiagnosticItem("runtime", "runtime_missing", "error", "未找到运行环境。", "The runtime was not found."), mockDiagnosticItem("gpu", "gpu_not_detected", "warning", "未探测到可用 GPU；这只是演示模式结果。", "No usable GPU was detected; this is a demo-mode result.")] },
+        moss: { runtimeKey: "moss", status: "missing", ready: false, path: "<user-home>\\AppData\\Local\\MAW\\local-runtime-moss", runtimePath: "<user-home>\\AppData\\Local\\MAW\\local-runtime-moss", pythonPath: "", configuredRuntimeVersion: "1", runtimeVersion: "1", torchVersion: null, torchCudaVersion: null, torchCudaAvailable: null, torchDeviceCount: null, diagnostics: [mockDiagnosticItem("runtime", "runtime_missing", "error", "未找到运行环境。", "The runtime was not found."), mockDiagnosticItem("gpu", "gpu_not_detected", "warning", "未探测到可用 GPU；这只是演示模式结果。", "No usable GPU was detected; this is a demo-mode result.")] }
+      },
+      summary: { status: "warning", counts: { pass: 0, warning: 2, error: 2, not_checked: 0, not_applicable: 0 } },
+      pathsRedacted: true,
+    });
     return {
       get_config: async () => ({
         platform: /^Mac/u.test(navigator.platform) ? "darwin" : "win32",
@@ -1730,6 +1774,7 @@
         const components = ["faster_whisper", "funasr", "qwen_asr", "jieba", "torch", "torchaudio", "quapeaks", "sherpa_onnx", "soundfile"].map((name) => ({ name, required: true, installed }));
         return { ok: true, ...runtime, inventory: { status: runtime.status || "missing", ready: installed, runtimeVersionExpected: "7", runtimeVersionInstalled: installed ? (runtime.runtimeVersion || "7") : "", pythonVersionExpected: "3.11", pythonVersionInstalled: installed ? "3.11" : "", manifestStatus: installed ? "ready" : "", installedAt: installed ? Math.floor(Date.now() / 1000) : 0, components } };
       },
+      get_local_runtime_diagnostics: async () => { window.__localRuntimeDiagnosticsCalls = (window.__localRuntimeDiagnosticsCalls || 0) + 1; return { ok: true, report: mockDiagnosticReport() }; },
       install_local_runtime: async () => { state.config.localRuntime = { status: "ready", ready: true, path: "D:\\Users\\Demo\\AppData\\Local\\MAW\\local-runtime", detail: "本地运行环境已就绪。" }; setTimeout(() => window.MAWLauncher.onBackendEvent({ type: "localRuntimeReady", runtime: state.config.localRuntime }), 400); return { ok: true, installing: true }; },
        cancel_local_runtime: async () => ({ ok: true }),
        get_alignment_models: async () => ({ ok: true, runtime: state.config?.localRuntime || {}, modelCacheRoot: state.config?.modelCacheRoot || "D:\\Models\\MAW", models: alignmentModels.map((model) => ({ ...model, runtimeAvailable: Boolean(state.config?.localRuntime?.ready) })) }),
@@ -2829,6 +2874,119 @@
     const detail = runtimeHintText(runtime, "local_runtime_ready_hint", "local_runtime_hint");
     if (detail) appendMessageText(container, detail);
   }
+  function localizeDiagnostic(value) {
+    if (value && typeof value === "object") return String(value[state.lang] || value.en || value.zh || "");
+    return String(value || "");
+  }
+  function diagnosticStatusLabel(status) {
+    const value = String(status || "not_checked");
+    return t(`local_runtime_diagnostics_status_${value}`) || value;
+  }
+  function renderLocalRuntimeDiagnostics() {
+    const panel = $("localRuntimeDiagnosticsPanel");
+    const diagnose = $("diagnoseLocalRuntime");
+    const exportButton = $("exportLocalRuntimeDiagnostics");
+    if (!panel || !diagnose || !exportButton) return;
+    const report = state.localRuntimeDiagnostics;
+    const running = Boolean(state.localRuntimeDiagnosticsRunning);
+    diagnose.disabled = running;
+    exportButton.disabled = running || !report;
+    if (running) {
+      panel.classList.remove("hidden");
+      panel.open = true;
+      $("localRuntimeDiagnosticsSummary").textContent = t("local_runtime_diagnostics_summary");
+      $("localRuntimeDiagnosticsHint").textContent = t("local_runtime_diagnostics_running");
+      $("localRuntimeDiagnosticsList").replaceChildren();
+      return;
+    }
+    if (!report || typeof report !== "object") {
+      panel.classList.add("hidden");
+      $("localRuntimeDiagnosticsList").replaceChildren();
+      return;
+    }
+    panel.classList.remove("hidden");
+    panel.open = true;
+    const summary = report.summary || {};
+    const counts = summary.counts || {};
+    const total = Object.values(counts).reduce((sum, value) => sum + Number(value || 0), 0);
+    const status = diagnosticStatusLabel(summary.status || "not_checked");
+    $("localRuntimeDiagnosticsSummary").textContent = `${t("local_runtime_diagnostics_summary")} · ${status}${total ? ` · ${total}` : ""}`;
+    $("localRuntimeDiagnosticsHint").textContent = t("local_runtime_diagnostics_observation");
+    const list = $("localRuntimeDiagnosticsList");
+    list.replaceChildren();
+    const runtimes = report.runtimes && typeof report.runtimes === "object" ? report.runtimes : {};
+    Object.entries(runtimes).forEach(([key, runtime]) => {
+      if (!runtime || typeof runtime !== "object") return;
+      const runtimeItem = document.createElement("li");
+      runtimeItem.className = "runtime-diagnostics-runtime";
+      const title = document.createElement("strong");
+      title.className = "runtime-diagnostics-runtime-title";
+      title.textContent = `${String(runtime.runtimeKey || key)} · ${diagnosticStatusLabel(runtime.status === "ready" ? "pass" : (runtime.status === "missing" ? "error" : "warning"))}`;
+      runtimeItem.append(title);
+      const itemList = document.createElement("ul");
+      itemList.className = "runtime-diagnostics-items";
+      const diagnostics = Array.isArray(runtime.diagnostics) ? runtime.diagnostics : [];
+      diagnostics.forEach((item) => {
+        if (!item || typeof item !== "object") return;
+        const row = document.createElement("li");
+        const rowStatus = String(item.status || "not_checked");
+        row.className = `runtime-diagnostics-item ${rowStatus}`;
+        const message = localizeDiagnostic(item.message || item.note) || String(item.code || "");
+        row.textContent = `${message} (${diagnosticStatusLabel(rowStatus)})`;
+        itemList.append(row);
+      });
+      if (!diagnostics.length) {
+        const row = document.createElement("li");
+        row.className = "runtime-diagnostics-item not_checked";
+        row.textContent = t("local_runtime_diagnostics_no_report");
+        itemList.append(row);
+      }
+      runtimeItem.append(itemList);
+      list.append(runtimeItem);
+    });
+  }
+  async function diagnoseLocalRuntime() {
+    if (!isLocalProvider() || state.localRuntimeDiagnosticsRunning) return;
+    state.localRuntimeDiagnosticsRunning = true;
+    renderLocalRuntimeDiagnostics();
+    const result = await bridge("get_local_runtime_diagnostics");
+    state.localRuntimeDiagnosticsRunning = false;
+    if (!result.ok) {
+      renderLocalRuntimeDiagnostics();
+      applyErrorResult(result);
+      return result;
+    }
+    state.localRuntimeDiagnostics = result.report || result;
+    renderLocalRuntimeDiagnostics();
+    setStatus(t("local_runtime_diagnostics_ready"));
+    return result;
+  }
+  function exportLocalRuntimeDiagnostics() {
+    const report = state.localRuntimeDiagnostics;
+    if (!report) {
+      setStatus(t("local_runtime_diagnostics_no_report"));
+      return false;
+    }
+    try {
+      const text = `${JSON.stringify(report, null, 2)}\n`;
+      const blob = new Blob([text], { type: "application/json" });
+      const objectUrl = URL.createObjectURL(blob);
+      const stamp = String(report.generatedAt || "").replace(/[^0-9]/gu, "").slice(0, 14) || "report";
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = `maw-local-runtime-diagnostics-${stamp}.json`;
+      link.rel = "noopener";
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+      setStatus(t("local_runtime_diagnostics_exported"));
+      return true;
+    } catch (error) {
+      setStatus(t("local_runtime_diagnostics_export_failed"));
+      return false;
+    }
+  }
   function renderLocalRuntime() {
     if (!isLocalProvider()) return;
     const runtime = state.config.localRuntime || {};
@@ -2857,6 +3015,7 @@
     $("localRuntimeProgressBar").style.width = `${Math.max(0, Math.min(100, state.localRuntimeProgress))}%`;
     $("localRuntimeProgressMessage").textContent = state.localRuntimeProgressMessage || "";
     renderLocalRuntimeInventory();
+    renderLocalRuntimeDiagnostics();
   }
   function renderOcrRuntime() {
     const runtime = state.config?.ocrRuntime || {};
@@ -4397,6 +4556,12 @@
         appendLog(t("local_runtime_cancelled"));
       }
     }
+    if (event.type === "localRuntimeDiagnostics" && event.report) {
+      state.localRuntimeDiagnosticsRunning = false;
+      state.localRuntimeDiagnostics = event.report;
+      renderLocalRuntimeDiagnostics();
+      setStatus(t("local_runtime_diagnostics_ready"));
+    }
     if (event.type === "ocrRuntimeProgress") {
       const runtime = state.config?.ocrRuntime || {};
       if (state.ocrRuntimeInstalling || runtime.status === "installing") {
@@ -4597,6 +4762,8 @@
       setStatus(t("alignment_model_ready"));
     }
   });
+  $("diagnoseLocalRuntime").addEventListener("click", () => { void diagnoseLocalRuntime(); });
+  $("exportLocalRuntimeDiagnostics").addEventListener("click", () => { exportLocalRuntimeDiagnostics(); });
   $("ffmpegHelp").addEventListener("click", () => bridge("open_url", { url: "https://ffmpeg.org/download.html" }));
   $("settingsButton").addEventListener("click", openSettings); $("settingsClose").addEventListener("click", closeSettings); $("settingsBackdrop").addEventListener("click", closeSettings); document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeSettings(); });
   $("batchConfirmYes").addEventListener("click", () => finishConfirm(true)); $("batchConfirmNo").addEventListener("click", () => finishConfirm(false));
