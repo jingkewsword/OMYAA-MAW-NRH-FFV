@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import final
 from unittest import mock
 
-from requests.exceptions import HTTPError
+from requests.exceptions import HTTPError, RequestException
 
 from maw.postprocess import (
     FixedProcessRequest,
@@ -788,6 +788,39 @@ class PostprocessTests(unittest.TestCase):
         self.assertNotIn("sk-example-secret", error.diagnostic)
         self.assertNotIn("full subtitle payload", error.diagnostic)
         self.assertLessEqual(len(error.diagnostic), MAX_PROVIDER_DIAGNOSTIC_CHARS)
+        session.post.assert_called_once()
+
+    def test_llm_network_error_redacts_endpoint_and_authorization(self) -> None:
+        settings = LlmSettings(
+            provider_id="custom",
+            api_key="api-key-secret",
+            base_url="https://api.example.test/v1",
+            model="custom-model",
+        )
+        transport_error = RequestException(
+            "request failed for https://api.example.test/v1/chat/completions?api_key=query-secret "
+            "Authorization: Bearer bearer-secret token=token-secret"
+        )
+        session = mock.MagicMock()
+        session.__enter__.return_value = session
+        session.post.side_effect = transport_error
+
+        with mock.patch("maw.postprocess_llm.requests.Session", return_value=session):
+            with self.assertRaises(LlmClientError) as raised:
+                _ = complete_subtitle_groups(settings, "Return JSON.", [{"id": "c0001", "text": "原文"}])
+
+        error = raised.exception
+        self.assertEqual(error.category, "network")
+        for secret in (
+            "api-key-secret",
+            "https://api.example.test/v1/chat/completions?api_key=query-secret",
+            "query-secret",
+            "bearer-secret",
+            "token-secret",
+        ):
+            self.assertNotIn(secret, str(error))
+            self.assertNotIn(secret, error.diagnostic)
+        self.assertIn("network request failed", str(error))
         session.post.assert_called_once()
 
     def test_reasoning_modes_normalize_and_map_by_provider(self) -> None:
