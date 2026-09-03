@@ -1240,6 +1240,20 @@
         </div>
         <div id="localModelList" class="local-model-list" role="list" data-i18n-aria-label="local_model_list_label" aria-label="本地模型列表"></div>
         <div id="localModelDetails" class="local-model-panel">
+        <div id="localModelGuide" class="local-model-guide">
+          <div class="local-model-guide-header">
+            <strong data-i18n="local_model_guide_title">准备此模型</strong>
+            <button id="openLocalModelSource" class="inline-link" type="button" data-i18n="local_model_open_source" data-i18n-title="local_model_open_source_title">打开官方模型页 ↗</button>
+          </div>
+          <p id="localModelManagedHint" class="hint"></p>
+          <p id="localModelManualHint" class="hint" data-i18n="local_model_manual_hint">也可以从官方模型页下载与当前模型完全对应的目录，再选择该目录；不保证任意权重、第三方改版或本地 HTTP 服务。</p>
+          <div class="local-model-components">
+            <strong data-i18n="local_model_components_title">必需组件</strong>
+            <ul id="localModelComponents"></ul>
+          </div>
+          <p class="hint" data-i18n="local_model_no_http">本地推理直接由 MAW 或其独立运行环境执行，不需要 API Key 或本地 HTTP 端口。</p>
+        </div>
+
           <div class="field">
             <label for="localModelPath" data-i18n="local_model_path">已有模型目录（可选）</label>
             <div class="path-row">

@@ -56,16 +56,11 @@ Launcher 工具箱的「生成时间码」可处理 `.srt`、`.mosp` 或 `.json`
 
 faster-whisper 使用 CTranslate2 运行时实现 OpenAI Whisper 模型，自带 Silero VAD、30 秒滑动窗口和词级时间戳，长音频由上游内部处理，MAW 不再分块（`--batch-size-s` 对该引擎无效）。MAW 固定开启词级时间戳与 VAD 过滤并关闭跨段上下文（避免一句幻觉污染后续字幕），词级秒级时间戳会归一化为 MAW 要求的整数毫秒；句段拆分交给与 Qwen 路径相同的统一切句逻辑。
 
-CLI 默认模型为 `large-v3`（对应 Hugging Face Hub 的 Systran CTranslate2 版本），也可以使用 `small`、`turbo`、`distil-large-v3` 等名称或已转换好的本地 CTranslate2 目录：
+CLI 默认模型为 `large-v3`（对应 Hugging Face Hub 的 Systran CTranslate2 版本）。CLI 仍保留 `--model` / `--model-path` 低层参数供开发者试验其他已转换目录；这些参数不扩大 Launcher 的正式支持范围，也不保证任意 Whisper 权重或格式：
 
 ```powershell
 uv run python generate_subtitle_local.py "D:\Videos\example.mp4" `
   --engine whisper --length-limit 30s --json
-```
-
-```powershell
-uv run python generate_subtitle_local.py "D:\Videos\example.mp4" `
-  --engine whisper --model large-v3-turbo --language zh --length-limit 30s --json
 ```
 
 热词通过 faster-whisper 的 `hotwords` 参数注入 decoder prompt，与 Qwen 路径的 context 提示类似，是提示而非保证命中的硬约束。按模型 ID 加载时同样遵循 `MAW_MODEL_CACHE_ROOT` 统一缓存根目录。该引擎不提供说话人分离（多人场景请用 MOSS）；GPU 推理需要用户自行安装 CUDA 12 与 cuDNN 9 库（CTranslate2 不复用 Torch 自带的 CUDA 依赖），设备选择为“自动”时如果 CUDA 运行库不可用会自动回退到 CPU，显式选择 CUDA 则保留错误。无 GPU 时以 int8 精度运行 CPU。Whisper 的词级时间戳来自交叉注意力对齐，精度低于 Qwen 的 Forced Aligner，静音处偶发幻觉属于上游已知行为；中文等非拉丁语言的验收请先用自己的音频进行。
