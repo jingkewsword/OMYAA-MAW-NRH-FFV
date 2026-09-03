@@ -69,6 +69,7 @@ from maw.output_naming import format_elapsed, maw_root
 from maw.local_log import LocalLogSink, TeeWriter, default_log_directory, install_stdio_tee, redact_sensitive_text
 from maw.local_debug import local_debug_manifest_path
 from maw.alignment_models import ALIGNMENT_MODELS, alignment_model_by_id, alignment_models_payload, inspect_alignment_model, normalize_alignment_model_id
+from maw.local_runtime_diagnostics import collect_runtime_diagnostics
 from maw.local_runtime import (
     LocalRuntimeCancelled,
     LocalRuntimeError,
@@ -2865,6 +2866,23 @@ class LauncherApi:
             **status.to_payload(),
             "inventory": local_runtime_inventory(model_cache_root),
         }
+
+    def get_local_runtime_diagnostics(self, _payload: Mapping[str, object] | None = None) -> dict[str, object]:
+        """Return a read-only, redacted diagnostic report for local and MOSS runtimes.
+
+        Optional Torch/CTranslate2 imports run in their managed Python probe
+        with short timeouts.  The diagnostics module converts probe failures
+        into structured codes, so this bridge method never exposes command
+        output or an exception traceback to the web UI.
+        """
+        config = effective_config(self.paths.env_path)
+        report = collect_runtime_diagnostics(
+            model_cache_root=config.model_cache_root,
+            app_version=_app_version(self.paths),
+        )
+        # Keep the report at the top level for simple pywebview callers and
+        # also provide a named field for clients that expect an API envelope.
+        return {"ok": True, **report, "report": report}
 
     def get_ocr_runtime(self, _payload: Mapping[str, object] | None = None) -> dict[str, object]:
         status = self._ocr_runtime_status()
