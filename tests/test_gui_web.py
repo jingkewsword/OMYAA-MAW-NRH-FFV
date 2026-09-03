@@ -1050,6 +1050,36 @@ class GuiWebBridgeTests(unittest.TestCase):
         self.assertIn("not a network outage", str(result["detail"]))
         self.assertNotIn("sk-test", str(result))
 
+    def test_llm_network_bridge_redacts_endpoint_and_authorization(self) -> None:
+        provider_error = LlmClientError(
+            "LLM network request failed for https://api.example.test/v1/chat/completions?api_key=query-secret "
+            "Authorization: Bearer bearer-secret token=token-secret",
+            category="network",
+            diagnostic="https://api.example.test/v1?api_key=query-secret Bearer bearer-secret token=token-secret",
+        )
+        with mock.patch("maw.gui_web.process_llm_postprocess", side_effect=provider_error):
+            result = self.api.run_llm_postprocess({
+                "operation": "proofread",
+                "providerId": "custom",
+                "apiKey": "api-key-secret",
+                "baseUrl": "https://api.example.test/v1?api_key=query-secret",
+                "model": "custom-model",
+                "customPrompt": "",
+            })
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["code"], "postprocess_failed")
+        for secret in (
+            "api-key-secret",
+            "https://api.example.test/v1/chat/completions?api_key=query-secret",
+            "https://api.example.test/v1?api_key=query-secret",
+            "query-secret",
+            "bearer-secret",
+            "token-secret",
+        ):
+            self.assertNotIn(secret, str(result))
+        self.assertEqual(result["detail"], result["error"])
+
     def test_llm_custom_bridge_rejects_empty_prompt_before_provider_call(self) -> None:
         with mock.patch("maw.gui_web.complete_subtitle_groups") as complete:
             result = self.api.run_llm_postprocess({
