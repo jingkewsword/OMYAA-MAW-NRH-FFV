@@ -780,7 +780,8 @@
       soniox_context_too_long: "Soniox 上下文约限制为 10000 个字符。",
       soniox_context_invalid: "Soniox 上下文格式不正确，请检查高级设置中的填写格式。",
       postprocess_config_invalid: (detail) => `自动后处理配置不完整：${detail || "请打开工具箱完成配置。"}`,
-      postprocess_failed: (detail) => `转写已完成，但自动后处理失败：${detail || "请查看日志。"}`,
+      postprocess_provider_response: (detail) => `后处理服务已返回 HTTP 错误，这不是网络中断；原始转写仍然保留，可从失败步骤重试。${detail ? ` 详细信息：${detail}` : ""}`,
+      postprocess_failed: (detail) => `转写已完成，但自动后处理失败；原始转写仍然保留，可从失败步骤重试：${detail || "请查看日志。"}`,
       postprocess_cancelled: "自动后处理已取消，原始转写产物仍然保留。",
       waveform_unavailable: (detail) => `无法从该媒体生成可用波形：${detail || "请检查 FFmpeg 和媒体文件。"}`,
       waveform_generation_failed: (detail) => `波形工程生成失败：${detail || "请检查媒体与输出目录权限。"}`,
@@ -830,6 +831,7 @@
       context_too_long: "Qwen-Audio context is limited to 400 characters.",
       soniox_context_too_long: "Soniox context is limited to approximately 10,000 characters.",
       postprocess_config_invalid: (detail) => `Automatic post-processing is not configured: ${detail || "open the toolbox to finish setup."}`,
+      postprocess_provider_response: (detail) => `The post-processing provider returned an HTTP error; this is not a network outage. The original transcription remains available, and you can retry from the failed step.${detail ? ` Details: ${detail}` : ""}`,
       waveform_unavailable: (detail) => `No usable waveform could be generated: ${detail || "check FFmpeg and the media file."}`,
       waveform_generation_failed: (detail) => `Waveform project generation failed: ${detail || "check the media and output-folder permissions."}`,
       media_tool_busy: "Another media operation is already running. Please wait for it to finish.",
@@ -837,7 +839,7 @@
       media_tool_failed: (detail) => `Media operation failed: ${detail || "check FFmpeg and the input file."}`,
       audio_track_invalid: "The selected audio track is invalid. Choose it again.",
       audio_tracks_missing: "No usable audio tracks were found.",
-      postprocess_failed: (detail) => `Transcription completed, but automatic post-processing failed: ${detail || "check the log."}`,
+      postprocess_failed: (detail) => `Transcription completed, but automatic post-processing failed. The original transcription remains available, and you can retry from the failed step.${detail ? ` Details: ${detail}` : ""}`,
       postprocess_cancelled: "Automatic post-processing was cancelled; the original transcription remains available.",
       soniox_context_invalid: "Soniox context format is invalid. Check the Advanced options format.",
       hotwords_file_missing: "Choose an existing UTF-8 .txt hotword file.",
@@ -1990,6 +1992,9 @@
     if (event.type === "error") {
       setRunning(false);
       $("retryPostprocess")?.classList.toggle("hidden", !event.canRetry);
+      if (event.originalSrtPath) $("srtPath").value = String(event.originalSrtPath);
+      if (event.originalProjectPath) $("jsonPath").value = String(event.originalProjectPath);
+      if (event.originalSrtPath || event.originalProjectPath) $("openFolder")?.classList.remove("hidden");
       const detail = event.detail || event.message || "";
       const message = event.code ? errText(event.code, detail) : detail || t("failed");
       // 友好提示归错误卡片、status 与复制报告的结构化字段所有；日志只保留后端原始 detail。
