@@ -8,6 +8,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from collections.abc import Mapping
 from pathlib import Path
 from types import SimpleNamespace
 from typing import final
@@ -25,6 +26,7 @@ from maw.local_log import LocalLogSink, TeeWriter  # noqa: E402
 from maw.local_models import LocalModelStatus  # noqa: E402
 from maw.ocr_runtime import OcrRuntimeCancelled  # noqa: E402
 from maw.postprocess_llm import LlmClientError  # noqa: E402
+from maw.postprocess_pipeline import PostprocessPipelineError  # noqa: E402
 from maw.runtime_manifest import STATUS_INSTALLING, write_runtime_manifest  # noqa: E402
 from maw.runtimes import OCR  # noqa: E402
 from maw.runtimes.base import RuntimeStatus  # noqa: E402
@@ -1023,6 +1025,30 @@ class GuiWebBridgeTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         request = process.call_args.args[0]
         self.assertTrue(request.merge_bilingual)
+
+    def test_llm_bridge_classifies_provider_http_error_without_exposing_secrets(self) -> None:
+        provider_error = LlmClientError(
+            "LLM provider returned HTTP 400: invalid request. This is a provider response, not a network outage.",
+            category="provider_response",
+            status_code=400,
+            diagnostic="invalid request",
+        )
+        with mock.patch("maw.gui_web.process_llm_postprocess", side_effect=provider_error):
+            result = self.api.run_llm_postprocess({
+                "operation": "proofread",
+                "providerId": "deepseek",
+                "apiKey": "sk-test",
+                "baseUrl": "https://api.deepseek.com",
+                "model": "deepseek-chat",
+                "customPrompt": "",
+            })
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["code"], "postprocess_provider_response")
+        self.assertEqual(result["httpStatus"], 400)
+        self.assertEqual(result["diagnostic"], "invalid request")
+        self.assertIn("not a network outage", str(result["detail"]))
+        self.assertNotIn("sk-test", str(result))
 
     def test_llm_custom_bridge_rejects_empty_prompt_before_provider_call(self) -> None:
         with mock.patch("maw.gui_web.complete_subtitle_groups") as complete:
@@ -2630,6 +2656,49 @@ class GuiWebBridgeTests(unittest.TestCase):
         self.assertIn('"type": "error"', event_script)
         self.assertIn('"code": "transcription_cancelled"', event_script)
         self.assertNotIn('"code": "transcription_failed"', event_script)
+
+    def test_worker_exposes_retry_and_original_transcription_for_provider_failure(self) -> None:
+        request = TranscriptionRequest(
+            media_path=self.root / "clip.wav",
+            srt_path=self.root / "clip.srt",
+            postprocess_plan={"enabled": True},
+            postprocess_llm_settings={"deepseek": {"apiKey": "key", "baseUrl": "https://example.test", "model": "model", "verified": "1"}},
+        )
+        result = TranscriptionResult(
+            srt_path=self.root / "clip.srt",
+            json_path=self.root / "clip.mosp",
+            html_path=None,
+        )
+        failure = PostprocessPipelineError(
+            "后处理步骤 translate 失败：LLM provider returned HTTP 400: invalid request. This is a provider response, not a network outage.",
+            run_directory=self.root / "MAW-Postprocess" / "run",
+            failed_index=0,
+            current_project=result.json_path,
+            current_srt=result.srt_path,
+            completed_steps=(),
+            failed_step="translate",
+            cause=LlmClientError(
+                "LLM provider returned HTTP 400: invalid request. This is a provider response, not a network outage.",
+                category="provider_response",
+                status_code=400,
+                diagnostic="invalid request",
+            ),
+        )
+
+        with (
+            mock.patch("maw.gui_web.run_transcription", return_value=result),
+            mock.patch("maw.gui_web.run_postprocess_pipeline", side_effect=failure),
+        ):
+            self.api._worker_main(request, threading.Event())
+
+        self.assertTrue(self.window.scripts)
+        event_script = self.window.scripts[-1]
+        self.assertIn('"code": "postprocess_provider_response"', event_script)
+        self.assertIn('"canRetry": true', event_script)
+        self.assertIn('"failedStep": "translate"', event_script)
+        self.assertIn('"httpStatus": 400', event_script)
+        self.assertIn(str(result.json_path).replace("\\", "\\\\"), event_script)
+        self.assertIn(str(result.srt_path).replace("\\", "\\\\"), event_script)
 
     def test_worker_emits_retryable_error_for_ffmpeg_start_failure(self) -> None:
         request = TranscriptionRequest(

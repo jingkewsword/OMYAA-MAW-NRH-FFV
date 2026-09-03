@@ -255,6 +255,27 @@ test('runtime errors show an actionable notice outside the log', async ({ page }
   await expect(page.locator('#status')).toContainText('未找到 FFmpeg / FFprobe');
 });
 
+test('provider HTTP failures keep retry guidance and original transcription discoverable', async ({ page }) => {
+  await openLauncher(page);
+  await page.evaluate(() => window.MAWLauncher.onBackendEvent({
+    type: 'error',
+    code: 'postprocess_provider_response',
+    detail: '后处理步骤 translate 失败：LLM provider returned HTTP 400: invalid request. This is a provider response, not a network outage.',
+    canRetry: true,
+    failedStep: 'translate',
+    originalSrtPath: 'D:\\Demo\\clip.srt',
+    originalProjectPath: 'D:\\Demo\\clip.mosp',
+  }));
+
+  await expect(page.locator('#errorNotice')).toBeVisible();
+  await expect(page.locator('#errorNoticeMessage')).toContainText('这不是网络中断');
+  await expect(page.locator('#errorNoticeMessage')).toContainText('原始转写仍然保留');
+  await expect(page.locator('#retryPostprocess')).toBeVisible();
+  await expect(page.locator('#openFolder')).toBeVisible();
+  await expect(page.locator('#srtPath')).toHaveValue('D:\\Demo\\clip.srt');
+  await expect(page.locator('#jsonPath')).toHaveValue('D:\\Demo\\clip.mosp');
+});
+
 test('error notice and status remain above the fixed footer at desktop and narrow widths', async ({ page }) => {
   const measure = () => page.evaluate(() => {
     const box = (selector) => {
