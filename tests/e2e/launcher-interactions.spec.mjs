@@ -20,6 +20,24 @@ async function runReplacement(page, { outputMode = 'both' } = {}) {
   await expect(page.locator('.toolbox-chain-item')).toHaveCount(previousCount + 1);
 }
 
+test('local model settings explain managed and manual preparation', async ({ page }) => {
+  await page.goto(`file://${launcherPath}`);
+  await page.waitForFunction(() => window.MAWLauncher?.config?.postprocessProviders?.length > 0);
+
+  await page.locator('#provider').selectOption('local');
+  await expect(page.locator('#localModelPanel')).toBeVisible();
+  await expect(page.locator('#localModelGuide')).toBeVisible();
+  await expect(page.locator('#localModelManagedHint')).toContainText('安装本地模型支持');
+  await expect(page.locator('#localModelManualHint')).toContainText('任意权重');
+  await expect(page.locator('#localModelComponents')).toContainText('Qwen/Qwen3-ASR-0.6B');
+  await expect(page.locator('#localModelComponents')).toContainText('Qwen/Qwen3-ForcedAligner-0.6B');
+  await expect(page.locator('#openLocalModelSource')).toHaveText('打开官方模型页 ↗');
+
+  await page.locator('#model').selectOption('sensevoice-small-local');
+  await expect(page.locator('#localModelComponents')).toContainText('iic/SenseVoiceSmall');
+  await expect(page.locator('#localModelComponents')).toContainText('fsmn-vad');
+});
+
 test('translation merge option follows manual and automatic translation controls', async ({ page }) => {
   await openLauncher(page);
   await page.locator('#toolboxLlmTab').click();

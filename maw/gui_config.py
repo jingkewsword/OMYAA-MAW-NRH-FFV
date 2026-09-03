@@ -41,6 +41,11 @@ class ModelConfig:
     # 上游缓存中的实际模型 ID；当引擎用简写加载（如 FunASR paraformer-zh）
     # 而缓存目录使用完整 ID 时，扫描器靠它定位已下载的模型。
     cache_refs: tuple[str, ...] = ()
+    # Launcher 自助准备所需的受控上游来源；不是任意模型仓库/端点配置。
+    model_source: str = ""
+    model_source_url: str = ""
+    # 上游加载器会自动准备的附加组件（例如 FunASR 的 VAD）。
+    required_components: tuple[str, ...] = ()
     # 暂时保留底层配置与 CLI 能力，但不在 Launcher 的模型列表中展示。
     hidden: bool = False
 
@@ -316,6 +321,8 @@ LOCAL_MODELS: Final[tuple[ModelConfig, ...]] = (
         model_ref="Qwen/Qwen3-ASR-0.6B",
         required_model_refs=("Qwen/Qwen3-ForcedAligner-0.6B",),
         requires_runtime=("qwen_asr", "torch"),
+        model_source="huggingface",
+        model_source_url="https://huggingface.co/Qwen/Qwen3-ASR-0.6B",
     ),
     ModelConfig(
         id="qwen3-asr-1.7b-local",
@@ -328,6 +335,8 @@ LOCAL_MODELS: Final[tuple[ModelConfig, ...]] = (
         model_ref="Qwen/Qwen3-ASR-1.7B",
         required_model_refs=("Qwen/Qwen3-ForcedAligner-0.6B",),
         requires_runtime=("qwen_asr", "torch"),
+        model_source="huggingface",
+        model_source_url="https://huggingface.co/Qwen/Qwen3-ASR-1.7B",
     ),
     ModelConfig(
         id="fun-asr-nano-local",
@@ -339,6 +348,8 @@ LOCAL_MODELS: Final[tuple[ModelConfig, ...]] = (
         engine="funasr",
         model_ref="FunAudioLLM/Fun-ASR-Nano-2512",
         requires_runtime=("funasr", "torchaudio"),
+        model_source="huggingface",
+        model_source_url="https://huggingface.co/FunAudioLLM/Fun-ASR-Nano-2512",
         hidden=True,
     ),
     ModelConfig(
@@ -354,6 +365,8 @@ LOCAL_MODELS: Final[tuple[ModelConfig, ...]] = (
         # FunASR model zoo 把 paraformer-zh 解析为这个 ModelScope ID；
         # GUI 不能导入 FunASR，扫描缓存时需要显式的映射。
         cache_refs=("iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",),
+        model_source="modelscope",
+        model_source_url="https://www.modelscope.cn/models/iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
         hidden=True,
     ),
     ModelConfig(
@@ -366,6 +379,9 @@ LOCAL_MODELS: Final[tuple[ModelConfig, ...]] = (
         engine="funasr",
         model_ref="iic/SenseVoiceSmall",
         requires_runtime=("funasr", "torchaudio"),
+        model_source="modelscope",
+        model_source_url="https://www.modelscope.cn/models/iic/SenseVoiceSmall",
+        required_components=("fsmn-vad",),
     ),
     ModelConfig(
         id="moss-transcribe-diarize-local",
@@ -380,6 +396,8 @@ LOCAL_MODELS: Final[tuple[ModelConfig, ...]] = (
         engine="moss",
         model_ref="OpenMOSS-Team/MOSS-Transcribe-Diarize",
         requires_runtime=("moss_transcribe_diarize", "transformers", "torch"),
+        model_source="huggingface",
+        model_source_url="https://huggingface.co/OpenMOSS-Team/MOSS-Transcribe-Diarize",
     ),
     ModelConfig(
         id="whisper-large-v3-local",
@@ -392,6 +410,8 @@ LOCAL_MODELS: Final[tuple[ModelConfig, ...]] = (
         # Hugging Face Hub 上的官方 CTranslate2 转换版；词级时间戳由上游内部处理
         model_ref="Systran/faster-whisper-large-v3",
         requires_runtime=("faster_whisper",),
+        model_source="huggingface",
+        model_source_url="https://huggingface.co/Systran/faster-whisper-large-v3",
     ),
 )
 

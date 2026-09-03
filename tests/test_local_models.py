@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from maw.gui_config import provider_by_id  # noqa: E402
-from maw.local_models import LocalModelStatus, _prepare_progress_payload, inspect_local_model, prepare_local_model  # noqa: E402
+from maw.local_models import LocalModelStatus, _prepare_progress_payload, inspect_local_model, local_model_payload, prepare_local_model  # noqa: E402
 
 
 def local_model(model_id: str):
@@ -52,6 +52,55 @@ class LocalModelDiscoveryTests(unittest.TestCase):
         self.assertEqual(partial.status, "partial")
         self.assertEqual(installed.status, "installed")
         self.assertEqual(Path(installed.path).resolve(), main.resolve())
+
+    def test_payload_exposes_allowlisted_sources_and_required_components(self) -> None:
+        qwen = local_model("qwen3-asr-local")
+        qwen_status = LocalModelStatus(
+            qwen.id,
+            qwen.engine,
+            qwen.model_ref,
+            "missing",
+            True,
+            False,
+            required_model_refs=qwen.required_model_refs,
+        )
+
+        with mock.patch("maw.local_models.inspect_local_model", return_value=qwen_status):
+            payload = local_model_payload(qwen)
+
+        self.assertEqual(payload["modelSource"], "huggingface")
+        self.assertEqual(payload["modelSourceUrl"], "https://huggingface.co/Qwen/Qwen3-ASR-0.6B")
+        self.assertEqual(
+            payload["modelComponents"],
+            [
+                {
+                    "role": "model",
+                    "ref": "Qwen/Qwen3-ASR-0.6B",
+                    "url": "https://huggingface.co/Qwen/Qwen3-ASR-0.6B",
+                },
+                {
+                    "role": "required",
+                    "ref": "Qwen/Qwen3-ForcedAligner-0.6B",
+                    "url": "https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B",
+                },
+            ],
+        )
+        self.assertTrue(payload["manualPathSupported"])
+
+        sensevoice = local_model("sensevoice-small-local")
+        sensevoice_status = LocalModelStatus(
+            sensevoice.id,
+            sensevoice.engine,
+            sensevoice.model_ref,
+            "missing",
+            True,
+            False,
+        )
+        with mock.patch("maw.local_models.inspect_local_model", return_value=sensevoice_status):
+            sensevoice_payload = local_model_payload(sensevoice)
+
+        self.assertEqual(sensevoice_payload["modelSource"], "modelscope")
+        self.assertEqual(sensevoice_payload["modelComponents"][-1], {"role": "runtime", "ref": "fsmn-vad", "url": ""})
 
     def test_whisper_huggingface_cache_is_detected(self) -> None:
         model = local_model("whisper-large-v3-local")

@@ -321,9 +321,12 @@ class GuiConfigTests(unittest.TestCase):
         qwen06 = provider.models[0]
         self.assertEqual(qwen06.model_ref, "Qwen/Qwen3-ASR-0.6B")
         self.assertIn("Qwen/Qwen3-ForcedAligner-0.6B", qwen06.required_model_refs)
+        self.assertEqual(qwen06.model_source, "huggingface")
+        self.assertEqual(qwen06.model_source_url, "https://huggingface.co/Qwen/Qwen3-ASR-0.6B")
         qwen17 = provider.models[1]
         self.assertEqual(qwen17.model_ref, "Qwen/Qwen3-ASR-1.7B")
         self.assertIn("Qwen/Qwen3-ForcedAligner-0.6B", qwen17.required_model_refs)
+        self.assertEqual(qwen17.model_source_url, "https://huggingface.co/Qwen/Qwen3-ASR-1.7B")
         nano = provider.models[2]
         self.assertEqual(nano.model_ref, "FunAudioLLM/Fun-ASR-Nano-2512")
         self.assertTrue(nano.hidden)
@@ -332,6 +335,9 @@ class GuiConfigTests(unittest.TestCase):
         sensevoice = provider.models[4]
         self.assertEqual(sensevoice.model_ref, "iic/SenseVoiceSmall")
         self.assertIn("funasr", sensevoice.requires_runtime)
+        self.assertEqual(sensevoice.model_source, "modelscope")
+        self.assertEqual(sensevoice.model_source_url, "https://www.modelscope.cn/models/iic/SenseVoiceSmall")
+        self.assertEqual(sensevoice.required_components, ("fsmn-vad",))
         moss = provider.models[-2]
         self.assertEqual(moss.engine, "moss")
         self.assertTrue(moss.supports_speaker)

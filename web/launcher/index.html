@@ -140,6 +140,19 @@
           <button id="refreshLocalModels" class="ghost small" type="button" data-i18n="local_refresh">重新扫描</button>
         </div>
         <p id="localModelHint" class="hint"></p>
+        <div id="localModelGuide" class="local-model-guide">
+          <div class="local-model-guide-header">
+            <strong data-i18n="local_model_guide_title">准备此模型</strong>
+            <button id="openLocalModelSource" class="inline-link" type="button" data-i18n="local_model_open_source" data-i18n-title="local_model_open_source_title">打开官方模型页 ↗</button>
+          </div>
+          <p id="localModelManagedHint" class="hint"></p>
+          <p id="localModelManualHint" class="hint" data-i18n="local_model_manual_hint">也可以从官方模型页下载与当前模型完全对应的目录，再选择该目录；不保证任意权重、第三方改版或本地 HTTP 服务。</p>
+          <div class="local-model-components">
+            <strong data-i18n="local_model_components_title">必需组件</strong>
+            <ul id="localModelComponents"></ul>
+          </div>
+          <p class="hint" data-i18n="local_model_no_http">本地推理直接由 MAW 或其独立运行环境执行，不需要 API Key 或本地 HTTP 端口。</p>
+        </div>
         <div class="field">
           <label for="localModelCachePath" data-i18n="local_model_cache_path_label">模型保存目录</label>
           <div class="path-row">
@@ -156,6 +169,7 @@
             <button id="pickLocalModelPath" class="ghost" type="button" data-i18n="choose_folder">选择文件夹</button>
           </div>
           <p id="localModelPathError" class="field-error"></p>
+          <p class="hint" data-i18n="local_model_path_hint">只选择当前模型的实际目录，并确保其中包含模型权重；不要选择整个缓存根目录。</p>
         </div>
         <div id="localModelProgress" class="task-progress hidden" aria-live="polite">
           <div id="localModelProgressTrack" class="task-progress-track indeterminate"><span id="localModelProgressBar"></span></div>
