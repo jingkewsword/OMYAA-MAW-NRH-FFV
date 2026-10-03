@@ -233,15 +233,20 @@ test('local model settings explain managed and manual preparation', async ({ pag
   await page.waitForFunction(() => window.MAWLauncher?.config?.postprocessProviders?.length > 0);
 
   await page.locator('#provider').selectOption('local');
+  await page.locator('#openLocalModelSettings').click();
   await expect(page.locator('#localModelPanel')).toBeVisible();
   await expect(page.locator('#localModelGuide')).toBeVisible();
+  expect(await page.locator('#localModelGuide').evaluate((node) => parseFloat(getComputedStyle(node).marginTop))).toBeGreaterThanOrEqual(8);
+  await page.locator('#localModelGuide').screenshot({ path: 'test-results/local-model-guide.png' });
   await expect(page.locator('#localModelManagedHint')).toContainText('安装本地模型支持');
   await expect(page.locator('#localModelManualHint')).toContainText('任意权重');
   await expect(page.locator('#localModelComponents')).toContainText('Qwen/Qwen3-ASR-0.6B');
   await expect(page.locator('#localModelComponents')).toContainText('Qwen/Qwen3-ForcedAligner-0.6B');
   await expect(page.locator('#openLocalModelSource')).toHaveText('打开官方模型页 ↗');
 
+  await page.locator('#settingsClose').click();
   await page.locator('#model').selectOption('sensevoice-small-local');
+  await page.locator('#openLocalModelSettings').click();
   await expect(page.locator('#localModelComponents')).toContainText('iic/SenseVoiceSmall');
   await expect(page.locator('#localModelComponents')).toContainText('fsmn-vad');
 });
@@ -800,11 +805,13 @@ test('local runtime diagnostics are opt-in, localized, and downloadable without 
   await page.goto(`file://${launcherPath}`);
   await page.waitForFunction(() => window.MAWLauncher?.config?.postprocessProviders?.length > 0);
   await page.locator('#provider').selectOption('local');
+  await page.locator('#openLocalRuntimeSettings').click();
 
   const diagnose = page.locator('#diagnoseLocalRuntime');
   const exportButton = page.locator('#exportLocalRuntimeDiagnostics');
   const panel = page.locator('#localRuntimeDiagnosticsPanel');
   await expect(diagnose).toBeVisible();
+  expect(await page.locator('.runtime-diagnostics-actions').evaluate((node) => parseFloat(getComputedStyle(node).marginTop))).toBeGreaterThanOrEqual(8);
   await expect(diagnose).toHaveText('诊断本地运行环境');
   await expect(exportButton).toBeDisabled();
   await expect(panel).toBeHidden();
@@ -817,6 +824,7 @@ test('local runtime diagnostics are opt-in, localized, and downloadable without 
   await expect(page.locator('#localRuntimeDiagnosticsHint')).toContainText('短探测');
   await expect(page.locator('#localRuntimeDiagnosticsList')).toContainText('未找到运行环境');
   await expect(exportButton).toBeEnabled();
+  await page.screenshot({ path: 'test-results/local-runtime-diagnostics.png' });
 
   const downloadPromise = page.waitForEvent('download');
   await exportButton.click();
@@ -832,7 +840,7 @@ test('local runtime diagnostics are opt-in, localized, and downloadable without 
   expect(rawReport).not.toMatch(/(?:sk-|api[_-]?key|authorization|traceback)/iu);
   expect(rawReport).not.toContain('D:\\Users\\Demo');
 
-  await page.locator('#langToggle').click();
+  await page.evaluate(() => document.getElementById('langEn').click());
   await expect(diagnose).toHaveText('Diagnose local runtime');
   await expect(page.locator('#localRuntimeDiagnosticsSummary')).toContainText('Diagnostic summary');
   await expect(page.locator('#localRuntimeDiagnosticsHint')).toContainText('short probes');
@@ -864,8 +872,9 @@ test('Windows NVIDIA runtime failures point to diagnostics without bridge action
   await expect(page.locator('#errorNoticeIssue')).toBeHidden();
 
   await page.locator('#errorNoticeAction').click();
-  await expect.poll(() => page.evaluate(() => window.__runtimePanelScrolls.length)).toBe(1);
-  expect(await page.evaluate(() => window.__runtimePanelScrolls[0])).toEqual({ behavior: 'smooth', block: 'center' });
+  await expect(page.locator('#settingsModal')).toBeVisible();
+  await expect(page.locator('#settingsRuntimeTab')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#diagnoseLocalRuntime')).toBeVisible();
   expect(await page.evaluate(() => window.__localRuntimeDiagnosticsCalls || 0)).toBe(0);
   expect(await page.evaluate(() => window.__openedRuntimeFolder)).toBeNull();
 });
@@ -874,6 +883,7 @@ test('Windows runtime diagnostics add manual configuration guidance only for sel
   await page.goto(`file://${launcherPath}`);
   await page.waitForFunction(() => window.MAWLauncher?.config?.postprocessProviders?.length > 0);
   await page.locator('#provider').selectOption('local');
+  await page.locator('#openLocalRuntimeSettings').click();
   const report = (platform) => ({
     schemaVersion: '1',
     generatedAt: '2026-01-01T00:00:00Z',
@@ -900,7 +910,7 @@ test('Windows runtime diagnostics add manual configuration guidance only for sel
   await expect(guidance).toContainText('MAW 不会自动替换依赖版本');
   await expect(guidance).toContainText('CTranslate2');
 
-  await page.locator('#langToggle').click();
+  await page.evaluate(() => document.getElementById('langEn').click());
   await expect(guidance).toContainText('Manual configuration note');
   await expect(guidance).toContainText('MAW will not automatically replace dependency versions');
 

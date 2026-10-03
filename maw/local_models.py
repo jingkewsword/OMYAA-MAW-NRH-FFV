@@ -335,6 +335,16 @@ def local_model_payload(
     }
 
 
+def local_model_metadata(model: ModelConfig) -> dict[str, object]:
+    """Describe fixed model sources without probing caches or runtimes."""
+    return {
+        "modelSource": model.model_source,
+        "modelSourceUrl": model.model_source_url,
+        "modelComponents": _model_components(model),
+        "manualPathSupported": True,
+    }
+
+
 def _model_components(model: ModelConfig) -> list[dict[str, str]]:
     """Return the fixed components that the selected Launcher entry prepares.
 

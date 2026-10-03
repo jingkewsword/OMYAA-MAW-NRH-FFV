@@ -86,6 +86,7 @@ from maw.local_runtime import (
 from maw.local_models import (
     firered_components_ready,
     inspect_local_model,
+    local_model_metadata,
     local_model_payload,
     prepare_local_model as prepare_model,
 )
@@ -4940,6 +4941,7 @@ def _model_payload(
             )
         else:
             payload["localStatus"] = {
+                **local_model_metadata(model),
                 "status": "checking",
                 "runtimeAvailable": False,
                 "installed": False,

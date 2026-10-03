@@ -12,6 +12,12 @@ Launcher 已提供实验性的「本地模型」识别方式，入口仍复用�
 
 对于仅有句级时间码的超长段，二次拆分产生的插值切点会尝试吸附到 ±400ms 内明显的低能量处；原始句子边界、间隙与已有字词时间码不变。能量平坦、音频不可读或缺少 numpy / soundfile 时保持原切点。低能量只提供切点参考，不能保证是准确的语音边界，仍需在编辑器中试听检查。
 
+## 模型来源与运行环境诊断
+
+在「设置 → AI 模型配置」选择本地模型后，可查看固定条目的官方来源、组件列表和手动目录说明；已有完整模型目录仍沿用现有目录选择入口。Qwen3-ASR 主模型的手动目录不会替代配套 Forced Aligner，所需对齐器可以在当前 Hugging Face 或 ModelScope 缓存中发现。
+
+「设置 → 运行环境」提供按需诊断和脱敏报告导出，检查 local/MOSS 环境、可选包和 Torch CUDA 握手。短探测只能描述当前观测，不证明驱动、模型或 CUDA 版本一定兼容。Windows GPU 启动失败时，错误卡片可打开这一设置页；诊断不会安装组件、更换依赖或自动切换设备。
+
 ## MOSS Transcribe-Diarize
 
 MOSS Transcribe-Diarize 0.9B 是 Apache-2.0 许可的端到端转写与说话人分离模型。官方在 AISHELL-4、Alimeeting、Podcast 和 Movies 多说话人基准上报告了较低的 CER / cpCER，适合会议、访谈、播客和多人视频；说话人标签是当前音频内的相对编号（如 `S01`），不是跨文件的真实身份。
@@ -56,11 +62,16 @@ Launcher 工具箱的「生成时间码」可处理 `.srt`、`.mosp` 或 `.json`
 
 faster-whisper 使用 CTranslate2 运行时实现 OpenAI Whisper 模型，自带 Silero VAD、30 秒滑动窗口和词级时间戳，长音频由上游内部处理，MAW 不再分块（`--batch-size-s` 对该引擎无效）。MAW 固定开启词级时间戳与 VAD 过滤并关闭跨段上下文（避免一句幻觉污染后续字幕），词级秒级时间戳会归一化为 MAW 要求的整数毫秒；句段拆分交给与 Qwen 路径相同的统一切句逻辑。
 
-CLI 默认模型为 `large-v3`（对应 Hugging Face Hub 的 Systran CTranslate2 版本）。CLI 仍保留 `--model` / `--model-path` 低层参数供开发者试验其他已转换目录；这些参数不扩大 Launcher 的正式支持范围，也不保证任意 Whisper 权重或格式：
+CLI 默认模型为 `large-v3`（对应 Hugging Face Hub 的 Systran CTranslate2 版本），也可以使用 `small`、`turbo`、`distil-large-v3` 等名称或已转换好的本地 CTranslate2 目录：
 
 ```powershell
 uv run python generate_subtitle_local.py "D:\Videos\example.mp4" `
   --engine whisper --length-limit 30s --json
+```
+
+```powershell
+uv run python generate_subtitle_local.py "D:\Videos\example.mp4" `
+  --engine whisper --model large-v3-turbo --language zh --length-limit 30s --json
 ```
 
 热词通过 faster-whisper 的 `hotwords` 参数注入 decoder prompt，与 Qwen 路径的 context 提示类似，是提示而非保证命中的硬约束。按模型 ID 加载时同样遵循 `MAW_MODEL_CACHE_ROOT` 统一缓存根目录。该引擎不提供说话人分离（多人场景请用 MOSS）；GPU 推理需要用户自行安装 CUDA 12 与 cuDNN 9 库（CTranslate2 不复用 Torch 自带的 CUDA 依赖），设备选择为“自动”时如果 CUDA 运行库不可用会自动回退到 CPU，显式选择 CUDA 则保留错误。无 GPU 时以 int8 精度运行 CPU。Whisper 的词级时间戳来自交叉注意力对齐，精度低于 Qwen 的 Forced Aligner，静音处偶发幻觉属于上游已知行为；中文等非拉丁语言的验收请先用自己的音频进行。

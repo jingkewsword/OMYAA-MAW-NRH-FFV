@@ -557,7 +557,6 @@ def _torch_cuda_handshake(torch: Mapping[str, object], *, platform_name: str | N
 
 def _torch_cuda_handshake_item(handshake: Mapping[str, object]) -> dict[str, object]:
     code = str(handshake.get("code") or "torch_cuda_handshake_not_checked")
-    status = str(handshake.get("status") or "not_checked")
     if code == "torch_cuda_handshake_ready":
         return _item(
             "torch-cuda-handshake",
