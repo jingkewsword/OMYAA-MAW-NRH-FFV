@@ -2135,9 +2135,10 @@
     const version = context?.version || state.config?.appVersion || $("appVersion")?.textContent?.trim().replace(/^v/, "") || "unknown";
     const occurredAt = context?.occurredAt || new Date().toISOString();
     state.errorReport = { code: code || "backend_error", message: String(message || ""), detail: String(detail || ""), diagnostics: diagnostic, version, occurredAt };
-    const contextText = `MAW v${version} · ${occurredAt.replace("T", " ")}`;
+    const contextText = state.lang === "zh"
+      ? `版本：${version}\n发生时间：${occurredAt.replace("T", " ")}`
+      : `Version: ${version}\nOccurred at: ${occurredAt.replace("T", " ")}`;
     $("errorNoticeContext").textContent = contextText;
-    appendLog(`[error] ${contextText}`);
     $("errorNoticeTitle").textContent = t("error_notice_title");
     renderMessage($("errorNoticeMessage"), message);
     const diagnosticNode = $("errorNoticeDiagnostics");
