@@ -51,6 +51,8 @@ Windows 超时使用本次 PID 的 `taskkill /T`，POSIX 使用新进程组；�
 
 e2e helper 仅保留最近 4096 字符的服务输出，stdout/stderr 分别解码 UTF-8；退出与启动超时错误含短尾部。浏览器 trace、截图与 HTML 报告依然按需读取，不应整份加入对话。
 
+通用 helper 在 POSIX 为服务创建独立进程组并按组回收，Windows 使用 PID 树；`cue-scroll-fixture.mjs` 是另一套独立生命周期，不自动获得通用 helper 的改进。本次审查证据及未验证范围见 [DEBUG_REVIEW_20261010.md](DEBUG_REVIEW_20261010.md)。
+
 ## 按变化选择测试层
 
 | 变化 | 首轮验证 | 扩大验证的条件 |
