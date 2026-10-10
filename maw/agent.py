@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import copy
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
@@ -12,6 +13,7 @@ import tempfile
 import uuid
 
 from maw.project import normalize_project
+from maw.console import configure_utf8_stdio
 
 SNAPSHOT = "moy.asr.agent.snapshot.v1"
 PROPOSAL = "moy.asr.agent.proposal.v1"
@@ -32,7 +34,9 @@ def read_json(path):
         raw = stream.read(MAX_BYTES + 1)
     if len(raw) > MAX_BYTES:
         raise AgentError("too_large", "JSON exceeds 64 MiB")
-    return json.loads(raw.decode("utf-8-sig"))
+    def reject_constant(value):
+        raise AgentError("invalid_request", "Non-finite numbers are not valid JSON")
+    return json.loads(raw.decode("utf-8-sig"), parse_constant=reject_constant)
 
 
 def read_project(path):
@@ -47,9 +51,9 @@ def read_project(path):
 
 def write_new(path, value):
     """Exclusive creation prevents accidental replacement of projects or proposals."""
+    content = json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
     with Path(path).open("x", encoding="utf-8", newline="\n") as stream:
-        json.dump(value, stream, ensure_ascii=False, indent=2, allow_nan=False)
-        stream.write("\n")
+        stream.write(content)
 
 
 def write_status(path, value):
@@ -296,6 +300,7 @@ def main(argv=None):
                     if Path(args.output).resolve() == Path(args.job).resolve():
                         raise AgentError("invalid_request", "job and output must be different paths")
                     initial_job = {"schema": JOB, "state": "running", "pid": os.getpid(),
+                           "started_at": datetime.now(timezone.utc).isoformat(),
                            "range": [args.start, args.end], "model": args.model, "output": str(Path(args.output).resolve())}
                     write_new(args.job, initial_job)
                     job = initial_job
@@ -306,22 +311,26 @@ def main(argv=None):
                 write_new(args.output, result)
                 result = {"proposal": str(Path(args.output).resolve()), "id": result["id"]}
                 if job:
-                    job.update(state="succeeded", result=result)
+                    job.update(state="succeeded", result=result, finished_at=datetime.now(timezone.utc).isoformat())
                     write_status(args.job, job)
         print(json.dumps({"ok": True, "result": result}, ensure_ascii=False, allow_nan=False))
         return 0
     except (Exception, KeyboardInterrupt, SystemExit) as exc:
-        code = getattr(exc, "code", "invalid_request")
+        code = getattr(exc, "code", "transcription_failed" if job else "invalid_request")
         code = code if isinstance(code, str) else "transcription_failed"
         # Provider exceptions can embed keys/URLs. Return a bounded generic runtime error.
         message = str(exc) if isinstance(exc, AgentError) or job is None else "Transcription failed or was interrupted; check local configuration/media and retry with a new job path"
         error = {"code": code, "message": message}
         if job:
-            job.update(state="failed", error=error)
-            write_status(args.job, job)
+            job.update(state="failed", error=error, finished_at=datetime.now(timezone.utc).isoformat())
+            try:
+                write_status(args.job, job)
+            except OSError:
+                error["status_error"] = "Could not persist final job status; use this command result instead"
         print(json.dumps({"ok": False, "error": error}, ensure_ascii=False))
         return 1
 
 
 if __name__ == "__main__":
+    configure_utf8_stdio()
     raise SystemExit(main())

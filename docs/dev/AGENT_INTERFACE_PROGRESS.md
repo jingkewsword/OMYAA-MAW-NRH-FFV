@@ -18,8 +18,8 @@
 | 仓库与格式核对、隔离 | 已修复 | 原 checkout 干净；新 worktree 已创建 |
 | CLI 查询、提案与范围转写 | 已修复 | 9 个 Python 测试通过，含真实 FFmpeg 800 ms 截取 + fixture 转写回填；未调用付费服务 |
 | 编辑器快照、预览、冲突与撤销 | 已修复 | 2 个真实浏览器 e2e 通过；CLI → 导出/审阅/取消/应用/撤销/重做/保存/冲突；源码与 bundle 已更新 |
-| Skill、接入文档、示例 | 待处理 | 仓库分发，不安装全局配置 |
-| 测试与人工核验清单 | 待处理 | 区分 fixture、浏览器和真实云端验证 |
+| Skill、接入文档、示例 | 已修复 | `.opencode/skill/maw-agent/SKILL.md`；按 skill-creator 校验通过；接入文档含可执行 PowerShell 示例 |
+| 测试与人工核验清单 | 进行中 | 核心与浏览器已通过；最终回归与人工核验交付进行中 |
 
 ## 第一阶段验证
 
@@ -29,3 +29,13 @@
 - `playwright test tests/e2e/agent-interface.spec.mjs --project=chromium --workers=1 --global-timeout=240000`：2 / 2 通过（20.3 秒），合成媒体及临时服务器已清理；对话框操作区实测间距 >= 8 px。
 - 环境：新 worktree 无原 venv，创建独立测试 venv，安装所需依赖。沙箱 Python 临时目录与 pnpm realpath 曾因 Windows 权限失败，正常权限隔离运行通过；没有把这些失败计入产品缺陷。
 - 后续要求：用户授权边开发边提交、推送到自己的 origin 功能分支；已实时核实登录与 push 权限。不合并 main、不创建 PR / Release。
+
+## 第二阶段验证与保存
+
+- 首个可用实现提交 `bf092968` 已推送 origin/feature/agent-interface，并通过 `git ls-remote` 实时确认。
+- CLI 增加 UTF-8 标准输出、非法非有限 JSON 拒绝、任务时间记录与状态写入失败提示；Agent Python 测试现为 10 / 10 通过。
+- 原工程契约测试 49 / 49 通过；字幕 / 波形工具测试 369 / 369 通过；ruff 通过。
+- Skill 校验需 Windows UTF-8 模式：`python -X utf8 <skill-creator>/scripts/quick_validate.py .opencode/skill/maw-agent` 通过。最初默认 GBK 解码失败，未更改技能内容来绕过编码。
+- 旧 JS 工具测试默认执行 `uv run --frozen`，曾尝试重新创建测试 venv 并触发文件占用。改为显式 `MAW_TEST_PYTHON` 后全部通过；测试日志改放独立缓存目录。
+- 全量 Python 首轮遇到 Windows GBK 子进程输出解码故障和停滞，已终止精确测试进程树；第二轮显式 UTF-8、固定解释器、240 秒封顶。待记录实际结果，不将首轮算作通过。
+- 内联 `blank-editor.html` 按仓库约定待发布前统一重生成。
