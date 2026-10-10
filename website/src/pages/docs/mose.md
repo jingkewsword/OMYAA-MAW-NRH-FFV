@@ -5,7 +5,7 @@ description: "Electron 原生工程操作、三端打包、系统打开方式与
 source: "docs/MOSE.md"
 ---
 
-<!-- Generated from docs/MOSE.md. Run npm run sync:docs to refresh. -->
+<!-- Generated from docs/MOSE.md. Run pnpm run sync:docs to refresh. -->
 
 | 名称 | 当前定位 |
 | --- | --- |

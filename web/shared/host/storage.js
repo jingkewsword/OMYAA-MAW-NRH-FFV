@@ -1,5 +1,5 @@
 // Storage errors remain visible to callers so each preference keeps its fallback.
-window.MAWE.register('host-storage', function createStorage(environment) {
+export function createStorage(environment) {
   'use strict';
   return Object.freeze({
     getItem(key) {
@@ -18,4 +18,4 @@ window.MAWE.register('host-storage', function createStorage(environment) {
       else environment.localStorage.setItem(key, value);
     },
   });
-});
+}
