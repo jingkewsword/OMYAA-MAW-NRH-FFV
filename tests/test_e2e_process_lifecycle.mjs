@@ -12,6 +12,17 @@ const synthetic = fileURLToPath(new URL('./fixtures/e2e-process-tree.py', import
 const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
+async function startBystander() {
+  const proc = spawn(process.execPath, ['-e', `
+    const server = require('node:http').createServer((req, res) => res.end('bystander'));
+    server.listen(0, '127.0.0.1', () => process.send(server.address().port));
+  `], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'], windowsHide: true });
+  const port = await new Promise((resolve, reject) => {
+    proc.once('message', resolve); proc.once('error', reject);
+  });
+  return { proc, port };
+}
+
 function killOwned(pid) {
   if (!alive(pid)) return;
   if (process.platform === 'win32') {
@@ -25,37 +36,86 @@ async function portFree(port) {
   await new Promise(resolve => server.close(resolve));
 }
 
-test('scroll stop removes the wrapper and its server, releases port, and is repeatable', { timeout: 25000 }, async () => {
+async function runScenario(kind, scenario, action = 'stop') {
   const root = mkdtempSync(join(tmpdir(), 'maw-lifecycle-'));
   mkdirSync(join(root, 'server-editor'));
   copyFileSync(synthetic, join(root, 'server-editor', 'serve.py'));
-  writeFileSync(join(root, 'scenario.txt'), 'ready');
+  writeFileSync(join(root, 'scenario.txt'), scenario);
   const evidence = join(root, 'evidence');
-  const child = spawn(process.execPath, [driver], { cwd: root, env: {
-    ...process.env, MAW_E2E_PYTHON: process.env.MAW_E2E_PYTHON || 'python', MAW_SCROLL_EVIDENCE: evidence,
+  mkdirSync(evidence);
+  const bystander = await startBystander();
+  const child = spawn(process.execPath, [driver, kind, action], { cwd: root, env: {
+    ...process.env, MAW_E2E_PYTHON: scenario === 'missing-command' ? join(root, 'missing-python')
+      : process.env.MAW_E2E_PYTHON || 'python', MAW_SCROLL_EVIDENCE: evidence,
   }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'], windowsHide: true });
   let output = '';
+  let message;
+  let timedOut = false;
+  const started = Date.now();
   child.stdout.on('data', b => { output += b; });
   child.stderr.on('data', b => { output += b; });
-  const timer = setTimeout(() => { try { killOwned(child.pid); } catch {} }, 20000);
+  child.on('message', value => {
+    message = value;
+    if (value.ready) {
+      if (process.platform === 'win32') child.kill('SIGKILL');
+      else child.kill('SIGTERM');
+    }
+  });
+  const exited = new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('exit', (code, signal) => resolve({ code, signal }));
+  });
+  const timer = setTimeout(() => {
+    timedOut = true;
+    try { killOwned(child.pid); } catch {}
+  }, scenario === 'hang' ? 52000 : 15000);
   try {
-    await new Promise((resolve, reject) => {
-      child.once('message', resolve);
-      child.once('error', reject);
-      child.once('exit', code => reject(new Error(`driver exited ${code}: ${output}`)));
-    });
+    const result = await exited;
+    assert.equal(timedOut, false, `driver exceeded deadline: ${output}`);
+    if (scenario === 'ready' && action === 'stop') {
+      assert.equal(result.code, 0, output);
+      assert.equal(message?.stopped, true);
+    } else if (scenario !== 'ready') {
+      assert.equal(result.code, 1, output);
+      assert.ok(message?.failure, output);
+      if (scenario === 'hang') assert.match(message.failure, /did not/);
+    } else if (action.startsWith('signal:')) {
+      assert.equal(result.code, { SIGINT: 130, SIGTERM: 143, SIGBREAK: 149, SIGHUP: 129 }[action.slice(7)]);
+    } else if (action === 'exit') assert.equal(result.code, 0, output);
+    else if (action === 'exception') assert.equal(result.code, 1, output);
+    assert.ok(Date.now() - started < (scenario === 'hang' ? 52000 : 15000));
     const dir = join(evidence, readdirSync(evidence)[0]);
-    const pids = JSON.parse(readFileSync(join(dir, 'owned-pids.json')));
     const { port } = JSON.parse(readFileSync(join(dir, 'runtime.json')));
-    const deadline = Date.now() + 2000;
-    while (pids.some(alive) && Date.now() < deadline) await delay(25);
-    assert.deepEqual(pids.filter(alive), [], 'owned descendants must exit, not just the wrapper');
+    if (scenario !== 'missing-command') {
+      const pids = JSON.parse(readFileSync(join(dir, 'owned-pids.json')));
+      const deadline = Date.now() + 2000;
+      while (pids.some(alive) && Date.now() < deadline) await delay(25);
+      assert.deepEqual(pids.filter(alive), [], 'owned descendants must exit, not just the wrapper');
+    }
     await portFree(port);
+    assert.equal(alive(bystander.proc.pid), true, 'unrelated process must remain alive');
+    const response = await fetch(`http://127.0.0.1:${bystander.port}`, { signal: AbortSignal.timeout(1000) });
+    assert.equal(await response.text(), 'bystander');
   } finally {
     clearTimeout(timer);
     for (const name of readdirSync(evidence)) {
       try { for (const pid of JSON.parse(readFileSync(join(evidence, name, 'owned-pids.json')))) killOwned(pid); } catch {}
     }
-    killOwned(child.pid);
+    try { killOwned(child.pid); } catch {}
+    bystander.proc.kill();
   }
-});
+}
+
+for (const kind of ['scroll', 'helpers']) {
+  for (const scenario of ['ready', 'startup-error', 'wrapper-exit', 'missing-command', 'hang']) {
+    test(`${kind}: ${scenario} reaps descendants, frees port, and returns within deadline`,
+      { timeout: 58000 }, () => runScenario(kind, scenario));
+  }
+  for (const action of ['exit', 'exception', 'signal:SIGINT', 'signal:SIGTERM',
+    process.platform === 'win32' ? 'signal:SIGBREAK' : 'signal:SIGHUP', 'hold']) {
+    // emit exercises the JS handler on Windows; process.kill(SIGTERM) there is
+    // unconditional termination, not delivery of a catchable POSIX signal.
+    test(`${kind}: ${action} cleans up after owner exit`, { timeout: 20000 },
+      () => runScenario(kind, 'ready', action));
+  }
+}

@@ -18,7 +18,7 @@ if '--leaf' not in sys.argv:
     child.wait()
 else:
     # Last-resort bound even if the test runner itself is forcibly killed.
-    threading.Timer(65, lambda: os._exit(91)).start()
+    threading.Timer(60, lambda: os._exit(91)).start()
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
@@ -27,7 +27,7 @@ else:
                 return
             self.send_response(200)
             self.end_headers()
-            status = 'error' if mode == 'startup-error' else 'ready'
+            status = {'startup-error': 'error', 'wrapper-exit': 'loading'}.get(mode, 'ready')
             self.wfile.write(json.dumps({'status': status}).encode())
 
         def log_message(self, *_args):
