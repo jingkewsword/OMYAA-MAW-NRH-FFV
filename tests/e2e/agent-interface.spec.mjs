@@ -107,4 +107,9 @@ test('range replacement and review-time conflict preserve outside subtitles', as
   await page.locator('#agent-review-apply').click();
   await expect(page.locator('#hint-stack')).toContainText('工程已变化');
   expect(await page.evaluate(() => MaweBoot.DATA.segments.length)).toBe(2);
+  await page.locator('#agent-review-cancel').click();
+  await page.evaluate(() => { MaweBoot.DATA.segments[0].end = 0; });
+  await page.locator('#agent-proposal-file').setInputFiles(proposalPath);
+  await expect(page.locator('#agent-review')).not.toBeVisible();
+  expect(await page.evaluate(() => MaweBoot.DATA.segments[0].end)).toBe(0);
 });
