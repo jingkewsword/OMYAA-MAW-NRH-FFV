@@ -188,9 +188,11 @@
     "editor/io/editor-wiring-server-events.js",
     "editor/io/editor-wiring-file-drop.js",
     "editor/boot/editor-startup.js",
+    "editor/io/editor-agent-core.js",
+    "editor/io/editor-agent.js",
     "editor/boot/editor-onboarding.js"
   ],
-  "esmFactories": 61,
+  "esmFactories": 62,
   "inputs": {
     "editor/boot/editor-boot.js": "298d5b808393547fe905cde4232e36af4079f07567786cd898fb3005a292a1db",
     "editor/boot/editor-runtime.js": "5d71c0d776a913d6e1ad3d7ea8cad3ba216d1d587641268ee66c529ce24ae863",
@@ -293,7 +295,7 @@
     "editor/io/editor-export-timeline.js": "37b65ef34272ee0d92e36c4a09c240f0f78982b512745821baad7411e800689e",
     "editor/io/editor-server-save.js": "d49528b92ccfdc8320a1319fa1558ad2e8a12e518d7b18e48cfabbe5b9c09ba8",
     "editor/ui/editor-workspaces.js": "6a0dcfab40bffcce3b10dae025d4ca20413f059a0905df93a11af9132cc7d58c",
-    "editor/io/editor-project-save.js": "4dc5ce43ba2d97ab0d16f80153da111738c2f43014b223df0ea04c11886bf9ce",
+    "editor/io/editor-project-save.js": "2edd8e1a746f06f0e6b0b1281531102a29afe24f758c7fdb131a59e2bfeb910a",
     "editor/io/editor-dynamic-exports.js": "3fceb191759ed43375d21ebc1cdbd8b6a0d2bc034377977e579d3dce925c7495",
     "editor/ui/editor-export-menus.js": "cfa4973df5672ea759702ef096c7b71e237d060ed4d8043d04e4ae72904fc213",
     "editor/io/editor-project-media-inputs.js": "107eaf3c7f006a9c67f9427f82cb85186343c5ddd684edbc8e4fbbab17a8a879",
@@ -378,12 +380,19 @@
     "editor/io/editor-wiring-server-events.js": "1174a484a1122bb02378ccf3ee5bdfe1b9d1669e3950b7fe50ba65ef56842b23",
     "editor/io/editor-wiring-file-drop.js": "6fcb7821cdd3215433c91913630ac16fdbacf9b3c675f6bb2e709a1bd58d0eb5",
     "editor/boot/editor-startup.js": "23317684cd154a502a5b8376ae4434886b0a3ec1fc9c8f8afc714a9a983d377e",
+    "editor/io/editor-agent-core.js": "1e27e01edb1dc4800788b45f1c9c3640710ab71c837391a3e5f6d80306fee9e1",
+    "editor/io/editor-agent.js": "e2b80869524a34293ddda95e9a48647e3f2fb8c1ebb2cd420b2511d3c45bcc83",
     "editor/boot/editor-onboarding.js": "488416a0a41bb30ad4343e6649f247c1f85970b818514a35a60f3af767177393"
   },
-  "configHash": "d42937878d91d54ec68f744276454ab2be39c7c87af00aa5bbeda4f7390304f0",
+  "configHash": "7899bafbd62eea744fc13c9425c187255f72f39e946801631ff381b104f5c6ba",
   "builderHash": "1a0a68295e7f276f7dfd728236489c261424ce86664cad4827cad5cd8c64124d",
   "metafile": {
     "inputs": {
+      "web/editor/io/editor-agent-core.js": {
+        "bytes": 6002,
+        "imports": [],
+        "format": "esm"
+      },
       "web/shared/host/storage.js": {
         "bytes": 313,
         "imports": [],
@@ -690,8 +699,13 @@
         "format": "esm"
       },
       "web/editor-entry.mjs": {
-        "bytes": 1733512,
+        "bytes": 1738578,
         "imports": [
+          {
+            "path": "web/editor/io/editor-agent-core.js",
+            "kind": "import-statement",
+            "original": "maw-factory:editor/io/editor-agent-core.js"
+          },
           {
             "path": "web/shared/host/storage.js",
             "kind": "import-statement",
@@ -1007,6 +1021,9 @@
         "exports": [],
         "entryPoint": "web/editor-entry.mjs",
         "inputs": {
+          "web/editor/io/editor-agent-core.js": {
+            "bytesInOutput": 3823
+          },
           "web/shared/host/storage.js": {
             "bytesInOutput": 141
           },
@@ -1191,10 +1208,10 @@
             "bytesInOutput": 4423
           },
           "web/editor-entry.mjs": {
-            "bytesInOutput": 1008577
+            "bytesInOutput": 1011812
           }
         },
-        "bytes": 1347751
+        "bytes": 1354809
       }
     }
   }
