@@ -7,6 +7,7 @@ import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createServer } from 'node:net';
 import { randomBytes } from 'node:crypto';
+import { createOutputTail } from './output-tail.mjs';
 
 // E2E tests exercise Python-backed editor servers and edit.py. Use the
 // repository's locked uv environment by default so the runner cannot silently
@@ -15,7 +16,7 @@ import { randomBytes } from 'node:crypto';
 const configuredPython = String(process.env.MAW_E2E_PYTHON || '').trim();
 const PYTHON_RUNNER = configuredPython
   ? { command: configuredPython, prefixArgs: [] }
-  : { command: 'uv', prefixArgs: ['run', '--frozen', 'python'] };
+  : { command: 'uv', prefixArgs: ['run', '--no-sync', 'python'] };
 
 function pythonCommandArgs(args) {
   return [...PYTHON_RUNNER.prefixArgs, ...args];
@@ -49,7 +50,8 @@ function terminateProcessTreeSync(pid) {
         stdio: 'ignore',
       });
     } else {
-      process.kill(pid, 'SIGKILL');
+      // launchServerProcess creates a group so uv's Python child is included.
+      process.kill(-pid, 'SIGKILL');
     }
   } catch (_) {
     // The process may already have exited between registration and cleanup.
@@ -369,7 +371,8 @@ export function generateProjectJson(filePath) {
 async function launchServerProcess(pythonArgs, port, env, { waitForStartup = false } = {}) {
   const proc = spawn(PYTHON_RUNNER.command, pythonCommandArgs(pythonArgs), {
     cwd: process.cwd(),
-    stdio: ['pipe', 'pipe', 'pipe'],
+    stdio: ['ignore', 'pipe', 'pipe'],
+    detached: process.platform !== 'win32',
     windowsHide: true,
     env,
   });
@@ -381,7 +384,7 @@ async function launchServerProcess(pythonArgs, port, env, { waitForStartup = fal
     await new Promise((resolve, reject) => {
       let pollTimer;
       let settled = false;
-      const allOutput = [];
+      const output = createOutputTail();
       const finish = (callback) => {
         if (settled) return;
         settled = true;
@@ -390,13 +393,13 @@ async function launchServerProcess(pythonArgs, port, env, { waitForStartup = fal
         callback();
       };
       const timeout = setTimeout(() => {
-        finish(() => reject(new Error('Server did not respond within 30s')));
+        finish(() => reject(new Error(`Server did not respond within 30s. Output tail: ${output.text()}`)));
       }, 30000);
-      proc.stdout.on('data', (chunk) => allOutput.push(chunk.toString()));
-      proc.stderr.on('data', (chunk) => allOutput.push(chunk.toString()));
+      proc.stdout.on('data', (chunk) => output.append(chunk));
+      proc.stderr.on('data', (chunk) => output.append(chunk, 'stderr'));
       proc.on('error', (err) => finish(() => reject(err)));
       proc.on('exit', (code) => finish(() => {
-        reject(new Error(`Server exited with code ${code}. Output: ${allOutput.join('')}`));
+        reject(new Error(`Server exited with code ${code}. Output tail: ${output.text()}`));
       }));
 
       const poll = async () => {
