@@ -45,7 +45,7 @@ MAW 帮你把字幕生成后的校对、整理和交付接起来。它以云端 
 
 源码安装、命令行起步和媒体迁移见 [从零完成一次字幕工程](../workflow/)；遇到启动或转写问题看 [常见问题](../faq/)。
 
-本分支提供 [MOSE Electron 桌面编辑器](../mose/)：Windows 使用 MAW + MOSE 套件或 Installer，macOS/Linux 配置独立 DMG/ZIP 与 AppImage/DEB。原生打开、拖入和另存为会绑定真实文件路径并记录最近工程；Windows Installer 的更新入口保留在 Launcher。实际可下载平台以 Release 附件为准，当前平台验证范围见 [检查记录](https://github.com/Moyf/moys-asr-workflow/blob/main/docs/TEST_FEEDBACK_ELECTRON_INTEGRATION.md)。
+本分支提供 [MOSE Electron 桌面编辑器](../mose/)：Windows 使用 MAW + MOSE 套件或 Installer，macOS/Linux 配置独立 DMG/ZIP 与 AppImage/DEB。原生打开、拖入和另存为会绑定真实文件路径并记录最近工程；MOSE 工具栏提供应用内更新，Windows 安装版可退出并安装。实际可下载平台以 Release 附件为准，当前平台验证范围见 [检查记录](https://github.com/Moyf/moys-asr-workflow/blob/main/docs/TEST_FEEDBACK_ELECTRON_INTEGRATION.md)。
 
 ## 可以做什么
 

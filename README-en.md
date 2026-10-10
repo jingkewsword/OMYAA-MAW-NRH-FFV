@@ -39,7 +39,7 @@ For source installation and a complete first run, see the [workflow guide](docs/
 
 This branch includes the [MOSE Electron editor](docs/MOSE.md): a shared MAW + MOSE suite and Installer on Windows, with standalone DMG/ZIP and AppImage/DEB build configurations for macOS/Linux. Native open, drag-and-drop, and Save As bind real file paths and update recent projects. Available downloads depend on the release; Windows has been tested locally, while macOS/Linux still require native build and installation checks.
 
-The Windows Installer checks for updates through Launcher and verifies downloaded Installers. Portable copies and standalone macOS/Linux MOSE packages currently require manual updates. Project associations respect existing default-app choices and apply to `.mosp`; legacy `.json` projects can still be opened without associating the general JSON extension.
+MOSE provides in-app update checks, release notes, verified downloads and cancellation. Installed Windows copies can quit and launch Installer after the unsaved-work guard; portable and macOS/Linux copies download packages for manual installation. Project associations respect existing default-app choices and apply to `.mosp`; legacy `.json` projects can still be opened without associating the general JSON extension.
 
 ## Core capabilities
 

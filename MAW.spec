@@ -191,6 +191,7 @@ a = Analysis(
         "maw.gui_config",
         "maw.gui_workflow",
         "maw.updater",
+        "maw.desktop_updates",
         "maw.local_models",
         "maw.local_runtime",
         "maw.local_debug",

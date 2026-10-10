@@ -34,6 +34,7 @@ UPDATE_REPOSITORY: Final[str] = "Moyf/moys-asr-workflow"
 UPDATE_API_URL: Final[str] = f"https://api.github.com/repos/{UPDATE_REPOSITORY}/releases"
 UPDATE_RELEASE_URL: Final[str] = f"https://github.com/{UPDATE_REPOSITORY}/releases"
 UPDATE_MANIFEST_NAME: Final[str] = "update-manifest.json"
+MOSE_UPDATE_MANIFEST_NAME: Final[str] = "mose-update-manifest.json"
 UPDATE_STATE_NAME: Final[str] = "state.json"
 UPDATE_PENDING_NAME: Final[str] = "pending.json"
 UPDATE_CHECK_INTERVAL_SECONDS: Final[int] = 24 * 60 * 60
@@ -358,9 +359,15 @@ def _expected_asset_name(
     arch: str,
     kind: str,
     flavor: str,
+    product: str = "maw",
 ) -> str | None:
     """Return the schema-v1 filename for a known MAW release asset."""
     suffix = f"v{version}"
+    if product == "mose" and flavor == "standard":
+        if platform_name == "macos" and arch == "arm64":
+            return f"MOSE-macOS-{arch}-{suffix}.{'zip' if kind == 'portable' else 'dmg'}"
+        if platform_name == "linux" and arch == "x64":
+            return f"MOSE-Linux-{arch}-{suffix}.{'AppImage' if kind == 'portable' else 'deb'}"
     if platform_name == "windows" and arch == "x64":
         if kind == "installer" and flavor == "standard":
             return f"MAW-Setup-Windows-x64-{suffix}.exe"
@@ -390,7 +397,11 @@ class UpdateClient:
         machine: str | None = None,
         frozen: bool | None = None,
         executable: Path | None = None,
+        product: str = "maw",
     ) -> None:
+        if product not in {"maw", "mose"}:
+            raise ValueError("unsupported update product")
+        self.product = product
         self.data_root = (data_root or default_app_data_root()).expanduser().resolve(strict=False)
         self.current_version = version_text(current_version)
         self.installation = detect_installation(system=system, machine=machine, frozen=frozen, executable=executable)
@@ -398,7 +409,7 @@ class UpdateClient:
 
     @property
     def update_root(self) -> Path:
-        return self.data_root / "updates"
+        return self.data_root / ("mose-updates" if self.product == "mose" else "updates")
 
     @property
     def state_path(self) -> Path:
@@ -549,9 +560,9 @@ class UpdateClient:
         except (URLError, TimeoutError, OSError, UnicodeError) as error:
             raise UpdateError("offline", str(error)) from error
 
-    @staticmethod
-    def _manifest_asset(release: UpdateRelease) -> Mapping[str, object] | None:
-        matches = [asset for asset in release.api_assets if str(asset.get("name") or "") == UPDATE_MANIFEST_NAME]
+    def _manifest_asset(self, release: UpdateRelease) -> Mapping[str, object] | None:
+        name = MOSE_UPDATE_MANIFEST_NAME if self.product == "mose" else UPDATE_MANIFEST_NAME
+        matches = [asset for asset in release.api_assets if str(asset.get("name") or "") == name]
         if len(matches) > 1:
             raise UpdateError("manifest_invalid", "Release contains duplicate update manifests")
         return matches[0] if matches else None
@@ -597,12 +608,12 @@ class UpdateClient:
         seen: set[str] = set()
         for asset in release.api_assets:
             name = str(asset.get("name") or "")
-            if name and name != UPDATE_MANIFEST_NAME:
+            if name and name not in {UPDATE_MANIFEST_NAME, MOSE_UPDATE_MANIFEST_NAME}:
                 if name in seen:
                     raise UpdateError("manifest_invalid", f"Release contains duplicate asset: {name}")
                 seen.add(name)
             url = str(asset.get("browser_download_url") or "")
-            if name and name != UPDATE_MANIFEST_NAME and _is_release_asset_url(url, tag=release.tag):
+            if name and name not in {UPDATE_MANIFEST_NAME, MOSE_UPDATE_MANIFEST_NAME} and _is_release_asset_url(url, tag=release.tag):
                 result[name] = asset
         return result
 
@@ -615,12 +626,13 @@ class UpdateClient:
         arch = self.installation.arch
         desired_kind = "installer" if self.installation.can_apply else "portable"
         desired_flavor = "standard"
-        if self.installation.kind == "portable" and self.installation.install_root:
+        if self.product == "maw" and self.installation.kind == "portable" and self.installation.install_root:
             ffmpeg_root = self.installation.install_root / "ffmpeg" / "bin"
             bundled_ffmpeg = ffmpeg_root / ("ffmpeg.exe" if platform_name == "windows" else "ffmpeg")
             bundled_ffprobe = ffmpeg_root / ("ffprobe.exe" if platform_name == "windows" else "ffprobe")
             desired_flavor = "standard" if bundled_ffmpeg.is_file() and bundled_ffprobe.is_file() else "lite"
         candidates: list[UpdateAsset] = []
+        compatible_names: set[str] = set()
         for raw in raw_assets:
             if not isinstance(raw, Mapping):
                 raise UpdateError("manifest_invalid", "manifest contains a non-object asset")
@@ -641,12 +653,21 @@ class UpdateClient:
                 if api_size <= 0 or api_size != manifest_size:
                     raise UpdateError("asset_size_invalid", f"asset size does not match the Release: {name}")
             asset = UpdateAsset.from_payload(merged)
+            products = raw.get("products", ["maw"])
+            if not isinstance(products, list) or not products or any(not isinstance(p, str) or p not in {"maw", "mose"} for p in products):
+                raise UpdateError("manifest_invalid", "invalid asset products")
+            native_mose = asset.name.startswith("MOSE-")
+            if native_mose and products != ["mose"]:
+                raise UpdateError("manifest_invalid", "MOSE packages must identify their product")
+            if self.product in products:
+                compatible_names.add(asset.name)
             expected_name = _expected_asset_name(
                 version=release.version_text,
                 platform_name=asset.platform,
                 arch=asset.arch,
                 kind=asset.kind,
                 flavor=asset.flavor,
+                product="mose" if native_mose else "maw",
             )
             if expected_name is not None and asset.name != expected_name:
                 raise UpdateError("manifest_invalid", f"asset filename does not match its release metadata: {asset.name}")
@@ -654,7 +675,7 @@ class UpdateClient:
         matches = [
             asset
             for asset in candidates
-            if asset.platform == platform_name and asset.arch == arch and asset.kind == desired_kind and asset.flavor == desired_flavor
+            if asset.name in compatible_names and asset.platform == platform_name and asset.arch == arch and asset.kind == desired_kind and asset.flavor == desired_flavor
         ]
         if matches:
             return matches[0]

@@ -12,7 +12,7 @@
 
 | 平台 | 包与启动方式 | 后端关系 | 工程打开方式 |
 | --- | --- | --- | --- |
-| Windows x64 | MAW + MOSE 套件 / Installer；启动 MAW 或 `MAW/MOSE/MOSE.exe` | 共用同套件的 `MAW.exe`、Python 与 FFmpeg | `.mosp` 经 Launcher 更新检查后打开 MOSE；独立文档图标 |
+| Windows x64 | MAW + MOSE 套件 / Installer；启动 MAW 或 `MAW/MOSE/MOSE.exe` | 共用同套件的 `MAW.exe`、Python 与 FFmpeg | `.mosp` 直接打开 MOSE；独立文档图标 |
 | macOS arm64 | MOSE DMG / ZIP，安装并启动 `MOSE.app` | 应用内含原生后端与 FFmpeg | MOSP UTI、文档图标、Finder 打开事件 |
 | Linux x64 | MOSE AppImage / DEB，启动 AppImage 或 `mose` | 包内含原生后端与 FFmpeg | DEB 提供 MIME / 桌面入口；AppImage 可注册当前用户打开方式 |
 
@@ -36,9 +36,9 @@ Chromium 的编解码支持、显存和大媒体内存开销仍由实际运行�
 
 ## 系统关联和更新
 
-Windows 安装版按当前用户安装到 `%LOCALAPPDATA%/Programs/MAW`。`.mosp` 命令指向 `MAW.exe --open-project "%1"`，双击也经过 Launcher 的更新检查；注册会保留已有默认应用选择，仅提供自己的“打开方式”。兼容旧 `.json` 工程，但不为通用 JSON 建立系统关联。
+Windows 安装版按当前用户安装到 `%LOCALAPPDATA%/Programs/MAW`。`.mosp` 命令指向 `MOSE/MOSE.exe "%1"`，双击直接打开独立编辑器；注册会保留已有默认应用选择，仅提供自己的“打开方式”。兼容旧 `.json` 工程，但不为通用 JSON 建立系统关联。
 
-Windows 安装版通过 Launcher 下载、校验并安装官方 Installer；便携版打开 Release 页面手动更新。macOS/Linux 的 MOSE 独立包目前也需要手动下载更新，未提供独立的自动更新服务。
+MOSE 工具栏「软件更新」支持每天一次的自动检查、版本与更新说明、下载进度、取消和校验。Windows 安装版可在未保存确认后退出并启动安装器，完成后打开 MOSE；便携版与 macOS/Linux 下载后手动安装。缺少专用 MOSE 清单或平台包时不会下载 MAW-only 更新。详见 [桌面开发与更新边界](../desktop/README.md)。
 
 macOS 由应用声明 MOSP UTI 与文档图标。Linux DEB 安装后可从文件管理器选择 MOSE；AppImage 先放到固定位置，再点击 Tools → “添加工程打开方式…”。该菜单只向当前用户 XDG 目录注册，不更换默认应用；移动 AppImage 后应重新注册。图标与默认打开行为需要在相应系统检查。
 

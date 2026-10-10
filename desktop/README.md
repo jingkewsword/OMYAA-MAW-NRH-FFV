@@ -26,7 +26,8 @@ Windows 共用套件内唯一的 Python 与 FFmpeg，不能把 `MOSE/` 单独移
 
 ```sh
 uv sync
-npm ci
+pnpm install --frozen-lockfile
+pnpm run build:editor
 npm ci --prefix desktop
 npm run dev --prefix desktop
 ```
@@ -37,7 +38,7 @@ npm run dev --prefix desktop
 npm start --prefix desktop -- "/path/to/project.mosp"
 ```
 
-改 `web/` 后刷新窗口即可看到 Server 渲染的新页面。日常不要生成 `blank-editor.html`；内联副本待发布前统一重生成。
+修改编辑器 JS 后先运行 `pnpm run build:editor`（或持续运行 `pnpm run watch:editor`），再刷新窗口；模板与 CSS 仍按请求读取。日常不要生成 `blank-editor.html`；内联副本待发布前统一重生成。
 
 ## 构建
 
@@ -73,11 +74,15 @@ npm run build --prefix desktop
 
 ## 系统打开方式与更新
 
-Windows 安装版及完整便携套件向当前用户注册 `.mosp` 打开方式与文档图标；命令为 `MAW.exe --open-project "%1"`，经过 Launcher 更新检查再打开 MOSE。保留已有默认应用选择，不关联通用 `.json` 扩展名。安装版通过 Launcher 下载并校验新 Installer；便携版手动更新。
+Windows 安装版及完整便携套件向当前用户注册 `.mosp` 打开方式与文档图标，命令直接指向 `MOSE/MOSE.exe "%1"`，无需先打开 Launcher。保留已有默认应用选择，不关联通用 `.json`。安装完成可直接打开 MOSE，并可选择创建桌面快捷方式；后端仍共用同套件的 MAW，不能单独搬走 MOSE 子目录。
+
+工具栏「软件更新」提供版本检查、纯文本更新说明、下载进度、取消下载与完成后定位文件。安装版默认每天自动检查一次，可关闭；源码模式仅手动检查。更新源为官方 GitHub Releases，MOSE 使用独立的 `mose-update-manifest.json` 和 `mose-updates` 缓存，旧的 MAW 清单保持兼容。未发布 MOSE 清单或缺少当前平台包时只提供发布页入口，不把 MAW-only 包当成 MOSE 更新。
+
+Windows 安装版下载后可「退出并安装」：主进程再次核验大小与 SHA-256，经原生确认和未保存拦截后停止自己的后端，再启动安装器。安装器保留交互提示，不静默强关其他 Launcher、不重启系统；更新完成重新打开 MOSE。取消未保存确认时保留编辑器与后端。便携版、macOS/Linux 可下载并定位经过校验的包，仍需手动替换或安装。
 
 macOS 使用 MOSP UTI、文档图标和 `open-file` 事件。Linux DEB 安装 MIME 和桌面入口；AppImage 移到固定位置后，可使用 Tools → “添加工程打开方式…” 写入当前用户 XDG 目录，再从文件管理器选择 MOSE。菜单注册不会更换默认应用；移动 AppImage 后应重新注册。桌面缓存工具缺失时会提示，重新登录后再检查。
 
-macOS/Linux MOSE 独立包当前手动下载更新，未实现应用内自动更新。系统关联与默认图标显示受安装方式和文件管理器缓存影响，需分别验收。
+macOS/Linux 暂未实现自动替换及重启安装。系统关联与默认图标显示受安装方式和文件管理器缓存影响，需分别验收。
 
 ## 验证与安全
 
@@ -91,6 +96,6 @@ E2E 可设置 `MOSE_TEST_EXECUTABLE` 指向实际打包的编辑器，否则运�
 
 窗口启用 `contextIsolation`、sandbox 并关闭 `nodeIntegration`；IPC 只接受当前编辑器主 frame 的精确 localhost origin。后端仅监听 `127.0.0.1`，令牌通过子进程环境与请求头传递，不放入命令行或日志。工程写入目标只取主进程保存对话框；偏好仅写固定的 userData 文件，限制键名与体积并保留上一个磁盘版本。HTTP 不提供任意路径写入。
 
-当前 Windows 已进行源码与打包交互检查；macOS/Linux 原生 CI 已接线，尚未运行。Installer 安装/卸载及三端文件管理器双击仍需原生验收，详细证据见 [检查记录](../docs/TEST_FEEDBACK_ELECTRON_INTEGRATION.md)。
+当前 Windows 已进行源码与打包交互检查；macOS/Linux 原生 CI 已接线，尚未运行。Installer 安装/卸载及三端文件管理器双击仍需原生验收。桌面基础能力见 [检查记录](../docs/TEST_FEEDBACK_ELECTRON_INTEGRATION.md)，本轮主线合并、更新功能与打包证据见 [starlit 开发记录](../docs/TEST_FEEDBACK_STARLIT_20261010.md)。
 
 License: AGPL-3.0-only（与 MAW 主仓库一致）。

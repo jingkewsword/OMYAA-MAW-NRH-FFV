@@ -118,17 +118,19 @@ test('native project selection and dropped project keep paths, binding and recen
     }, stickers);
     await page.locator('#editor-settings-toggle').click();
     await page.locator('#editor-settings-tab-sticker').click();
-    await page.locator('#sticker-root-btn').click();
     await page.locator('#sticker-root-browse').click();
     await page.waitForFunction((selected) => MaweBoot.STICKER_ROOT === selected, stickers.replaceAll('\\', '/'));
-    const spacing = await page.locator('#sticker-root-modal .modal-field-row').evaluate((row) => ({
+    const spacing = await page.locator('#sticker-root-input').evaluate((input) => {
+      const row = input.parentElement;
+      return ({
       gap: Number.parseFloat(getComputedStyle(row).gap),
       top: row.getBoundingClientRect().top - row.previousElementSibling.getBoundingClientRect().bottom,
-    }));
+      });
+    });
     assert.equal(spacing.gap >= 8 && spacing.top >= 8, true, JSON.stringify(spacing));
     await page.screenshot({ path: path.join(root, 'directory-picker.png') });
     assert.equal(existsSync(path.join(root, 'directory-picker.png')), true);
-    await page.locator('#sticker-root-cancel').click();
+    await page.locator('#editor-settings-close').click();
     assert.equal(await page.evaluate(() => MaweProjectSave.saveCurrentProject({ silent: true })), true);
     assert.equal(await page.evaluate(() => MaweServerSave.hasUnsavedProjectChanges()), false);
     assert.deepEqual(errors, []);
