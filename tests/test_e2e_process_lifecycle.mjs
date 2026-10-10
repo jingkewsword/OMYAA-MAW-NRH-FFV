@@ -9,7 +9,18 @@ import { createServer } from 'node:net';
 
 const driver = fileURLToPath(new URL('./fixtures/e2e-lifecycle-driver.mjs', import.meta.url));
 const synthetic = fileURLToPath(new URL('./fixtures/e2e-process-tree.py', import.meta.url));
-const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
+const alive = pid => {
+  try {
+    process.kill(pid, 0);
+    // Linux can retain an already-exited orphan as a zombie until PID 1 reaps
+    // it. It cannot execute or own a listening socket; do not count it as live.
+    if (process.platform === 'linux') {
+      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+      if (stat.slice(stat.lastIndexOf(')') + 2).startsWith('Z ')) return false;
+    }
+    return true;
+  } catch { return false; }
+};
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 async function startBystander() {
