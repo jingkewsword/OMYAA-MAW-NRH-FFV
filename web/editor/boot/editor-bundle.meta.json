@@ -320,7 +320,7 @@
     "editor/io/editor-server-connection.js": "253bfd5c6783fd0f8035130207dff3ba06996015c80eb29883156671cfcded06",
     "editor/io/editor-drag-drop.js": "ab5228ff0d7b81512ebf3edf4e9b0d7ca0ceb83937313f752201a04cd0bdc80b",
     "editor/io/editor-sticker-otio-export.js": "0a96a6b629aefa7a982502d2ba54f62c492d42ff4e820e157af1dc89d9e9b0a8",
-    "editor/io/editor-json-repair.js": "101238bc0e3c415682ccb942c216f395d4c25417f81e59343ec3778ab634cad0",
+    "editor/io/editor-json-repair.js": "e666943c7972b19387c47b3ff285454984f268915c33017459970434cf889cfd",
     "editor/ui/editor-help-panel.js": "09d0778f0720704c94315df5f2b80b9d24e336ea09d1d336b74fcde832441ab4",
     "editor/ui/editor-theme.js": "6a8a3a01eb7a4a976fa0dd9f56ea8f374027249270c876f62cde5f7fb6dc1aec",
     "editor/ui/editor-gap-remove-ui.js": "6dc41c8b56b16e12399ab898111b0df0bfc0917e2d7af78a70784a3f1888ce0d",
@@ -381,18 +381,13 @@
     "editor/io/editor-wiring-file-drop.js": "6fcb7821cdd3215433c91913630ac16fdbacf9b3c675f6bb2e709a1bd58d0eb5",
     "editor/boot/editor-startup.js": "23317684cd154a502a5b8376ae4434886b0a3ec1fc9c8f8afc714a9a983d377e",
     "editor/io/editor-agent-core.js": "1e27e01edb1dc4800788b45f1c9c3640710ab71c837391a3e5f6d80306fee9e1",
-    "editor/io/editor-agent.js": "e2b80869524a34293ddda95e9a48647e3f2fb8c1ebb2cd420b2511d3c45bcc83",
+    "editor/io/editor-agent.js": "fc944c2969a4c80f9bbed020d9ae507d889f7b9b8537cd55d511a0061452eeb3",
     "editor/boot/editor-onboarding.js": "488416a0a41bb30ad4343e6649f247c1f85970b818514a35a60f3af767177393"
   },
-  "configHash": "7899bafbd62eea744fc13c9425c187255f72f39e946801631ff381b104f5c6ba",
+  "configHash": "c36247d10d8cadcb9b0cfa0a161e414e3550087108a1a8fa620e07d122286ffa",
   "builderHash": "1a0a68295e7f276f7dfd728236489c261424ce86664cad4827cad5cd8c64124d",
   "metafile": {
     "inputs": {
-      "web/editor/io/editor-agent-core.js": {
-        "bytes": 6002,
-        "imports": [],
-        "format": "esm"
-      },
       "web/shared/host/storage.js": {
         "bytes": 313,
         "imports": [],
@@ -698,14 +693,14 @@
         "imports": [],
         "format": "esm"
       },
+      "web/editor/io/editor-agent-core.js": {
+        "bytes": 6002,
+        "imports": [],
+        "format": "esm"
+      },
       "web/editor-entry.mjs": {
-        "bytes": 1738578,
+        "bytes": 1738913,
         "imports": [
-          {
-            "path": "web/editor/io/editor-agent-core.js",
-            "kind": "import-statement",
-            "original": "maw-factory:editor/io/editor-agent-core.js"
-          },
           {
             "path": "web/shared/host/storage.js",
             "kind": "import-statement",
@@ -1010,6 +1005,11 @@
             "path": "web/editor/media/waveform/playback.js",
             "kind": "import-statement",
             "original": "maw-factory:editor/media/waveform/playback.js"
+          },
+          {
+            "path": "web/editor/io/editor-agent-core.js",
+            "kind": "import-statement",
+            "original": "maw-factory:editor/io/editor-agent-core.js"
           }
         ],
         "format": "esm"
@@ -1021,9 +1021,6 @@
         "exports": [],
         "entryPoint": "web/editor-entry.mjs",
         "inputs": {
-          "web/editor/io/editor-agent-core.js": {
-            "bytesInOutput": 3823
-          },
           "web/shared/host/storage.js": {
             "bytesInOutput": 141
           },
@@ -1207,11 +1204,14 @@
           "web/editor/media/waveform/playback.js": {
             "bytesInOutput": 4423
           },
+          "web/editor/io/editor-agent-core.js": {
+            "bytesInOutput": 3823
+          },
           "web/editor-entry.mjs": {
-            "bytesInOutput": 1011812
+            "bytesInOutput": 1012004
           }
         },
-        "bytes": 1354809
+        "bytes": 1355001
       }
     }
   }

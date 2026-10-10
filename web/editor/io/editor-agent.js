@@ -6,14 +6,16 @@
   const applyButton = document.getElementById('agent-review-apply');
   const fileInput = document.getElementById('agent-proposal-file');
   let pending = null;
-  function snapshot() {
-    MaweProjectSave.flushInlineEditsForSave();
-    return JSON.parse(MaweJsonRepair.buildJson());
+  function snapshot({ prepare = false } = {}) {
+    if (prepare) MaweProjectSave.flushInlineEditsForSave();
+    else if (MaweProjectSave.inlineEditHasUncommittedText()) throw new Error('请完成正在编辑的文字后重新审阅提案');
+    // Review must not repair or otherwise mutate the project before the user applies.
+    return JSON.parse(MaweJsonRepair.buildJson({ repair: prepare }));
   }
   function errorMessage(error) { MaweHint.flashHint(error.message || 'Agent 提案处理失败', 'invalid'); }
   document.getElementById('agent-export').addEventListener('click', async () => {
     try {
-      const project = snapshot();
+      const project = snapshot({ prepare: true });
       const indices = [...MaweState.selection.indices('main')].sort((a, b) => a - b);
       const selected = indices.map(i => project.segments[i]).filter(Boolean);
       const data = { schema: 'moy.asr.agent.snapshot.v1', project, context: {
