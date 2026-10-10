@@ -48,7 +48,7 @@ export function spawnServerProcess(command, args, options = {}) {
   proc.once('exit', () => {
     // POSIX group ownership survives its leader's exit. Reap the rest now,
     // before dropping the record; Windows Job ownership handles this in-kernel.
-    try { terminate(record); } catch (error) { record.error = error; }
+    try { terminate(record); } catch (error) { record.cleanupError = error; }
   });
   proc.once('close', () => { record.closed = true; active.delete(record); });
   return proc;
@@ -59,14 +59,14 @@ export function stopServerProcess(proc) {
   if (!record) return Promise.reject(new Error('Not an owned E2E server'));
   if (record.stop) return record.stop;
   record.stop = new Promise((resolve, reject) => {
-    if (record.closed) { resolve(); return; }
+    if (record.closed) { record.cleanupError ? reject(record.cleanupError) : resolve(); return; }
     let timer;
     const finish = error => {
       clearTimeout(timer);
       proc.removeListener('close', onClose);
       error ? reject(error) : resolve();
     };
-    const onClose = () => finish();
+    const onClose = () => finish(record.cleanupError);
     proc.once('close', onClose);
     // A timeout is failure, never evidence that descendants or pipes closed.
     timer = setTimeout(() => finish(new Error(`E2E server ${proc.pid} did not close within 5s`)), 5000);
