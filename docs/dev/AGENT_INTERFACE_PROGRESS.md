@@ -19,7 +19,7 @@
 | CLI 查询、提案与范围转写 | 已修复 | 9 个 Python 测试通过，含真实 FFmpeg 800 ms 截取 + fixture 转写回填；未调用付费服务 |
 | 编辑器快照、预览、冲突与撤销 | 已修复 | 2 个真实浏览器 e2e 通过；CLI → 导出/审阅/取消/应用/撤销/重做/保存/冲突；源码与 bundle 已更新 |
 | Skill、接入文档、示例 | 已修复 | `.opencode/skill/maw-agent/SKILL.md`；按 skill-creator 校验通过；接入文档含可执行 PowerShell 示例 |
-| 测试与人工核验清单 | 进行中 | 核心与浏览器已通过；最终回归与人工核验交付进行中 |
+| 测试与人工核验清单 | 已修复 | 最终 Python 1878 项 OK（30 skipped）；JS 369 + 15 项通过；e2e 2 项通过；仓库外人工清单已生成，未代替人工勾选 |
 
 ## 第一阶段验证
 
@@ -45,4 +45,15 @@
 - `buildJson({repair:false})` 提供无时间修复的序列化路径；导入/审阅/拒绝提案不再提前修复工程时间。导出快照仍显式提交输入并沿用保存规范化。
 - 浏览器新增回归：人为制造未保存的异常时间后导入旧提案，冲突被拒绝且原时间不被提前修复。2 / 2 e2e 通过（9.9 秒）；截图已查看，审阅按钮区间距符合要求。
 - 完整 Python 回归第二轮：1816 项，5 failures + 4 errors，30 skipped。其中 7 项关联缺少 `quapeaks`；2 项关联模块清单顺序/完整性。本次已补依赖并修正模块清单，未忽略失败。
-- 针对修正后的 editor_assets / waveform / media_cache / quapeaks_generation / reapeaks 重跑 121 项，全部通过。最终完整回归进行中。
+- 针对修正后的 editor_assets / waveform / media_cache / quapeaks_generation / reapeaks 重跑 121 项，全部通过。
+
+## 最终交付验证
+
+- 完整 Python 回归：`python -X utf8 -m unittest discover -s tests -p test_*.py -v`，1878 项，`OK (skipped=30)`，103.605 秒，退出码 0。安装 quapeaks 后此前导入失败的模块参与实际执行，故数量增加。使用独立 venv、显式 UTF-8 与 240 秒超时，无真实付费请求。
+- 最终 `check:editor` / `typecheck` / JS 语法、顺序、Agent 与命令测试（15 项）均通过；既有字幕/波形工具测试 369 项通过。
+- Agent Python 专项 10 项通过，其中真实 FFmpeg + fixture ASR 测试通过；云端账号、上传、计费和识别质量未经实服务验证。
+- 浏览器 e2e：2 项通过；覆盖真实 CLI 文件往返、主字幕选区、审阅取消、应用、撤销/重做、保存、范围外数据保留、审阅前后冲突以及拒绝时不修改时间。截图已视觉检查，操作区间距 >= 8px。
+- Skill validator / ruff / `git diff --check` 通过。
+- 人工清单按仓库模板生成在仓库外的 `../agent-interface-handoff-20261010/verification.html`，包含实际截图；人工项保持未勾选。
+- 阶段代码提交 `bf092968`、`0d7c80d5`、`b88087d9` 已推送至用户 origin 功能分支。原 main 仍为 `3a10baf1` 且干净；未触碰另一个 docs worktree。
+- 实现完成；未实施的范围：MCP 包装、实时浏览器会话接口、其他 ASR 引擎、打包 CLI 入口。明确限制：主轨、范围完整覆盖、结构替换不支持副轨绑定/装饰分组/帧模式，重听写不自动回填多说话人片段。
