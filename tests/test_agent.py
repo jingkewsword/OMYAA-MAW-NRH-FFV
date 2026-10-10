@@ -2,7 +2,10 @@ import contextlib
 import copy
 import io
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 import wave
@@ -173,6 +176,20 @@ class AgentTests(unittest.TestCase):
                 result = agent.transcribe_range(project(), media, 1000, 1800, model="fixture", adapter=qwen)
             cue = result["operation"]["segments"][0]
             self.assertEqual((cue["start"], cue["end"], cue["speaker"]), (1000, 1800, "Alice"))
+
+    def test_cli_unicode_output_and_invalid_json(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "source.mosp"
+            source = project()
+            source["segments"][1]["text"] = "中文测试"
+            agent.write_new(path, source)
+            result = subprocess.run([sys.executable, "-m", "maw.agent", "read", str(path)],
+                                    capture_output=True, check=True,
+                                    env={**os.environ, "PYTHONUTF8": "0", "PYTHONIOENCODING": "ascii"})
+            self.assertEqual(json.loads(result.stdout.decode("utf-8"))["result"]["project"]["segments"][1]["text"], "中文测试")
+            path.write_text('{"segments":[],"invalid":NaN}', encoding="utf-8")
+            with self.assertRaises(agent.AgentError):
+                agent.read_json(path)
 
 
 if __name__ == "__main__":

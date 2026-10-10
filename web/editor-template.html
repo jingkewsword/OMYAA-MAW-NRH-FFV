@@ -1785,11 +1785,11 @@ __WAVEFORM_CSS__
 
 <input type="file" id="open-project-file" accept=".json,.mosp,application/json" style="display:none">
 <input type="file" id="agent-proposal-file" accept=".json,application/json" hidden>
-<dialog id="agent-review" style="width:min(800px,85vw);max-height:85vh;background:var(--bg,#20242b);color:inherit;border:1px solid #888;border-radius:12px;padding:20px">
+<dialog id="agent-review" class="agent-review-dialog">
   <h2>审阅 Agent 提案</h2>
   <p style="margin-top:12px">核对文字、范围和字词时间码数量。应用为一次可撤销编辑；不可靠的字词映射会沿用编辑器规则清除。</p>
-  <div id="agent-review-report" style="margin-top:12px;max-height:55vh;overflow:auto;white-space:normal"></div>
-  <div style="display:flex;gap:12px;margin-top:16px">
+  <div id="agent-review-report" class="agent-review-report"></div>
+  <div class="agent-review-actions">
     <button type="button" id="agent-review-cancel">取消</button>
     <button type="button" id="agent-review-apply">应用提案</button>
   </div>
