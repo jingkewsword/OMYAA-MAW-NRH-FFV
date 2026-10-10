@@ -32,6 +32,11 @@ jobs:
           python-version: '3.11'
           architecture: x64
 
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.28.4
+          run_install: false
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -94,7 +99,8 @@ jobs:
       - name: Install Electron dependencies
         run: |
           npm ci --prefix desktop
-          npm ci --ignore-scripts
+          pnpm install --frozen-lockfile
+          pnpm run check:editor
 
       - name: Run Electron unit tests
         run: npm test --prefix desktop
@@ -404,6 +410,11 @@ jobs:
           python-version: '3.11'
           architecture: ${{ matrix.arch }}
 
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.28.4
+          run_install: false
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -464,7 +475,8 @@ jobs:
       - name: Install and check Electron dependencies
         run: |
           npm ci --prefix desktop
-          npm ci --ignore-scripts
+          pnpm install --frozen-lockfile
+          pnpm run check:editor
           npm test --prefix desktop
           uv run --no-sync python -m scripts.build_project_icon --check
 

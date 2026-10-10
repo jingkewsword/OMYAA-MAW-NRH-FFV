@@ -64,11 +64,13 @@ from maw.gui_config import (
     provider_for_model,
     save_env,
 )
-from maw.gui_platform import apply_dark_title_bar, asset_path, creationflags, popen_process_tree, process_group_kwargs, release_process_tree, startupinfo, terminate_process_tree
-from maw.gui_workflow import TranscriptionCancelledError, TranscriptionProcessError, TranscriptionRequest, TranscriptionResult, _bundled_ffmpeg_directory, _child_environment, _ffmpeg_search_path, build_alignment_serve_command, build_output_paths, build_serve_command, default_srt_path, raw_response_path, run_transcription, unique_output_path, with_test_suffix
+from maw.gui_platform import apply_dark_title_bar, asset_path, creationflags, popen_process_tree, process_group_kwargs, release_process_tree, restore_host_library_path, startupinfo, terminate_process_tree
+from maw.gui_workflow import _bundled_ffmpeg_directory, TranscriptionCancelledError, TranscriptionProcessError, TranscriptionRequest, TranscriptionResult, _child_environment, _ffmpeg_search_path, build_alignment_serve_command, build_output_paths, build_serve_command, default_srt_path, raw_response_path, run_transcription, unique_output_path, with_test_suffix
 from maw.launcher_batch import BatchItem, run_batch
 from maw.output_naming import format_elapsed, maw_root
 from maw.local_log import LocalLogSink, TeeWriter, default_log_directory, install_stdio_tee, redact_sensitive_text
+from maw.diagnostics import BUNDLED_APP_VERSION, app_version, error_context
+from maw.file_errors import file_error_code
 from maw.local_debug import local_debug_manifest_path
 from maw.alignment_models import ALIGNMENT_MODELS, alignment_model_by_id, alignment_models_payload, inspect_alignment_model, normalize_alignment_model_id
 from maw.local_runtime import (
@@ -162,7 +164,6 @@ EDITOR_HEALTH_PROBE_PATH: Final = "/api/startup-status"
 # 短暂超过默认 0.25s，但仍远小于 SERVER_START_TIMEOUT 的总预算。
 EDITOR_HEALTH_PROBE_TIMEOUT: Final = 2.0
 # Keep this aligned with pyproject.toml; release workflows synchronize and verify it.
-BUNDLED_APP_VERSION = "1.8.0-beta.1"
 # MOSE ships inside the same suite as MAW, so its registry marker must follow
 # the public project version rather than retaining the prototype 0.1.x value.
 MOSE_VERSION = BUNDLED_APP_VERSION
@@ -216,8 +217,6 @@ ERROR_MESSAGES: Final[dict[str, str]] = {
     "alignment_media_invalid": "The selected speech-alignment media file does not exist or is unsupported.",
     "alignment_server_no_response": "Speech-alignment server did not respond.",
     "alignment_server_start_failed": "Speech-alignment server failed to start.",
-    "mose_not_found": "MOSE desktop editor was not found in this MAW package.",
-    "mose_start_failed": "MOSE desktop editor failed to start.",
     "server_stop_not_maw": "The process using this port is not a MAW editor server.",
     "server_stop_failed": "Unable to stop the MAW editor server.",
     "sticker_dir_invalid": "Sticker directory does not exist.",
@@ -226,6 +225,10 @@ ERROR_MESSAGES: Final[dict[str, str]] = {
     "custom_prompt_required": "A custom prompt is required.",
     "postprocess_config_invalid": "自动后处理配置不完整。",
     "postprocess_failed": "转写已完成，但自动后处理失败。",
+    "intermediate_path_too_long": "中间文件创建失败：文件名或路径过长，请缩短原文件名或目录路径，重新选择文件后重试。",
+    "file_path_too_long": "文件名或路径过长，请缩短原文件名或目录路径，重新选择文件后重试。",
+    "intermediate_file_failed": "中间文件创建或写入失败，请检查目录权限、磁盘空间和文件占用。",
+    "file_write_failed": "文件创建或写入失败，请检查目录权限、磁盘空间和文件占用。",
     "subtitle_invalid": "Subtitle or project could not be parsed.",
     "script_invalid": "Script could not be parsed.",
     "match_too_low": "Script and subtitle match coverage is too low.",
@@ -282,14 +285,7 @@ def _toolbox_operation(method: Callable[..., object]) -> Callable[..., object]:
 
 def _app_version(paths: object) -> str:
     """Read project.version from pyproject.toml for the hero wordmark; fall back to the bundled release."""
-    root = getattr(paths, "root", None)
-    pyproject = (root / "pyproject.toml") if root else Path("pyproject.toml")
-    try:
-        text = Path(pyproject).read_text(encoding="utf-8")
-    except OSError:
-        return BUNDLED_APP_VERSION
-    match = re.search(r'(?m)^version = "([^"]+)"\r?$', text)
-    return match.group(1) if match else BUNDLED_APP_VERSION
+    return app_version(getattr(paths, "root", None))
 
 
 def _is_ffprobe_start_failure(lines: Sequence[str]) -> bool:
@@ -1508,10 +1504,37 @@ class LauncherApi:
             )
             self._emit_postprocess_status("toolbox_status_writing")
         except (OSError, UnicodeError, ValueError, TextConversionUnavailable) as error:
-            return {"ok": False, "field": "postprocessInput", "code": "postprocess_failed", "detail": str(error), "error": str(error)}
+            return {"ok": False, "field": "postprocessInput", "code": file_error_code(error) or "postprocess_failed", "detail": str(error), "error": str(error)}
         return _subtitle_artifact_result(result)
 
+    def check_script_alignment(self, payload: Mapping[str, object]) -> dict[str, object]:
+        """Input/chunk check runs in the main runtime; no model is needed."""
+        from maw.script_timestamp_alignment import ScriptAlignmentRequest, check_script_alignment
+
+        media_path = _optional_path(payload.get("mediaPath"))
+        if not media_path or not _optional_path(payload.get("scriptPath")):
+            return _error_result("toolboxTimestampScriptPath", "alignment_failed", "文稿驱动对齐需要文稿与媒体文件。")
+        self._emit_postprocess_status("toolbox_status_reading")
+        try:
+            report = check_script_alignment(ScriptAlignmentRequest(media_path=media_path, **self._script_alignment_options(payload)))
+            return {"ok": True, "report": report.to_payload()}
+        except (OSError, UnicodeError, ValueError, RuntimeError) as error:
+            return _error_result("toolboxTimestampScriptPath", "alignment_failed", str(error))
+
+    @staticmethod
+    def _script_alignment_options(payload: Mapping[str, object]) -> dict[str, object]:
+        track = str(payload.get("audioTrack") if payload.get("audioTrack") is not None else "").strip()
+        return {
+            "script_path": _optional_path(payload.get("scriptPath")),
+            "language": str(payload.get("language") or "zh"),
+            "silence_db": float(str(payload.get("silenceDb", -35))),
+            "silence_ms": int(str(payload.get("silenceMs", 500))),
+            "anchors_path": _optional_path(payload.get("anchorsPath")),
+            "audio_track": int(track) if track else None,
+        }
+
     def run_timestamp_alignment(self, payload: Mapping[str, object]) -> dict[str, object]:
+        script_mode = str(payload.get("alignmentMode") or "fill") == "script"
         model_id = normalize_alignment_model_id(str(payload.get("modelId") or ""))
         try:
             model = alignment_model_by_id(model_id)
@@ -1520,6 +1543,11 @@ class LauncherApi:
         project_path = _optional_path(payload.get("projectPath"))
         srt_path = _optional_path(payload.get("srtPath"))
         media_path = _optional_path(payload.get("mediaPath"))
+        if script_mode:
+            if model.engine != "qwen":
+                return _error_result("toolboxTimestampModel", "alignment_failed", "文稿驱动对齐仅支持 Qwen ForcedAligner（不调用 ASR）。")
+            if not media_path or not _optional_path(payload.get("scriptPath")):
+                return _error_result("toolboxTimestampScriptPath", "alignment_failed", "文稿驱动对齐需要文稿与媒体文件。")
         model_cache_root = effective_config(self.paths.env_path).model_cache_root
         runtime = self._local_runtime_status(model_cache_root)
         status = inspect_alignment_model(
@@ -1543,6 +1571,9 @@ class LauncherApi:
             # 输入完全相同。时间码工具固定只更新工程，忽略共享输出选择。
             output_mode = OutputMode.JSON.value
             requested_model_path = _optional_path(payload.get("modelPath"))
+            script_options = {}
+            if script_mode:
+                script_options = self._script_alignment_options(payload)
             if runtime.ready:
                 worker_result = run_timestamp_alignment_in_runtime(
                     project_path=project_path,
@@ -1556,6 +1587,7 @@ class LauncherApi:
                     device=str(payload.get("device") or "auto"),
                     model_cache_root=model_cache_root,
                     on_event=lambda line: self._emit({"type": "log", "message": line}),
+                    **script_options,
                 )
                 artifact_result = worker_result.get("artifact")
                 report_result = worker_result.get("report")
@@ -1563,6 +1595,19 @@ class LauncherApi:
                     raise LocalRuntimeError("本地字词时间码命令返回了无效结果。")
                 self._emit_postprocess_status("toolbox_status_writing")
                 return {"ok": True, **dict(artifact_result), "report": dict(report_result)}
+            if script_mode:
+                from maw.script_timestamp_alignment import ScriptAlignmentRequest, run_script_alignment
+
+                artifact, report = run_script_alignment(ScriptAlignmentRequest(
+                    media_path=media_path,
+                    model_path=requested_model_path,
+                    model_cache_root=Path(model_cache_root) if model_cache_root else None,
+                    device=str(payload.get("device") or "auto"),
+                    output_directory=_optional_path(payload.get("outputDirectory")),
+                    **script_options,
+                ))
+                self._emit_postprocess_status("toolbox_status_writing")
+                return {**_subtitle_artifact_result(artifact), "report": report.to_payload()}
             artifact, report = process_timestamp_alignment(
                 TimestampAlignmentRequest(
                     project_path=project_path,
@@ -1626,7 +1671,7 @@ class LauncherApi:
         except SubtitleMatchError as error:
             return _error_result("postprocessScriptPath", "subtitle_invalid", str(error))
         except (OSError, UnicodeError, ValueError) as error:
-            return {"ok": False, "field": "postprocessScriptPath", "code": "postprocess_failed", "detail": str(error), "error": str(error)}
+            return {"ok": False, "field": "postprocessScriptPath", "code": file_error_code(error) or "postprocess_failed", "detail": str(error), "error": str(error)}
         return _subtitle_artifact_result(result)
 
     @_toolbox_operation
@@ -1669,6 +1714,7 @@ class LauncherApi:
                     notes=str(payload.get("notes") or "").strip(),
                 ),
                 complete=llm_complete(settings),
+                on_status=self._emit_postprocess_status,
             )
             self._emit_postprocess_status("toolbox_status_writing")
         except PostprocessFileError as error:
@@ -1684,7 +1730,7 @@ class LauncherApi:
         except (AiCleanupError, LlmClientError) as error:
             return _llm_error_result("postprocessScriptPath", "postprocess_failed", error)
         except (OSError, UnicodeError, ValueError) as error:
-            return {"ok": False, "field": "postprocessScriptPath", "code": "postprocess_failed", "detail": str(error), "error": str(error)}
+            return {"ok": False, "field": "postprocessScriptPath", "code": file_error_code(error) or "postprocess_failed", "detail": str(error), "error": str(error)}
         return _subtitle_artifact_result(result)
 
     @_toolbox_operation
@@ -1726,7 +1772,7 @@ class LauncherApi:
         except OcrRuntimeCancelled as error:
             return _error_result("ocrModel", "ocr_runtime_cancelled", str(error))
         except (OSError, UnicodeError, ValueError, OcrRuntimeError) as error:
-            return {"ok": False, "field": "ocrVideoPath", "code": "postprocess_failed", "detail": str(error), "error": str(error)}
+            return {"ok": False, "field": "ocrVideoPath", "code": file_error_code(error) or "postprocess_failed", "detail": str(error), "error": str(error)}
         return {"ok": True, **result}
 
     @_toolbox_operation
@@ -1785,7 +1831,7 @@ class LauncherApi:
         except (OSError, UnicodeError, ValueError, RuntimeError) as error:
             if isinstance(error, (LlmClientError, PostprocessStepError)):
                 return _llm_error_result("postprocessInput", "postprocess_failed", error)
-            return {"ok": False, "field": "postprocessInput", "code": "postprocess_failed", "detail": str(error), "error": str(error)}
+            return {"ok": False, "field": "postprocessInput", "code": file_error_code(error) or "postprocess_failed", "detail": str(error), "error": str(error)}
         return _subtitle_artifact_result(result)
 
     @_toolbox_operation
@@ -1804,7 +1850,7 @@ class LauncherApi:
                 ffmpeg_path=ffmpeg,
             )
         except (OSError, ValueError, RuntimeError) as error:
-            return {"ok": False, "field": "postprocessFfconcat", "code": "postprocess_failed", "detail": str(error), "error": str(error)}
+            return {"ok": False, "field": "postprocessFfconcat", "code": file_error_code(error) or "postprocess_failed", "detail": str(error), "error": str(error)}
         return {
             "ok": True,
             "sourceMediaPath": str(result.source_media_path),
@@ -2472,8 +2518,8 @@ class LauncherApi:
         except OSError as error:
             self._close_server_log()
             detail = f"{url} | {error}"
-            self._persist_start_failure("server_start_failed", detail)
-            return _error_result("port", "server_start_failed", detail)
+            context = self._persist_start_failure("server_start_failed", detail)
+            return _error_result("port", "server_start_failed", detail, context=context)
         if not _wait_for_server(
             url,
             timeout=SERVER_START_TIMEOUT,
@@ -2484,9 +2530,9 @@ class LauncherApi:
             if exit_code is not None:
                 detail = redact_sensitive_text(self._read_server_log())
                 detail = f"{url} | 进程退出码 {exit_code}" + (f"：{detail}" if detail else "")
-                self._persist_start_failure("server_start_failed", detail)
+                context = self._persist_start_failure("server_start_failed", detail)
                 _ = self._stop_owned_server()
-                return _error_result("port", "server_start_failed", detail)
+                return _error_result("port", "server_start_failed", detail, context=context)
             diagnostics = self._server_no_response_diagnostics(
                 url,
                 probe_path=EDITOR_HEALTH_PROBE_PATH,
@@ -2495,10 +2541,10 @@ class LauncherApi:
             detail = f"{url} | 启动超时 {int(SERVER_START_TIMEOUT)} 秒"
             startup_log = str(diagnostics.get("startupLogTail") or "")
             detail += f"：{startup_log}" if startup_log else "：子进程未输出日志"
-            self._persist_start_failure("server_no_response", detail)
+            context = self._persist_start_failure("server_no_response", detail)
             _ = self._stop_owned_server(close_log=False)
             self._close_server_log()
-            result = _error_result("port", "server_no_response", url)
+            result = _error_result("port", "server_no_response", url, context=context)
             result["diagnostics"] = diagnostics
             return result
         self._close_server_log()
@@ -2615,24 +2661,24 @@ class LauncherApi:
             self.alignment_media_path = None
             self.alignment_gap_remove = None
             detail = f"{url} | {error}"
-            self._persist_start_failure("alignment_server_start_failed", detail)
-            return _error_result("", "alignment_server_start_failed", detail)
+            context = self._persist_start_failure("alignment_server_start_failed", detail)
+            return _error_result("", "alignment_server_start_failed", detail, context=context)
 
         if not _wait_for_server(url, timeout=SERVER_START_TIMEOUT):
             exit_code = self.alignment_process.poll() if self.alignment_process else None
             if exit_code is not None:
                 detail = redact_sensitive_text(self._read_alignment_log())
                 detail = f"{url} | process exited with code {exit_code}" + (f": {detail}" if detail else "")
-                self._persist_start_failure("alignment_server_start_failed", detail)
+                context = self._persist_start_failure("alignment_server_start_failed", detail)
                 _ = self._stop_owned_alignment_server()
-                return _error_result("", "alignment_server_start_failed", detail)
+                return _error_result("", "alignment_server_start_failed", detail, context=context)
             _ = self._stop_owned_alignment_server(close_log=False)
             child_log = redact_sensitive_text(self._read_alignment_log())
             self._close_alignment_log()
             detail = f"{url} | 启动超时 {int(SERVER_START_TIMEOUT)} 秒"
             detail += f"：{child_log}" if child_log else "：子进程未输出日志"
-            self._persist_start_failure("alignment_server_no_response", detail)
-            return _error_result("", "alignment_server_no_response", detail)
+            context = self._persist_start_failure("alignment_server_no_response", detail)
+            return _error_result("", "alignment_server_no_response", detail, context=context)
         self._close_alignment_log()
         return {
             "ok": True,
@@ -2760,9 +2806,11 @@ class LauncherApi:
             if close_log:
                 self._close_alignment_log()
 
-    def _persist_start_failure(self, code: str, detail: str) -> None:
+    def _persist_start_failure(self, code: str, detail: str) -> dict[str, str]:
+        context = error_context()
         if self._log_sink is not None:
-            self._log_sink.append({"type": "error", "code": code, "detail": detail})
+            self._log_sink.append({"type": "error", "code": code, "detail": detail, "errorContext": context})
+        return context
 
     def _read_alignment_log(self) -> str:
         log_file = self.alignment_log_file
@@ -3511,14 +3559,14 @@ class LauncherApi:
                     "detail": str(error),
                 })
             else:
-                self._emit({"type": "error", "code": "transcription_failed", "detail": str(error)})
+                self._emit({"type": "error", "code": file_error_code(error) or "transcription_failed", "detail": str(error)})
             if self.worker is threading.current_thread():
                 self.worker = None
             self.pump.flush()
             return
         # The pywebview worker boundary must report every backend failure to JS.
         except Exception as error:  # noqa: BLE001
-            self._emit({"type": "error", "code": "transcription_failed", "detail": str(error)})
+            self._emit({"type": "error", "code": file_error_code(error) or "transcription_failed", "detail": str(error)})
             if self.worker is threading.current_thread():
                 self.worker = None
             self.pump.flush()
@@ -3608,7 +3656,7 @@ class LauncherApi:
             except Exception as error:  # noqa: BLE001 - postprocess boundary reports separately from ASR.
                 self._emit({
                     "type": "error",
-                    "code": "postprocess_failed",
+                    "code": file_error_code(error) or "postprocess_failed",
                     "detail": str(error),
                     "canRetry": False,
                     "postprocessRunDirectory": str(self.postprocess_workspace_directory or ""),
@@ -3771,7 +3819,7 @@ class LauncherApi:
         except Exception as error:  # noqa: BLE001 - retry boundary reports to the Launcher.
             self._emit({
                 "type": "error",
-                "code": "postprocess_failed",
+                "code": file_error_code(error) or "postprocess_failed",
                 "detail": str(error),
                 "canRetry": True,
                 "postprocessRunDirectory": str(self.postprocess_workspace_directory or ""),
@@ -4056,6 +4104,14 @@ class LauncherApi:
             self.pump.flush()
 
     def _emit(self, event: Mapping[str, object]) -> None:
+        if event.get("type") == "error":
+            if event.get("code") in {"postprocess_failed", "transcription_failed"}:
+                code = file_error_code(str(event.get("detail") or ""))
+                if code:
+                    event = {**event, "code": code}
+            if event.get("code") in {"file_path_too_long", "intermediate_path_too_long"}:
+                event = {**event, "canRetry": False}
+            event = {**event, "errorContext": error_context(event.get("errorContext"))}
         if self._log_sink is not None:
             self._log_sink.append(event)
         self.pump.enqueue(event)
@@ -4092,6 +4148,7 @@ def run_app(
     paths = default_paths()
     # 事件流与进程内 print/traceback 共用同一个 sink：单锁单文件。
     log_sink = LocalLogSink()
+    log_sink.write_text("MAW v" + _app_version(paths), label="session")
     api = LauncherApi(
         paths=paths,
         default_server_port=server_port,
@@ -4607,8 +4664,8 @@ def _free_local_port() -> int:
         return int(sock.getsockname()[1])
 
 
-def _error_result(field: str, code: str, detail: str = "") -> dict[str, object]:
-    return {"ok": False, "field": field, "code": code, "detail": detail, "error": ERROR_MESSAGES.get(code, detail or code)}
+def _error_result(field: str, code: str, detail: str = "", *, context: object = None) -> dict[str, object]:
+    return {"ok": False, "field": field, "code": code, "detail": detail, "error": ERROR_MESSAGES.get(code, detail or code), "errorContext": error_context(context)}
 
 
 def _burn_crf_override(raw: object) -> int | None:
@@ -4694,12 +4751,12 @@ def _postprocess_pipeline_error_event(
     """Expose retry state and original transcription paths without provider secrets."""
 
     category = str(getattr(error, "category", "") or "")
-    code = "postprocess_provider_response" if category == "provider_response" else "postprocess_failed"
+    code = file_error_code(error) or ("postprocess_provider_response" if category == "provider_response" else "postprocess_failed")
     event: dict[str, object] = {
         "type": "error",
         "code": code,
         "detail": str(error),
-        "canRetry": can_retry,
+        "canRetry": can_retry and not code.endswith("path_too_long"),
         "postprocessRunDirectory": str(error.run_directory),
         "failedStep": error.failed_step,
         "failedIndex": error.failed_index,
@@ -4997,12 +5054,7 @@ def _stop_external_maw_server(port: int) -> bool:
 
 def _open_external(target: str) -> None:
     if sys.platform == "linux" and getattr(sys, "frozen", False):
-        env = os.environ.copy()
-        original = env.get("LD_LIBRARY_PATH_ORIG")
-        if original is not None:
-            env["LD_LIBRARY_PATH"] = original
-        else:
-            env.pop("LD_LIBRARY_PATH", None)
+        env = restore_host_library_path(os.environ.copy())
         subprocess.Popen(["xdg-open", target], env=env)
     else:
         webbrowser.open(target)

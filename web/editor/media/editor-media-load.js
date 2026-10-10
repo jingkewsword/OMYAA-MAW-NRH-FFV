@@ -34,7 +34,7 @@
     if (!file) return;
     if (mediaLoadInFlight) return false;
     mediaLoadInFlight = true;
-    const finishLoading = MaweLoadingProgress.beginEditorLoading(`正在加载媒体 ${file.name}…`, 5);
+    const finishLoading = MaweLoadingProgress.beginEditorLoading(`正在导入媒体 ${file.name}…`, 5);
     try {
     const nativePath = file.nativePath || window.MOSEDesktop?.pathForFile?.(file);
     const native = nativePath ? await window.MOSEDesktop.loadMedia({
@@ -153,7 +153,7 @@
     }
 
     MawePlaybackLoop.lastActive = -1;
-    MaweHint.flashHint(MaweProjectSave.translatedEditorText(`已加载媒体：${file.name}`), 'success');
+    MaweHint.flashHint(MaweProjectSave.translatedEditorText(`已导入媒体：${file.name}`), 'success');
     if (MaweCoreState.waveformEditor && !preserveProjectWaveform && !native) {
       try {
         MaweBoot.DATA.spectral = null;
