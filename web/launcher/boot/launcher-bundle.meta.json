@@ -23,7 +23,7 @@
   ],
   "esmFactories": 0,
   "inputs": {
-    "launcher/i18n/launcher-strings.js": "b2c3a4f66b077ef411b7e482a3280325f379c6122f47e60def5f3bedde0ee5e0",
+    "launcher/i18n/launcher-strings.js": "f699d4bd09de6ce82bd02dd3fa59f0eba2838b36d650054c0223a29c07d9bc58",
     "launcher/boot/launcher-state.js": "42f784e687518a211bb51bfcb65b286d4a473f978937ef52c1ef59433b8c3e65",
     "launcher/boot/launcher-mock-api.js": "eb9c6c1463aebc277cb16bcb91dbe4fc3d016c2f299bbda57c4956b7a75d6d15",
     "launcher/i18n/launcher-labels.js": "966c0310dc5f70088c733402be218325af7166d81c92ba7be9184cffb80062e6",
@@ -47,7 +47,7 @@
   "metafile": {
     "inputs": {
       "web/editor-entry.mjs": {
-        "bytes": 378007,
+        "bytes": 378794,
         "imports": [],
         "format": "esm"
       }
@@ -59,10 +59,10 @@
         "entryPoint": "web/editor-entry.mjs",
         "inputs": {
           "web/editor-entry.mjs": {
-            "bytesInOutput": 282664
+            "bytesInOutput": 283385
           }
         },
-        "bytes": 282690
+        "bytes": 283411
       }
     }
   }

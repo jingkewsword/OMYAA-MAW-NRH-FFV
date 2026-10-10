@@ -254,6 +254,12 @@
   const segments = target.kind === 'main' ? MaweBoot.DATA.segments : target.track.segments;
   const idx = target.index;
   const nextText = MaweDom.cuePanelText.value.replace(/\r\n?/g, '\n');
+  const textSnapshot = MaweCuePanelState.cuePanelTextEditSnapshot;
+  const hasMatchingTextSnapshot = textSnapshot
+    && textSnapshot.kind === target.kind
+    && textSnapshot.index === target.index
+    && textSnapshot.trackId === target.trackId;
+  const previousText = hasMatchingTextSnapshot ? textSnapshot.text : seg.text;
   const oldStart = seg.start;
   const oldEnd = seg.end;
   const minimumDurationMs = MaweTimeline.timelineMinimumDurationMs();
@@ -278,13 +284,13 @@
     MaweCuePanelState.resetCuePanelEditState();
     return false;
   }
-  const changed = nextText !== seg.text || newStart !== oldStart || newEnd !== oldEnd;
+  const changed = nextText !== previousText || newStart !== oldStart || newEnd !== oldEnd;
   if (!changed) {
     MaweCuePanelState.resetCuePanelEditState();
+    if (document.activeElement === MaweDom.cuePanelText) captureCuePanelTextEditSnapshot();
     return false;
   }
   ensureCuePanelUndo();
-  const previousText = seg.text;
   seg.text = nextText;
   seg.start = newStart;
   seg.end = Math.max(newStart + minimumDurationMs, newEnd);
@@ -330,6 +336,7 @@
   }
   MaweViewUpdates.invalidate({ save: true });
   MaweCuePanelState.resetCuePanelEditState();
+  if (document.activeElement === MaweDom.cuePanelText) captureCuePanelTextEditSnapshot();
   MaweViewUpdates.invalidate({ cueList: true, preview: 'update' });
   return true;
 }
@@ -449,8 +456,8 @@
       index: target.index,
       trackId: target.trackId,
       text: target.segment.text || '',
-      // Esc 还原时字词时间码要与文字一起回到会话开始的状态（输入过程可能
-      // 已按等长替换同步过 items）。
+      // Esc 还原时字词时间码要与文字一起回到本次会话开始的状态；输入过程只
+      // 更新字幕文字，字词时间码在提交时才同步。
       items: target.kind === 'main' && Array.isArray(target.segment.items)
         ? JSON.parse(JSON.stringify(target.segment.items)) : null,
       dirty: dirtyFlagSnapshot(target.segment),

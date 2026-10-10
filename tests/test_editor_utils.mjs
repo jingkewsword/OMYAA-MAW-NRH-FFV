@@ -42,6 +42,24 @@ test('translates the progressive and duplicate split menu labels', () => {
   assert.equal(i18n.translateText('复制拆分', 'en'), 'Duplicate split');
 });
 
+test('plans an all-or-nothing subtitle time offset within media bounds', () => {
+  const segments = [
+    { start: 1000, end: 2000 },
+    { start: 3000, end: 4000 },
+    { start: 5000, end: 6000 },
+  ];
+  const plan = helpers.planSubtitleTimeOffset(segments, [0, 1], -500, 7000);
+  assert.equal(plan.ok, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(plan.changes)), [
+    { index: 0, start: 500, end: 1500 },
+    { index: 1, start: 2500, end: 3500 },
+  ]);
+  assert.equal(segments[0].start, 1000, 'planning must not mutate cue ranges');
+  assert.equal(helpers.planSubtitleTimeOffset(segments, [0, 1], -1500, 7000).reason, 'media_bounds');
+  assert.equal(helpers.planSubtitleTimeOffset(segments, [0], 1500, 7000).reason, 'overlap');
+  assert.equal(helpers.planSubtitleTimeOffset(segments, [2], 2000, 7000).reason, 'media_bounds');
+});
+
 test('accepts legacy and current project schemas but rejects unknown versions', () => {
   assert.equal(helpers.supportsProjectSchema({ segments: [] }), true);
   assert.equal(helpers.supportsProjectSchema({ schema: helpers.PROJECT_SCHEMA, segments: [] }), true);
@@ -815,6 +833,8 @@ test('classifies common and legacy-migrated gap display types', () => {
     [{ source: 'audio_gate', origins: ['audio_gate', 'manual'] }, 'audio_gate_manual', true],
     [{ source: 'manual', origins: ['manual'] }, 'manual', true],
     [{ source: 'script_alignment', origins: ['script_alignment'] }, 'script_alignment', true],
+    [{ source: 'ai_cleanup_review', origins: ['ai_cleanup_review'] }, 'ai_cleanup_review', true],
+    [{ source: 'ai_cleanup_review', origins: ['ai_cleanup_review', 'manual'] }, 'ai_cleanup_review_manual', true],
     [{ source: 'legacy', origins: ['legacy'] }, 'audio_gate', false],
     [{ source: null, origins: ['script_alignment', 'audio_gate'] }, 'multi_source', true],
     [{ source: null, origins: ['audio_gate', 'legacy'] }, 'audio_gate', false],
@@ -909,6 +929,49 @@ test('replaces one provenance source without losing the other layers', () => {
     JSON.parse(JSON.stringify(replaced.sources.script_alignment)),
     [{ id: 'align', source: 'script_alignment', start: 0, end: 100, removed: true }],
   );
+});
+
+test('unmuting an AI review range removes only its linked review source after range edits', () => {
+  const initial = gapCore.normalizeGapRemoveProvenance({
+    sources: {
+      ai_cleanup_review: [
+        { id: 'review-a', review_marker_id: 'review-a', start: 100, end: 300 },
+        { id: 'review-b', review_marker_id: 'review-b', start: 250, end: 400 },
+      ],
+      ai_cleanup: [{ id: 'cleanup', start: 200, end: 350 }],
+      audio_gate: [{ id: 'audio', start: 50, end: 150 }],
+    },
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(initial.sources.ai_cleanup_review)), [
+    { id: 'review-a', source: 'ai_cleanup_review', start: 100, end: 300, review_marker_id: 'review-a', removed: true },
+    { id: 'review-b', source: 'ai_cleanup_review', start: 250, end: 400, review_marker_id: 'review-b', removed: true },
+  ]);
+
+  const rangeEdited = gapCore.removeGapRemoveProvenanceRange(initial, 150, 180);
+  assert.deepEqual(JSON.parse(JSON.stringify(rangeEdited.sources.ai_cleanup_review)), [
+    { id: 'review-a', source: 'ai_cleanup_review', start: 100, end: 150, review_marker_id: 'review-a', removed: true },
+    { id: 'review-a-2', source: 'ai_cleanup_review', start: 180, end: 300, review_marker_id: 'review-a', removed: true },
+    { id: 'review-b', source: 'ai_cleanup_review', start: 250, end: 400, review_marker_id: 'review-b', removed: true },
+  ]);
+
+  const unmuted = gapCore.replaceGapRemoveProvenanceSource(
+    rangeEdited,
+    'ai_cleanup_review',
+    rangeEdited.sources.ai_cleanup_review.filter((item) => item.review_marker_id !== 'review-a'),
+  );
+  assert.deepEqual(JSON.parse(JSON.stringify(unmuted.sources.ai_cleanup_review)), [
+    { id: 'review-b', source: 'ai_cleanup_review', start: 250, end: 400, review_marker_id: 'review-b', removed: true },
+  ]);
+  assert.deepEqual(JSON.parse(JSON.stringify(unmuted.sources.ai_cleanup)), [
+    { id: 'cleanup', source: 'ai_cleanup', start: 200, end: 350, removed: true },
+  ]);
+  assert.deepEqual(JSON.parse(JSON.stringify(unmuted.sources.audio_gate)), [
+    { id: 'audio', source: 'audio_gate', start: 50, end: 150, removed: true },
+  ]);
+  assert.deepEqual(JSON.parse(JSON.stringify(gapCore.gapRangesFromProvenance(unmuted))), [
+    { start: 50, end: 150, removed: true },
+    { start: 200, end: 400, removed: true },
+  ]);
 });
 
 test('regenerates an audio source while retaining a manual restoration', () => {

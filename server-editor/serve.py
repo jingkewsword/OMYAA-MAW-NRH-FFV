@@ -54,7 +54,7 @@ from maw.app_paths import default_server_settings_path, legacy_server_settings_p
 from maw.ass_styles import load_ass_style_library, save_ass_style_library  # noqa: E402
 from maw.ffmpeg import resolve_ffmpeg_tools  # noqa: E402
 from maw.gui_config import DEFAULT_ENV_PATH, load_env  # noqa: E402
-from maw.gui_platform import restore_host_library_path  # noqa: E402
+from maw.gui_platform import creationflags, restore_host_library_path, startupinfo  # noqa: E402
 from maw.postprocess_ffmpeg import libass_missing_glyphs  # noqa: E402
 from maw.project import (  # noqa: E402
     ProjectValidationFailed,
@@ -68,6 +68,7 @@ from maw.project_io import (  # noqa: E402
 )
 from maw.media import (  # noqa: E402
     MEDIA_EXTENSIONS,
+    VIDEO_EXTENSIONS,
     MediaConversionError,
     MediaResolution,
     MediaResolutionError,
@@ -87,6 +88,9 @@ MAX_RECENT_PROJECTS = 10
 MAX_ASS_STYLE_LIBRARY_BYTES = 512 * 1024
 # 单帧预览请求携带整份 ASS 文本；超长内容更可能是误用而不是真实工程。
 MAX_ASS_FRAME_TEXT_BYTES = 8 * 1024 * 1024
+# 间隔列表由浏览器传入，仅含毫秒边界；限制数量避免不必要的 JSON/FFmpeg 清单负载。
+MAX_GAP_REMOVED_INTERVALS = 100_000
+MAX_SAFE_JSON_INTEGER = 9_007_199_254_740_991
 # libass 单帧渲染是交互动作，超时视为环境异常而不是让请求挂起。
 ASS_FRAME_RENDER_TIMEOUT_SEC = 120
 BUILTIN_WORKSPACE_IDS = frozenset({"classic", "wave-right", "three-fold", "cinema"})
@@ -358,10 +362,153 @@ class AssFrameError(ValueError):
         self.code = code
 
 
+class GapRemovedVideoExportError(ValueError):
+    """The gap-removed video request or its FFmpeg output is invalid."""
+
+
+class GapRemovedVideoExportInProgressError(RuntimeError):
+    """Another gap-removed video export is currently using FFmpeg."""
+
+
+def normalize_gap_removed_intervals(value: object) -> list[tuple[int, int]]:
+    """Validate ordered half-open source-media intervals in integer milliseconds."""
+    if not isinstance(value, list) or not value:
+        raise GapRemovedVideoExportError("去空隙保留区间为空或格式不正确")
+    if len(value) > MAX_GAP_REMOVED_INTERVALS:
+        raise GapRemovedVideoExportError("去空隙保留区间数量过多")
+    intervals: list[tuple[int, int]] = []
+    previous_end = -1
+    for index, interval in enumerate(value):
+        if not isinstance(interval, dict):
+            raise GapRemovedVideoExportError(f"第 {index + 1} 个保留区间格式不正确")
+        start = interval.get("startMs")
+        end = interval.get("endMs")
+        if (
+            isinstance(start, bool) or not isinstance(start, int)
+            or isinstance(end, bool) or not isinstance(end, int)
+            or not 0 <= start < end <= MAX_SAFE_JSON_INTEGER
+        ):
+            raise GapRemovedVideoExportError(f"第 {index + 1} 个保留区间时间无效")
+        if start < previous_end:
+            raise GapRemovedVideoExportError("去空隙保留区间必须按时间排序且不能重叠")
+        intervals.append((start, end))
+        previous_end = end
+    return intervals
+
+
+def _gap_removed_ffconcat_text(media_path: Path, intervals: list[tuple[int, int]]) -> str:
+    source = str(media_path).replace("\\", "/")
+    quoted_source = "'" + source.replace("'", "'\\''") + "'"
+    lines = ["ffconcat version 1.0"]
+    for start_ms, end_ms in intervals:
+        start = f"{start_ms // 1000}.{start_ms % 1000:03d}"
+        end = f"{end_ms // 1000}.{end_ms % 1000:03d}"
+        lines.extend((f"file {quoted_source}", f"inpoint {start}", f"outpoint {end}"))
+    return "\n".join(lines) + "\n"
+
+
+def _probe_video_stream_signature(path: Path, ffprobe_path: Path) -> tuple[tuple[object, ...], ...]:
+    command = [
+        str(ffprobe_path), "-v", "error", "-show_entries",
+        "stream=codec_type,codec_name,profile,codec_tag_string,width,height,channels,sample_rate,channel_layout",
+        "-of", "json", str(path),
+    ]
+    try:
+        completed = subprocess.run(
+            command, capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=120, check=False, startupinfo=startupinfo(), creationflags=creationflags(),
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        raise GapRemovedVideoExportError(f"无法读取媒体流信息：{error}") from error
+    if completed.returncode != 0:
+        raise GapRemovedVideoExportError((completed.stderr or "ffprobe 读取媒体流信息失败").strip()[-4000:])
+    try:
+        payload = json.loads(completed.stdout)
+    except (TypeError, json.JSONDecodeError) as error:
+        raise GapRemovedVideoExportError("ffprobe 返回了无效的媒体流信息") from error
+    streams = payload.get("streams") if isinstance(payload, dict) else None
+    if not isinstance(streams, list) or not streams:
+        raise GapRemovedVideoExportError("媒体中没有可重组的流")
+    signature_fields = (
+        "codec_type", "codec_name", "profile", "codec_tag_string", "width", "height",
+        "channels", "sample_rate", "channel_layout",
+    )
+    signature: list[tuple[object, ...]] = []
+    for stream in streams:
+        if not isinstance(stream, dict) or not isinstance(stream.get("codec_type"), str):
+            raise GapRemovedVideoExportError("ffprobe 返回了无效的媒体流信息")
+        signature.append(tuple(stream.get(field) for field in signature_fields))
+    if not any(item[0] == "video" for item in signature):
+        raise GapRemovedVideoExportError("当前媒体没有视频流")
+    return tuple(signature)
+
+
+def rebuild_gap_removed_video(
+    source_path: Path,
+    intervals: list[tuple[int, int]],
+    output_path: Path,
+    *,
+    ffmpeg_path: Path,
+    ffprobe_path: Path,
+) -> Path:
+    """Stream-copy all source streams for the kept intervals into a private output file."""
+    try:
+        source = source_path.expanduser().resolve(strict=True)
+    except OSError as error:
+        raise GapRemovedVideoExportError("当前工程的源媒体文件不存在") from error
+    if not source.is_file() or source.suffix.lower() not in VIDEO_EXTENSIONS:
+        raise GapRemovedVideoExportError("当前工程绑定的媒体不是受支持的视频文件")
+    if output_path.suffix.lower() != source.suffix.lower():
+        raise GapRemovedVideoExportError("输出容器扩展名必须与源视频一致")
+    if not intervals:
+        raise GapRemovedVideoExportError("去空隙保留区间为空")
+
+    input_signature = _probe_video_stream_signature(source, ffprobe_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    concat_path = output_path.with_suffix(".ffconcat")
+    concat_path.write_text(_gap_removed_ffconcat_text(source, intervals), encoding="utf-8")
+    command = [
+        str(ffmpeg_path), "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
+        "-f", "concat", "-safe", "0", "-i", str(concat_path),
+        "-map", "0", "-c", "copy", str(output_path),
+    ]
+    try:
+        completed = subprocess.run(
+            command, capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=86_400, check=False, startupinfo=startupinfo(), creationflags=creationflags(),
+        )
+    except subprocess.TimeoutExpired as error:
+        output_path.unlink(missing_ok=True)
+        raise GapRemovedVideoExportError("视频重组超时") from error
+    except OSError as error:
+        output_path.unlink(missing_ok=True)
+        raise GapRemovedVideoExportError(f"无法启动 FFmpeg：{error}") from error
+    if completed.returncode != 0:
+        output_path.unlink(missing_ok=True)
+        raise GapRemovedVideoExportError((completed.stderr or "FFmpeg 视频重组失败").strip()[-4000:])
+    if not output_path.is_file() or output_path.stat().st_size <= 0:
+        output_path.unlink(missing_ok=True)
+        raise GapRemovedVideoExportError("FFmpeg 没有生成有效的视频文件")
+    try:
+        output_signature = _probe_video_stream_signature(output_path, ffprobe_path)
+    except GapRemovedVideoExportError:
+        output_path.unlink(missing_ok=True)
+        raise
+    if output_signature != input_signature:
+        output_path.unlink(missing_ok=True)
+        raise GapRemovedVideoExportError("重组结果的媒体流与源视频不一致，已取消导出")
+    return output_path
+
+
 def editor_ffmpeg_binary() -> Path | None:
     """Resolve the FFmpeg binary the same way project media loading does."""
+    return editor_ffmpeg_tools().ffmpeg
+
+
+def editor_ffmpeg_tools():
+    """Resolve the FFmpeg/FFprobe pair used for verified video export."""
     configured_ffmpeg = os.environ.get("FFMPEG_PATH") or load_env(DEFAULT_ENV_PATH).get("FFMPEG_PATH", "")
-    return resolve_ffmpeg_tools(configured_path=configured_ffmpeg or None).ffmpeg
+    return resolve_ffmpeg_tools(configured_path=configured_ffmpeg or None)
 
 
 def ffmpeg_supports_libass(ffmpeg: Path) -> bool:
@@ -710,6 +857,7 @@ def build_server_page(
         json_class = "" if project.json_path else "empty"
         media_class = "empty"
 
+    gap_video_source = project.source_media_path or project.media_path
     page_data = copy.deepcopy(project.data)
     page_data.pop("media_time_reference", None)
     if defer_reapeaks:
@@ -748,6 +896,13 @@ def build_server_page(
             "portableStickerExportUrl": "/api/exports/sticker-otio",
             "otiozStickerExportUrl": "/api/exports/sticker-otioz",
             "otiozTimelineExportUrl": "/api/exports/timeline-otioz",
+        "gapRemovedVideoExportUrl": "/api/exports/gap-removed-video",
+        "gapRemovedVideoSourceName": gap_video_source.name if gap_video_source else None,
+        "canGapRemovedVideoExport": bool(
+            project.json_path is not None
+            and gap_video_source is not None
+            and gap_video_source.suffix.lower() in VIDEO_EXTENSIONS
+        ),
             "lottieExportUrl": "/api/exports/lottie",
             "ografExportUrl": "/api/exports/ograf",
             "waveformUrl": "/api/waveform",
@@ -777,6 +932,10 @@ def build_server_page(
             "onboardingStatus": settings.onboarding_status,
         }, ensure_ascii=False),
         app_version=html.escape(f"v{edit.get_app_version()}"),
+        release_url=html.escape(
+            edit.get_app_release_url(),
+            quote=True,
+        ),
         json_display=html.escape(json_display),
         json_name_class=json_class,
         media_name_display=html.escape(media_display),
@@ -852,6 +1011,7 @@ class EditorServer(ThreadingHTTPServer):
         self.settings_lock = threading.Lock()
         self.reapeaks_lock = threading.Lock()
         self.ass_frame_lock = threading.Lock()
+        self.gap_removed_video_lock = threading.Lock()
         self.libass_supported: bool | None = None
         self.libass_binary_signature: tuple[object, ...] | None = None
         self.reapeaks_generation = 0
@@ -1853,6 +2013,8 @@ class EditorRequestHandler(BaseHTTPRequestHandler):
             self.export_sticker_otioz()
         elif path == "/api/exports/timeline-otioz":
             self.export_timeline_otioz()
+        elif path == "/api/exports/gap-removed-video":
+            self.export_gap_removed_video()
         elif path == "/api/exports/lottie":
             self.export_lottie()
         elif path == "/api/exports/ograf":
@@ -2079,6 +2241,57 @@ class EditorRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(zip_bytes)))
         self.end_headers()
         self.wfile.write(zip_bytes)
+
+    def export_gap_removed_video(self) -> None:
+        """Rebuild the bound source video and stream it without accepting client paths."""
+        try:
+            request = self.read_json_request(max_bytes=8 * 1024 * 1024)
+            self._check_request_token(request)
+            intervals = normalize_gap_removed_intervals(request.get("intervals"))
+            project = self.editor_server.project
+            source = project.source_media_path or project.media_path
+            if project.json_path is None:
+                raise GapRemovedVideoExportError("当前服务器没有绑定工程文件")
+            if source is None or source.suffix.lower() not in VIDEO_EXTENSIONS:
+                raise GapRemovedVideoExportError("当前工程没有可重组的视频媒体")
+            if not self.editor_server.gap_removed_video_lock.acquire(blocking=False):
+                raise GapRemovedVideoExportInProgressError("另一个去空隙视频重组操作正在进行")
+        except PermissionError as error:
+            self.send_json(HTTPStatus.FORBIDDEN, {"ok": False, "error": str(error)})
+            return
+        except (UnicodeDecodeError, json.JSONDecodeError, GapRemovedVideoExportError, ValueError) as error:
+            self.send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(error)})
+            return
+        except GapRemovedVideoExportInProgressError as error:
+            self.send_json(HTTPStatus.CONFLICT, {"ok": False, "error": str(error)})
+            return
+
+        try:
+            tools = editor_ffmpeg_tools()
+            if tools.ffmpeg is None or tools.ffprobe is None:
+                self.send_json(HTTPStatus.SERVICE_UNAVAILABLE, {
+                    "ok": False, "error": "重组视频需要可用的 FFmpeg 和 FFprobe",
+                })
+                return
+            with tempfile.TemporaryDirectory(prefix="maw-gap-removed-") as temp_dir:
+                output_path = Path(temp_dir) / f"restructured{source.suffix.lower()}"
+                try:
+                    rebuild_gap_removed_video(
+                        source,
+                        intervals,
+                        output_path,
+                        ffmpeg_path=tools.ffmpeg,
+                        ffprobe_path=tools.ffprobe,
+                    )
+                except GapRemovedVideoExportError as error:
+                    self.send_json(HTTPStatus.UNPROCESSABLE_ENTITY, {"ok": False, "error": str(error)})
+                    return
+                download_name = f"{source.stem}_gap-removed{source.suffix.lower()}"
+                self.send_video_attachment(output_path, download_name)
+        except OSError as error:
+            self.send_json(HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "error": f"视频重组失败：{error}"})
+        finally:
+            self.editor_server.gap_removed_video_lock.release()
 
     def export_lottie(self) -> None:
         try:
@@ -2445,6 +2658,40 @@ class EditorRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
+
+    def send_video_attachment(self, path: Path, filename: str) -> None:
+        """Stream a verified temporary video and keep it alive until the response ends."""
+        mime = {
+            ".mp4": "video/mp4",
+            ".mkv": "video/x-matroska",
+            ".avi": "video/x-msvideo",
+            ".mov": "video/quicktime",
+            ".wmv": "video/x-ms-wmv",
+            ".flv": "video/x-flv",
+            ".webm": "video/webm",
+            ".ts": "video/mp2t",
+            ".m4v": "video/x-m4v",
+        }.get(path.suffix.lower(), "application/octet-stream")
+        ascii_name = "".join(
+            char if 32 <= ord(char) < 127 and char not in {'"', "\\", ";"} else "_"
+            for char in filename
+        ) or "gap-removed-video"
+        disposition = f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(filename, safe="")} '
+        try:
+            size = path.stat().st_size
+            if size <= 0:
+                raise OSError("重组视频文件为空")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", mime)
+            self.send_header("Content-Disposition", disposition.rstrip())
+            self.send_header("Content-Length", str(size))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            with path.open("rb") as source:
+                while chunk := source.read(128 * 1024):
+                    self.wfile.write(chunk)
+        except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
+            return
 
     def sticker_path(self, relative_url: str) -> Path | None:
         root = self.editor_server.project.sticker_root

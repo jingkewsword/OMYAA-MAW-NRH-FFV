@@ -426,7 +426,7 @@ test('English UI does not translate project words or their hover text', async ({
   });
   await setWordTiming(page);
   await expect(page.locator('#word-timing-quick-toggle')).toBeVisible();
-  await expect(page.locator('#waveform-settings-panel .waveform-settings-title')).toHaveText(['Waveform appearance', 'Display']);
+  await expect(page.locator('#waveform-settings-panel .waveform-settings-title')).toHaveText(['Appearance', 'Display']);
   await expect(word(page, 0).locator('.waveform-word-label')).toHaveText('字词时间码');
   await expect(word(page, 0)).toHaveAttribute('title', /^字词时间码/);
   await page.evaluate(() => MaweWordTiming.openConversion([0]));
@@ -457,16 +457,21 @@ test('equal-length typo replacement syncs item texts through the cue panel', asy
   const panel = page.locator('#cue-panel-text');
   await expect(panel).toHaveValue('我很喜欢！');
   await panel.fill('我最喜欢！');
+  expect((await source(page)).items.map(item => item.text)).toEqual(['我', '很喜欢']);
+  await panel.blur();
   await expect(page.locator('#hint-stack')).toContainText('已同步字词时间码文字');
   expect((await source(page)).items.map(item => item.text)).toEqual(['我', '最喜欢！']);
-  // 追加文字长度变化：静默跳过，字词保持原样
-  await panel.fill('我最喜欢！啊');
+  // 长度变化跨入字词范围时，输入过程中不改 items；提交时提示实际差异。
+  await panel.fill('我非常喜欢！');
+  expect((await source(page)).items.map(item => item.text)).toEqual(['我', '最喜欢！']);
+  await panel.blur();
+  await expect(page.locator('#hint-stack')).toContainText('字词时间码未同步：[最 -> 非常] 不是等长替换');
   expect((await source(page)).items.map(item => item.text)).toEqual(['我', '最喜欢！']);
   // Esc 取消整次编辑：文字与字词一起回到会话开始的状态
-  await panel.fill('我很喜欢！');
+  await panel.fill('我非常有喜欢！');
   await page.keyboard.press('Escape');
   const restored = await source(page);
-  expect([restored.text, restored.items.map(item => item.text)]).toEqual(['我很喜欢！', ['我', '很喜欢']]);
+  expect([restored.text, restored.items.map(item => item.text)]).toEqual(['我非常喜欢！', ['我', '最喜欢！']]);
 });
 
 test('selected sentence gains edge handles in word timing mode and drags only its own range', async ({ page }) => {

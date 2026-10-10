@@ -440,7 +440,7 @@ test('Utilities use a horizontal tab strip with arrow-key navigation', async ({ 
     };
   });
   expect(layout.columns).toBe(1);
-  expect(layout.tabColumnCount).toBe(5);
+  expect(layout.tabColumnCount).toBe(4);
 
   // beta.4 重构后工具顺序：烧录字幕、媒体重组、口播对齐、提取音频、生成波形。
   await page.locator('#toolboxAlignmentTab').focus();
@@ -508,7 +508,7 @@ test('green-screen burn accepts subtitles without a video source', async ({ page
   const call = await page.evaluate(() => window.__greenBurnCalls[0]);
   expect(call).toMatchObject({ mediaPath: '', subtitlePath: 'D:\\Demo\\captions.ass', greenScreen: true });
   await expect(page.locator('#toolboxUtilityMediaPath')).toHaveValue('D:\\Demo\\captions.green-screen.mp4');
-  await page.locator('#toolboxFfconcatTab').click();
+  await page.locator('#toolboxWaveformTab').click();
   await expect(page.locator('#toolboxUtilityMediaPath')).toBeEnabled();
   await expect(page.locator('#pickToolboxUtilityMedia')).toBeEnabled();
   await page.locator('#toolboxBurnSubtitleTab').click();
