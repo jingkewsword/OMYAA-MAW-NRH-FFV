@@ -10,6 +10,14 @@
   #define MawSourceDir AddBackslash(SourcePath) + "..\\build\\release\\mose\\MAW"
 #endif
 
+; These are build prerequisites, never paths checked on the end user's PC.
+#if !FileExists(MawSourceDir + "\MAW.exe") || !FileExists(MawSourceDir + "\MOSE\MOSE.exe")
+  #error "Stage the MAW + MOSE suite before compiling the installer."
+#endif
+#if !FileExists(MawSourceDir + "\MOSE\resources\assets\mosp.ico") || !FileExists(MawSourceDir + "\ffmpeg\bin\ffmpeg.exe") || !FileExists(MawSourceDir + "\ffmpeg\bin\ffprobe.exe")
+  #error "The suite is missing document icons or FFmpeg."
+#endif
+
 [Setup]
 AppId={{4E6B4A8C-0E4F-4E88-8C9F-1DF1C9BFB0F7}
 AppName=Moy's ASR Workflow
@@ -44,6 +52,14 @@ Source: "{#MawSourceDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsu
 [Icons]
 Name: "{autoprograms}\Moy's ASR Workflow"; Filename: "{app}\MAW.exe"; WorkingDir: "{app}"
 Name: "{autoprograms}\Moy's Open Subtitle Editor"; Filename: "{app}\MOSE\MOSE.exe"; WorkingDir: "{app}\MOSE"
+Name: "{autodesktop}\MOSE"; Filename: "{app}\MOSE\MOSE.exe"; WorkingDir: "{app}\MOSE"; Tasks: desktopicon
+
+[Tasks]
+Name: "desktopicon"; Description: "Create a MOSE desktop shortcut"; Flags: unchecked
+
+[Run]
+Filename: "{app}\MOSE\MOSE.exe"; Description: "Open MOSE subtitle editor"; WorkingDir: "{app}\MOSE"; Flags: nowait postinstall skipifsilent; Check: not RestartMoseAfterUpdate
+Filename: "{app}\MOSE\MOSE.exe"; WorkingDir: "{app}\MOSE"; Flags: nowait; Check: RestartMoseAfterUpdate
 
 [Registry]
 Root: HKCU; Subkey: "Software\Moy\MAW"; ValueType: string; ValueName: "InstallPath"; ValueData: "{app}"; Flags: uninsdeletekeyifempty
@@ -54,9 +70,14 @@ Root: HKCU; Subkey: "Software\Classes\.mosp"; ValueType: string; ValueName: ""; 
 Root: HKCU; Subkey: "Software\Classes\.mosp\OpenWithProgids"; ValueType: string; ValueName: "Moy.MAW.Project"; ValueData: ""; Flags: uninsdeletevalue
 Root: HKCU; Subkey: "Software\Classes\Moy.MAW.Project"; ValueType: string; ValueName: ""; ValueData: "MAW Project"; Flags: uninsdeletekeyifempty
 Root: HKCU; Subkey: "Software\Classes\Moy.MAW.Project\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\MOSE\resources\assets\mosp.ico"",0"; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Classes\Moy.MAW.Project\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\MAW.exe"" --open-project ""%1"""; Flags: uninsdeletekeyifempty
+Root: HKCU; Subkey: "Software\Classes\Moy.MAW.Project\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\MOSE\MOSE.exe"" ""%1"""; Flags: uninsdeletekeyifempty
 
 [Code]
+function RestartMoseAfterUpdate(): Boolean;
+begin
+  Result := ExpandConstant('{param:MOSEUPDATE|0}') = '1';
+end;
+
 function CanSetProjectDefault(): Boolean;
 var Handler: String;
 begin
@@ -70,15 +91,4 @@ begin
   if (CurUninstallStep = usUninstall) and RegQueryStringValue(HKCU, 'Software\Classes\.mosp', '', Handler) and
     (Handler = 'Moy.MAW.Project') then
     RegDeleteValue(HKCU, 'Software\Classes\.mosp', '');
-end;
-
-function InitializeSetup(): Boolean;
-begin
-  Result := FileExists(ExpandConstant('{#MawSourceDir}\MAW.exe')) and
-    FileExists(ExpandConstant('{#MawSourceDir}\MOSE\MOSE.exe')) and
-    FileExists(ExpandConstant('{#MawSourceDir}\MOSE\resources\assets\mosp.ico')) and
-    FileExists(ExpandConstant('{#MawSourceDir}\ffmpeg\bin\ffmpeg.exe')) and
-    FileExists(ExpandConstant('{#MawSourceDir}\ffmpeg\bin\ffprobe.exe'));
-  if not Result then
-    MsgBox('The MAW + MOSE suite or its bundled FFmpeg files are missing.', mbError, MB_OK);
 end;

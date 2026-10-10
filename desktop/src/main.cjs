@@ -15,6 +15,7 @@ const { spawn } = require('node:child_process');
 const { writeSelectedProject } = require('./native_files.cjs');
 const { installLinuxIntegration } = require('./linux_integration.cjs');
 const { createPreferenceStore } = require('./preferences.cjs');
+const { verifyInstaller, launchInstaller } = require('./update_install.cjs');
 const {
   appendBoundedOutput,
   childExited,
@@ -56,6 +57,10 @@ let rendererMessageQueue = null;
 let quitRequested = false;
 let shutdownComplete = false;
 let currentProjectPath = '';
+const desktopControl = crypto.randomBytes(32).toString('base64url');
+let pendingUpdate = null;
+let updatePromptOpen = false;
+let shutdownPromise = null;
 
 function repositoryRoot() {
   return path.resolve(__dirname, '..', '..');
@@ -115,6 +120,7 @@ function startBackend(projectPath) {
     const childEnv = {
       ...process.env,
       MAW_DESKTOP_TOKEN: token,
+      MAW_DESKTOP_CONTROL: desktopControl,
       PYTHONUTF8: '1',
     };
     // Smoke is a deterministic backend/page/exit check.  Do not let a
@@ -229,7 +235,7 @@ async function requestBackend(route, payload) {
   if (!backend) throw new Error('编辑器后端未连接。');
   const response = await fetch(`${backend.origin}${route}`, {
     method: payload === undefined ? 'GET' : 'POST',
-    headers: { ...backendHeaders(backend.token), 'Content-Type': 'application/json' },
+    headers: { ...backendHeaders(backend.token), 'Content-Type': 'application/json', 'X-MAW-Desktop-Control': desktopControl },
     ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
     signal: AbortSignal.timeout(120_000),
   });
@@ -324,7 +330,10 @@ function createWindow(state, { show = true } = {}) {
       buttons: ['丢弃改动并继续', '取消'], defaultId: 1, cancelId: 1,
     });
     if (choice === 0) event.preventDefault();
-    else quitRequested = false;
+    else {
+      quitRequested = false;
+      pendingUpdate = null;
+    }
   });
   window.webContents.on('page-title-updated', (event) => {
     event.preventDefault();
@@ -476,6 +485,38 @@ function registerIpc() {
     }
   });
   trustedIpc('mose:choose-project', chooseProject);
+  trustedIpc('mose:update', async (payload) => {
+    if (!payload || !['status', 'check', 'download', 'cancel', 'preferences', 'reveal', 'install', 'release'].includes(payload.action)) {
+      throw new Error('无效的更新操作。');
+    }
+    if (payload.action === 'release') {
+      await shell.openExternal('https://github.com/Moyf/moys-asr-workflow/releases');
+      return { ok: true };
+    }
+    if (pendingUpdate || updatePromptOpen) throw new Error('更新安装正在准备。');
+    if (payload.action === 'reveal') {
+      const ready = await requestBackend('/api/desktop/updates', { action: 'ready', tag: payload.tag });
+      shell.showItemInFolder(ready.path);
+      return { ok: true };
+    }
+    if (payload.action !== 'install') return requestBackend('/api/desktop/updates', payload);
+    updatePromptOpen = true;
+    try {
+      const ready = await requestBackend('/api/desktop/updates', { action: 'ready', tag: payload.tag });
+      if (!app.isPackaged || process.platform !== 'win32' || !ready.canApply) throw new Error('当前版本需要手动安装更新。');
+      await verifyInstaller(ready);
+      const choice = await dialog.showMessageBox(mainWindow, {
+        type: 'question', title: 'MOSE 软件更新', message: `退出编辑器并安装 v${ready.version}？`,
+        detail: '未保存内容仍会提示确认。安装器将更新整个 MAW + MOSE 套件；如 Launcher 正在工作，请先完成任务。',
+        buttons: ['退出并安装', '取消'], defaultId: 1, cancelId: 1,
+      });
+      if (choice.response !== 0) return { ok: true, cancelled: true };
+      pendingUpdate = ready;
+      quitRequested = true;
+      mainWindow.close();
+      return { ok: true };
+    } finally { updatePromptOpen = false; }
+  });
   trustedIpc('mose:save-project-as', saveProjectAs);
   trustedIpc('mose:choose-media', async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
@@ -497,6 +538,7 @@ function registerIpc() {
     ok: true,
     origin: backend?.origin || '',
     desktop: true,
+    packaged: app.isPackaged,
   }));
 }
 
@@ -572,6 +614,25 @@ async function bootstrap(projectPath) {
 
 const initialProjectPath = parseProjectArgs(process.argv.slice(1), process.cwd());
 
+function finishShutdown() {
+  if (shutdownPromise) return shutdownPromise;
+  shutdownPromise = (async () => {
+    const update = pendingUpdate;
+    try {
+      if (update) await requestBackend('/api/desktop/updates', { action: 'prepare', tag: update.tag });
+      await stopBackend();
+      if (update) await launchInstaller(update);
+    } catch (error) {
+      await stopBackend();
+      dialog.showErrorBox('MOSE 无法安装更新', String(error.message || error));
+    } finally {
+      shutdownComplete = true;
+      app.quit();
+    }
+  })();
+  return shutdownPromise;
+}
+
 function focusEditor(projectPath) {
   if (projectPath) sendProjectToRenderer(projectPath);
   if (!mainWindow && backend && !quitRequested) createWindow(backend);
@@ -610,17 +671,11 @@ if (!gotLock) {
       mainWindow.close();
       return;
     }
-    void stopBackend().finally(() => {
-      shutdownComplete = true;
-      app.quit();
-    });
+    void finishShutdown();
   });
   app.on('window-all-closed', () => {
     if (quitRequested || process.platform !== 'darwin') {
-      void stopBackend().finally(() => {
-        shutdownComplete = true;
-        app.quit();
-      });
+      void finishShutdown();
     }
   });
   app.on('activate', () => {

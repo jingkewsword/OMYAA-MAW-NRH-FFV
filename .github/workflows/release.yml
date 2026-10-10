@@ -874,7 +874,7 @@ jobs:
           EOF
 
       - name: Generate update manifest
-        run: python3 scripts/generate_update_manifest.py --root release-artifacts --tag "${{ github.ref_name }}"
+        run: python3 scripts/generate_update_manifest.py --root release-artifacts --tag "${{ github.ref_name }}" --include-mose-suite
 
       - name: Verify update manifest and release asset contract
         env:
@@ -889,34 +889,35 @@ jobs:
 
           root = Path("release-artifacts")
           tag = os.environ["RELEASE_TAG"]
-          manifest = json.loads((root / "update-manifest.json").read_text(encoding="utf-8"))
-          if manifest.get("schemaVersion") != 1 or manifest.get("tag") != tag:
-              raise SystemExit("update-manifest.json schema/tag mismatch")
-          expected_version = tag.removeprefix("v")
-          if manifest.get("version") != expected_version:
-              raise SystemExit("update-manifest.json version mismatch")
-          prerelease_version = expected_version.split("+", 1)[0]
-          expected_prerelease = bool(re.search(r"(?i)(?:^|[.-])(?:a(?:lpha)?|b(?:eta)?|rc|pre(?:view)?|dev)[.-]?\d*|\d(?:a(?:lpha)?|b(?:eta)?|rc|pre(?:view)?|dev)\d*", prerelease_version))
-          if manifest.get("prerelease") != expected_prerelease:
-              raise SystemExit("update-manifest.json prerelease flag mismatch")
-          if not manifest.get("assets"):
-              raise SystemExit("update-manifest.json contains no release assets")
-          seen_names = set()
-          for asset in manifest["assets"]:
-              for field in ("name", "platform", "arch", "type", "kind", "flavor", "size", "sha256"):
-                  if field not in asset:
-                      raise SystemExit(f"update manifest asset is missing {field}: {asset!r}")
-              if asset["type"] != asset["kind"]:
-                  raise SystemExit(f"update manifest asset type/kind mismatch: {asset!r}")
-              if asset["name"] in seen_names:
-                  raise SystemExit(f"update manifest contains duplicate asset: {asset['name']}")
-              seen_names.add(asset["name"])
-              path = root / asset["name"]
-              if not path.is_file():
-                  raise SystemExit(f"manifest asset is missing: {path}")
-              data = path.read_bytes()
-              if asset["size"] != len(data) or asset["sha256"] != hashlib.sha256(data).hexdigest():
-                  raise SystemExit(f"manifest hash/size mismatch: {path}")
+          for manifest_name in ("update-manifest.json", "mose-update-manifest.json"):
+              manifest = json.loads((root / manifest_name).read_text(encoding="utf-8"))
+              if manifest.get("schemaVersion") != 1 or manifest.get("tag") != tag:
+                  raise SystemExit("update-manifest.json schema/tag mismatch")
+              expected_version = tag.removeprefix("v")
+              if manifest.get("version") != expected_version:
+                  raise SystemExit("update-manifest.json version mismatch")
+              prerelease_version = expected_version.split("+", 1)[0]
+              expected_prerelease = bool(re.search(r"(?i)(?:^|[.-])(?:a(?:lpha)?|b(?:eta)?|rc|pre(?:view)?|dev)[.-]?\d*|\d(?:a(?:lpha)?|b(?:eta)?|rc|pre(?:view)?|dev)\d*", prerelease_version))
+              if manifest.get("prerelease") != expected_prerelease:
+                  raise SystemExit("update-manifest.json prerelease flag mismatch")
+              if not manifest.get("assets"):
+                  raise SystemExit("update-manifest.json contains no release assets")
+              seen_names = set()
+              for asset in manifest["assets"]:
+                  for field in ("name", "platform", "arch", "type", "kind", "flavor", "size", "sha256"):
+                      if field not in asset:
+                          raise SystemExit(f"update manifest asset is missing {field}: {asset!r}")
+                  if asset["type"] != asset["kind"]:
+                      raise SystemExit(f"update manifest asset type/kind mismatch: {asset!r}")
+                  if asset["name"] in seen_names:
+                      raise SystemExit(f"update manifest contains duplicate asset: {asset['name']}")
+                  seen_names.add(asset["name"])
+                  path = root / asset["name"]
+                  if not path.is_file():
+                      raise SystemExit(f"manifest asset is missing: {path}")
+                  data = path.read_bytes()
+                  if asset["size"] != len(data) or asset["sha256"] != hashlib.sha256(data).hexdigest():
+                      raise SystemExit(f"manifest hash/size mismatch: {path}")
           required = {
               f"MAW-Windows-x64-{tag}.zip",
               f"MAW-lite-Windows-x64-{tag}.zip",

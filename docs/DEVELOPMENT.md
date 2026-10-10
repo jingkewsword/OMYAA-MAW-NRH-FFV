@@ -111,7 +111,7 @@ Windows 使用 `scripts/run-e2e.ps1`，脚本检查 quapeaks，并在需要时�
 
 ### Electron 与系统集成
 
-Windows 在同套件中共享 `MAW.exe` 与 FFmpeg；macOS/Linux 把原生后端放入 MOSE resources。各平台必须在对应系统和架构构建，步骤见 [desktop README](../desktop/README.md)。工程打开、原生另存为、真实路径、系统关联和手动更新范围见 [MOSE](MOSE.md)。
+Windows 在同套件中共享 `MAW.exe` 与 FFmpeg；macOS/Linux 把原生后端放入 MOSE resources。各平台必须在对应系统和架构构建，步骤见 [desktop README](../desktop/README.md)。工程打开、原生另存为、真实路径、系统关联和应用内更新范围见 [MOSE](MOSE.md)。
 
 `npm test --prefix desktop` 检查后端定位、文件写入、进程清理和打包契约；`node --test desktop/e2e/*.mjs` 检查真实 Electron/Server 流程，原生对话框选值使用替身。可通过 `MAW_MOSE_PYTHON` 指定源码后端解释器，通过 `MOSE_TEST_EXECUTABLE` 指定已打包编辑器。安装/卸载、文件管理器双击、macOS/Linux 原生运行仍须对应系统验收，不能以配置检查代替。
 

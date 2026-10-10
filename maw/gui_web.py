@@ -541,17 +541,17 @@ def _mosp_default_is_available(winreg_module: object) -> bool:
 
 
 def _register_mosp_association() -> bool:
-    """Register .mosp with MAW so direct opens still pass through the updater."""
+    """Register .mosp with the complete suite's native editor."""
     if sys.platform != "win32":
         return False
     launcher = _bundled_launcher_executable()
     bundled = _bundled_mose_executable()
     # Associations belong to the complete MAW-MOSE suite only.  Pointing the
-    # command at MAW (instead of MOSE) is intentional: it lets a double-clicked
-    # project pass through the Launcher update check before opening MOSE.
+    # native editor now owns its own update surface; opening a project does
+    # not need to create a Launcher window first.
     if launcher is None or bundled is None:
         return False
-    executable = launcher
+    executable = bundled
     project_icon = bundled.parent / "resources" / "assets" / "mosp.ico"
     icon = project_icon if project_icon.is_file() else bundled
     try:
@@ -574,7 +574,7 @@ def _register_mosp_association() -> bool:
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, rf"Software\Classes\{MAW_FILE_TYPE}\DefaultIcon") as icon_key:
             winreg.SetValueEx(icon_key, None, 0, winreg.REG_SZ, f'"{icon}",0')
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, rf"Software\Classes\{MAW_FILE_TYPE}\shell\open\command") as command_key:
-            winreg.SetValueEx(command_key, None, 0, winreg.REG_SZ, f'"{executable}" --open-project "%1"')
+            winreg.SetValueEx(command_key, None, 0, winreg.REG_SZ, f'"{executable}" "%1"')
     except (AttributeError, ImportError, OSError):
         return False
     try:

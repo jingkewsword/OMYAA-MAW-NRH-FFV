@@ -60,6 +60,15 @@ $StartMenuShortcut = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Progra
 if (-not (Test-Path -LiteralPath $StartMenuShortcut -PathType Leaf)) {
     throw "The expected Start Menu shortcut was not created: $StartMenuShortcut"
 }
+$MoseShortcut = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Moy's Open Subtitle Editor.lnk"
+if (-not (Test-Path -LiteralPath $MoseShortcut -PathType Leaf)) {
+    throw 'The MOSE Start Menu shortcut was not created.'
+}
+$ProjectCommand = (Get-Item -LiteralPath 'HKCU:\Software\Classes\Moy.MAW.Project\shell\open\command').GetValue('')
+$ExpectedCommand = '"' + (Join-Path $AppRoot 'MOSE\MOSE.exe') + '" "%1"'
+if ($ProjectCommand -ne $ExpectedCommand) {
+    throw 'The project association does not open MOSE directly.'
+}
 $UninstallEntry = Get-ChildItem -Path $UninstallRoot -ErrorAction SilentlyContinue |
     Where-Object { $_.GetValue('DisplayName') -eq "Moy's ASR Workflow" } |
     Select-Object -First 1

@@ -873,6 +873,8 @@ class EditorServer(ThreadingHTTPServer):
         self.request_token = secrets.token_urlsafe(32)
         self.desktop_mode = desktop_mode
         self.desktop_token = desktop_token
+        self.desktop_updates = None
+        self.desktop_updates_lock = threading.Lock()
         self.save_lock = threading.Lock()
         self.sticker_lock = threading.Lock()
         self.timeline_otioz_lock = threading.Lock()
@@ -2075,6 +2077,8 @@ class EditorRequestHandler(BaseHTTPRequestHandler):
                 self.send_localized_error(HTTPStatus.NOT_FOUND, "未知 API")
         elif path == "/api/desktop/project/prepare" and self.editor_server.desktop_mode:
             self.prepare_desktop_project()
+        elif path == "/api/desktop/updates" and self.editor_server.desktop_mode:
+            self.desktop_update_operation()
         elif path in {"/api/desktop/media/load", "/api/desktop/media/commit"} and self.editor_server.desktop_mode:
             self.desktop_media_operation(commit=path.endswith("/commit"))
         elif path == "/api/recent-projects/open":
@@ -2101,6 +2105,31 @@ class EditorRequestHandler(BaseHTTPRequestHandler):
             self.export_ograf()
         else:
             self.send_localized_error(HTTPStatus.NOT_FOUND, "未知 API")
+
+    def desktop_update_operation(self) -> None:
+        from maw.desktop_updates import DesktopUpdates
+        from maw.diagnostics import app_version
+        from maw.updater import UpdateClient, UpdateError
+
+        try:
+            payload = self.read_json_request(max_bytes=4096)
+            action = payload.get("action")
+            if not isinstance(action, str):
+                raise ValueError("invalid action")
+            if action in {"ready", "prepare"}:
+                control = os.environ.get("MAW_DESKTOP_CONTROL", "")
+                supplied = self.headers.get("X-MAW-Desktop-Control", "")
+                if not control or not secrets.compare_digest(control, supplied):
+                    self.send_json(HTTPStatus.FORBIDDEN, {"ok": False, "error": "desktop_control_required"})
+                    return
+            with self.editor_server.desktop_updates_lock:
+                if self.editor_server.desktop_updates is None:
+                    self.editor_server.desktop_updates = DesktopUpdates(UpdateClient(
+                        current_version=app_version(), product="mose"))
+            self.send_json(HTTPStatus.OK, self.editor_server.desktop_updates.operation(action, payload))
+        except (ValueError, UpdateError) as error:
+            self.send_json(HTTPStatus.BAD_REQUEST, {"ok": False,
+                           "error": error.code if isinstance(error, UpdateError) else "invalid_request"})
 
     def send_localized_error(self, status: HTTPStatus, detail: str) -> None:
         """Send a localized error body without putting non-Latin-1 text in the status line."""

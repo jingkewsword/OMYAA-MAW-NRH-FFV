@@ -187,6 +187,7 @@
     "editor/media/editor-wiring-waveform-hints.js",
     "editor/io/editor-wiring-server-events.js",
     "editor/io/editor-wiring-file-drop.js",
+    "editor/ui/editor-desktop-updates.js",
     "editor/boot/editor-startup.js",
     "editor/boot/editor-onboarding.js"
   ],
@@ -377,6 +378,7 @@
     "editor/media/editor-wiring-waveform-hints.js": "78821bb6248fb06325b5950dd8f54c06b5cb50c009fb73f50f0ee2dbd87a31e6",
     "editor/io/editor-wiring-server-events.js": "34681d9672141611c75af75d555856a9de69272c7d6ee7be9e9d8cd40f0b20ae",
     "editor/io/editor-wiring-file-drop.js": "6fcb7821cdd3215433c91913630ac16fdbacf9b3c675f6bb2e709a1bd58d0eb5",
+    "editor/ui/editor-desktop-updates.js": "af0305a2990a00d3b02e68400ff55ced8c1217a1ed7cf2ba9d942241d2212926",
     "editor/boot/editor-startup.js": "e12a4958265840c9dac94a4595345476f17b2130d4f7b2f60730cd47d53b0fb4",
     "editor/boot/editor-onboarding.js": "0ce812d8e651c80c67f8d5707cdd67c6ec34eca2ebeea1f661470406cfcebd75"
   },
@@ -690,7 +692,7 @@
         "format": "esm"
       },
       "web/editor-entry.mjs": {
-        "bytes": 1744648,
+        "bytes": 1752373,
         "imports": [
           {
             "path": "web/shared/host/storage.js",
@@ -1191,10 +1193,10 @@
             "bytesInOutput": 4423
           },
           "web/editor-entry.mjs": {
-            "bytesInOutput": 1016214
+            "bytesInOutput": 1021872
           }
         },
-        "bytes": 1355604
+        "bytes": 1361262
       }
     }
   }

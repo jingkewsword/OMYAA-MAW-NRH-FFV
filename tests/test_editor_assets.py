@@ -213,6 +213,7 @@ class EditorAssetContractTests(CompactContainerAssertions, unittest.TestCase):
                 "editor/media/editor-wiring-waveform-hints.js",
                 "editor/io/editor-wiring-server-events.js",
                 "editor/io/editor-wiring-file-drop.js",
+                "editor/ui/editor-desktop-updates.js",
                 "editor/boot/editor-startup.js",
                 "editor/boot/editor-onboarding.js",
         ),

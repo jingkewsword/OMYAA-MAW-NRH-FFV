@@ -2752,7 +2752,7 @@ class GuiWebBridgeTests(unittest.TestCase):
         values = {path: value for path, name, value in fake_winreg.values if name is None}
         self.assertEqual(values[r"Software\Classes\.mosp"], "Moy.MAW.Project")
         self.assertEqual(values[r"Software\Classes\Moy.MAW.Project\DefaultIcon"], f'"{executable}",0')
-        self.assertEqual(values[r"Software\Classes\Moy.MAW.Project\shell\open\command"], f'"{launcher}" --open-project "%1"')
+        self.assertEqual(values[r"Software\Classes\Moy.MAW.Project\shell\open\command"], f'"{executable}" "%1"')
         named_values = {(path, name): value for path, name, value in fake_winreg.values if name is not None}
         self.assertEqual(named_values[(r"Software\Moy\MOSE", "InstallPath")], str(self.root))
         self.assertEqual(named_values[(r"Software\Moy\MOSE", "ExecutablePath")], str(executable))

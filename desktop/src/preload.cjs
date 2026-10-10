@@ -15,6 +15,7 @@ function preferenceOperation(operation, key, value) {
 
 contextBridge.exposeInMainWorld('MOSEDesktop', Object.freeze({
   available: true,
+  update: (payload) => ipcRenderer.invoke('mose:update', payload),
   storage: Object.freeze({
     getItem: (key) => preferenceOperation('get', key),
     setItem: (key, value) => preferenceOperation('set', key, String(value)),

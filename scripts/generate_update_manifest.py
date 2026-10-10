@@ -18,7 +18,7 @@ PRERELEASE_RE = re.compile(
 )
 
 
-def _asset_metadata(name: str) -> tuple[str, str, str, str, str] | None:
+def _asset_metadata(name: str) -> tuple[str, str, str, str] | None:
     if name == "update-manifest.json":
         return None
     patterns = (
@@ -28,6 +28,10 @@ def _asset_metadata(name: str) -> tuple[str, str, str, str, str] | None:
         (r"^MAW-macOS-arm64-v.+\.zip$", "macos", "arm64", "portable", "standard"),
         (r"^MAW-lite-macOS-arm64-v.+\.zip$", "macos", "arm64", "portable", "lite"),
         (r"^MAW-Linux-x86_64-v.+\.AppImage$", "linux", "x64", "portable", "standard"),
+        (r"^MOSE-macOS-arm64-v.+\.zip$", "macos", "arm64", "portable", "standard"),
+        (r"^MOSE-macOS-arm64-v.+\.dmg$", "macos", "arm64", "installer", "standard"),
+        (r"^MOSE-Linux-x64-v.+\.AppImage$", "linux", "x64", "portable", "standard"),
+        (r"^MOSE-Linux-x64-v.+\.deb$", "linux", "x64", "installer", "standard"),
     )
     for pattern, platform, arch, kind, flavor in patterns:
         if re.fullmatch(pattern, name):
@@ -35,7 +39,9 @@ def _asset_metadata(name: str) -> tuple[str, str, str, str, str] | None:
     return None
 
 
-def build_manifest(root: Path, tag: str) -> dict[str, object]:
+def build_manifest(root: Path, tag: str, *, include_mose_suite: bool = False, product: str = "maw") -> dict[str, object]:
+    if product not in {"maw", "mose"}:
+        raise ValueError("unsupported update product")
     match = VERSION_RE.fullmatch(tag.strip())
     if not match:
         raise ValueError(f"invalid release tag: {tag!r}")
@@ -57,6 +63,10 @@ def build_manifest(root: Path, tag: str) -> dict[str, object]:
         f"MAW-macOS-arm64-v{version}.zip",
         f"MAW-lite-macOS-arm64-v{version}.zip",
         f"MAW-Linux-x86_64-v{version}.AppImage",
+        f"MOSE-macOS-arm64-v{version}.zip",
+        f"MOSE-macOS-arm64-v{version}.dmg",
+        f"MOSE-Linux-x64-v{version}.AppImage",
+        f"MOSE-Linux-x64-v{version}.deb",
     }
     files: list[Path] = []
     for path in root.rglob("*"):
@@ -64,6 +74,11 @@ def build_manifest(root: Path, tag: str) -> dict[str, object]:
             continue
         if path.name not in expected_names:
             continue
+        if product == "maw" and path.name.startswith("MOSE-"):
+            continue
+        if product == "mose" and not path.name.startswith("MOSE-"):
+            if not include_mose_suite or not path.name.startswith(("MAW-Windows-", "MAW-Setup-Windows-")):
+                continue
         files.append(path)
     if not files:
         raise ValueError(f"no MAW release assets found under {root}")
@@ -88,6 +103,8 @@ def build_manifest(root: Path, tag: str) -> dict[str, object]:
                 "flavor": flavor,
                 "size": path.stat().st_size,
                 "sha256": digest.hexdigest(),
+                "products": (["mose"] if path.name.startswith("MOSE-") else
+                             ["maw", "mose"] if include_mose_suite and platform == "windows" and flavor == "standard" else ["maw"]),
             }
         )
     return {
@@ -104,11 +121,16 @@ def main() -> int:
     parser.add_argument("--root", type=Path, required=True, help="downloaded Release artifact directory")
     parser.add_argument("--tag", required=True, help="Release tag, for example v1.5.0")
     parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument("--include-mose-suite", action="store_true", help="Windows standard assets contain the staged MOSE editor")
     args = parser.parse_args()
     output = args.output or args.root / "update-manifest.json"
-    manifest = build_manifest(args.root, args.tag)
+    manifest = build_manifest(args.root, args.tag, include_mose_suite=args.include_mose_suite)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+    if args.include_mose_suite:
+        desktop_manifest = build_manifest(args.root, args.tag, include_mose_suite=True, product="mose")
+        desktop_output = output.with_name("mose-update-manifest.json")
+        desktop_output.write_text(json.dumps(desktop_manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     print(f"Generated {output} with {len(manifest['assets'])} assets")
     return 0
 

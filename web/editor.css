@@ -1316,6 +1316,18 @@
   #editor-settings-page-export .editor-settings-field { gap: 8px; }
   .editor-settings-field[hidden] { display: none; }
   .sticker-root-controls { display: flex; flex: 0 0 100%; gap: 8px; min-width: 0; }
+  .desktop-update-dialog { width: min(620px, calc(100vw - 48px)); max-height: 80vh; overflow: auto; border: 1px solid var(--border); border-radius: 12px; padding: 24px; background: var(--bg-panel); color: var(--text-primary); }
+  .desktop-update-dialog::backdrop { background: #0008; }
+  .desktop-update-content { display: flex; flex-direction: column; gap: 16px; }
+  .desktop-update-content > h2, .desktop-update-content > p { margin: 0; }
+  .desktop-update-content progress { width: 100%; }
+  .desktop-update-content pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; font: inherit; margin: 12px 0 0; }
+  .desktop-update-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  .desktop-update-actions button { min-height: 34px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-raised); color: var(--text-primary); font: inherit; cursor: pointer; }
+  .desktop-update-actions button:hover:not(:disabled) { border-color: var(--accent); }
+  .desktop-update-actions button:disabled { opacity: .5; cursor: default; }
+  .desktop-update-actions button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .desktop-update-content > label { display: flex; align-items: center; gap: 8px; }
   .editor-settings-panel .sticker-root-controls input[type="text"] { flex: 1 1 auto; width: auto; min-width: 0; }
   .sticker-root-controls button { flex: 0 0 auto; }
   #editor-settings-page-project-tracks .editor-settings-item { white-space: normal; }
