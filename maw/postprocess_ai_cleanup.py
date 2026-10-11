@@ -29,6 +29,7 @@ from maw.postprocess_llm import (
     LlmClientError,
     LlmDelta,
     LlmSettings,
+    _loads_with_trailing_repair,
     _request_completion,
     _response_content,
     _strip_json_fence,
@@ -53,6 +54,67 @@ from maw.script_alignment import (
 
 GAP_REMOVE_SCHEMA: Final[str] = "moy.asr.gap_remove.v1"
 MARKERS_SCHEMA: Final[str] = "moy.asr.markers.v1"
+
+# json_schema 约束载荷：仅约束结构（端点语法层），语义仍由本地协议校验兜底。
+AI_CLEANUP_DECISIONS_JSON_SCHEMA: Final[dict[str, object]] = {
+    "name": "maw_ai_cleanup_decisions",
+    "schema": {
+        "type": "object",
+        "properties": {
+            "decisions": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "decision": {"type": "string"},
+                        "scriptLine": {"type": "string"},
+                        "reason": {"type": "string"},
+                        "evidence": {"type": "string"},
+                        "altTakeId": {"type": "string"},
+                    },
+                    "required": ["id", "decision", "scriptLine"],
+                },
+            }
+        },
+        "required": ["decisions"],
+    },
+}
+AI_CLEANUP_REVIEWS_JSON_SCHEMA: Final[dict[str, object]] = {
+    "name": "maw_ai_cleanup_reviews",
+    "schema": {
+        "type": "object",
+        "properties": {
+            "reviews": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["id", "reason"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        "required": ["reviews"],
+        "additionalProperties": False,
+    },
+}
+
+
+def _cleanup_response_schema(clips: list[dict[str, str]]) -> dict[str, object]:
+    # Readthrough rows carry the proposed first-pass outcome, including their
+    # read-only neighbors. Decision rows never carry this field. Select the
+    # grammar from that internal payload contract, not from user prompt text;
+    # the cached endpoint mode is shared by both operations, but their schemas
+    # must remain separate.
+    if clips and all("proposed" in row for row in clips):
+        return AI_CLEANUP_REVIEWS_JSON_SCHEMA
+    return AI_CLEANUP_DECISIONS_JSON_SCHEMA
+
+
 MARKER_REVIEW_COLOR: Final[str] = "#f5a623"
 MARKER_REVIEW_REASON_MAX_LENGTH: Final[int] = 300
 MARKER_NOTE_MAX_LENGTH: Final[int] = 500
@@ -148,10 +210,11 @@ def llm_complete(
                 on_delta=on_delta,
                 is_cancelled=is_cancelled,
                 on_response=on_response,
+                response_json_schema=_cleanup_response_schema(clips),
             )
             content = _response_content(body)
             try:
-                return json.loads(_strip_json_fence(content))
+                return _loads_with_trailing_repair(_strip_json_fence(content))
             except json.JSONDecodeError as error:
                 last_error = f"JSON syntax error: {error.msg} at character {error.pos}"
         raise LlmClientError(
