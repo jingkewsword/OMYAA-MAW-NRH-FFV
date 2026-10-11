@@ -289,6 +289,36 @@ class JsonConstraintDowngradeTests(unittest.TestCase):
         self.assertEqual(result, {"decisions": []})
         self.assertEqual(session.post.call_count, 3)
 
+    def test_cleanup_schema_follows_decision_and_readthrough_payloads(self) -> None:
+        from maw.postprocess_ai_cleanup import llm_complete
+        from maw.postprocess_ai_cleanup_review import review_decisions
+
+        payloads: list[dict] = []
+
+        def post_effect(url, json: dict | None = None, **_kwargs):
+            assert json is not None
+            payloads.append(json)
+            fmt = json.get("response_format")
+            if fmt is None or fmt["type"] == "json_object":
+                return _rejection_response_mock()
+            # A grammar-enforcing endpoint emits only the required envelope.
+            required = fmt["json_schema"]["schema"]["required"]
+            content = '{"reviews":[]}' if required == ["reviews"] else '{"decisions":[]}'
+            return _response_mock(_completion_body(content))
+
+        transport = llm_complete(_make_settings())
+        with mock.patch(
+            "maw.postprocess_llm.requests.Session",
+            return_value=_mock_session(post_effect),
+        ):
+            self.assertEqual(transport("Return decisions.", [{"id": "c001", "asrText": "test"}]), {"decisions": []})
+            flags = review_decisions(transport, [{"id": "c001", "asrText": "test", "proposed": "discard"}])
+            self.assertEqual(flags, {})
+            self.assertEqual(transport("Return decisions.", [{"id": "c002", "asrText": "next"}]), {"decisions": []})
+        self.assertEqual(len(payloads), 4)
+        envelopes = [payload["response_format"]["json_schema"]["schema"]["required"] for payload in payloads[1:]]
+        self.assertEqual(envelopes, [["decisions"], ["reviews"], ["decisions"]])
+
     def test_unrelated_400_does_not_retry_or_poison_cache(self) -> None:
         response = _rejection_response_mock()
         response.json.return_value = {"error": {"message": "unsupported model"}}
@@ -338,6 +368,18 @@ class TruncatedJsonRepairTests(unittest.TestCase):
     def test_trailing_comma_before_closers_is_dropped(self) -> None:
         repaired = json.loads(_close_truncated_json('{"groups":[{"id":"c1",'))
         self.assertEqual(repaired, {"groups": [{"id": "c1"}]})
+
+    def test_trailing_comma_with_complete_closers_is_dropped(self) -> None:
+        content = '{"groups":[{"id":"c1","text":"literal ,]} stays"}, ]}'
+        self.assertEqual(
+            _loads_with_trailing_repair(content),
+            {"groups": [{"id": "c1", "text": "literal ,]} stays"}]},
+        )
+
+    def test_comma_without_previous_value_is_not_repaired(self) -> None:
+        for content in ('{,}', '{"groups":[,]}'):
+            with self.subTest(content=content), self.assertRaises(json.JSONDecodeError):
+                _loads_with_trailing_repair(content)
 
     def test_nested_missing_brackets_are_closed_in_order(self) -> None:
         repaired = json.loads(_close_truncated_json('{"a":[{"b":1'))

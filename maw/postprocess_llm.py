@@ -932,7 +932,7 @@ def _response_content(body: JsonValue) -> str:
 
 
 def _close_truncated_json(value: str) -> str | None:
-    """Close containers that a small model left open at the end of its reply.
+    """Close missing containers or remove one comma at the structural tail.
 
     Only a clean structural prefix can be repaired: an unterminated string or
     a mismatched closer means the damage is mid-content, and silently closing
@@ -942,7 +942,8 @@ def _close_truncated_json(value: str) -> str | None:
     closer_for = {"{": "}", "[": "]"}
     in_string = False
     escaped = False
-    for char in value:
+    last_comma: int | None = None
+    for index, char in enumerate(value):
         if in_string:
             if escaped:
                 escaped = False
@@ -957,11 +958,23 @@ def _close_truncated_json(value: str) -> str | None:
         elif char in "}]":
             if not stack or closer_for[stack.pop()] != char:
                 return None
-    if in_string or not stack:
+        elif char == ",":
+            last_comma = index
+    if in_string:
         return None
     repaired = value.rstrip()
-    if repaired.endswith(","):
-        repaired = repaired[:-1].rstrip()
+    if last_comma is not None:
+        prefix = value[:last_comma].rstrip()
+        suffix = value[last_comma + 1:]
+        # Repair a comma only at the structural tail, whether the closing
+        # containers were emitted or omitted. Never remove string content or
+        # a comma without a preceding value (e.g. {,} or [,]).
+        if prefix and prefix[-1] not in "{[:," and all(
+            char.isspace() or char in "}]" for char in suffix
+        ):
+            repaired = (value[:last_comma] + suffix).rstrip()
+    if not stack and repaired == value.rstrip():
+        return None
     return repaired + "".join(closer_for[opener] for opener in reversed(stack))
 
 
@@ -969,9 +982,9 @@ def _loads_with_trailing_repair(content: str) -> JsonValue:
     """json.loads with one best-effort repair for truncated JSON suffixes.
 
     Local models occasionally stop one closing bracket short or leave a
-    trailing comma before the closers.  Repair only succeeds for a strict
-    prefix of a JSON document; anything else re-raises the original error so
-    the normal protocol retry still happens.
+    trailing comma before the closers. Only these structural suffixes are
+    repaired; anything else re-raises the original error so the normal
+    protocol retry still happens.
     """
     try:
         return json.loads(content)

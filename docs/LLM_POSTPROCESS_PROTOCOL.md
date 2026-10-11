@@ -116,7 +116,7 @@
 
 - `model`：当前供应商或自定义模型名；
 - `messages`：系统协议和 cue 文本数组；
-- `response_format`：JSON 输出约束，按端点能力自动降级——默认 `{"type": "json_object"}`；被端点拒绝（HTTP 400 / 422）时改发 `json_schema` 语法约束（字幕协议与 AI 整理各用对应结构）；两者都被拒绝或约束下返回空内容时不再携带该参数，仅靠提示词约束。探测结果按「端点 + 模型」在会话内缓存；
+- `response_format`：JSON 输出约束，按端点能力自动降级——默认 `{"type": "json_object"}`；被端点拒绝（HTTP 400 / 422）时改发 `json_schema` 语法约束（字幕协议、AI 整理 decisions 和剪后通读 reviews 各用对应结构）；两者都被拒绝或约束下返回空内容时不再携带该参数，仅靠提示词约束。端点能力按「端点 + 模型」在会话内缓存，当前工序的结构独立选择，不复用另一工序的 schema；
 - `temperature: 0.1`。
 
 预设供应商为 DeepSeek、智谱 Coding Plan 和阿里云 Qwen；Custom 可填写 HTTPS 或环回 HTTP 的 OpenAI-compatible URL。API Key、URL、模型和最近供应商只保存在本机配置中，完整 Key 不进入工程、SRT、前端配置响应或任务结果。字幕文字会发送给用户选择的供应商，用户应自行确认其隐私和数据保留政策。

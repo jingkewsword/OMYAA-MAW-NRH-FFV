@@ -79,6 +79,41 @@ AI_CLEANUP_DECISIONS_JSON_SCHEMA: Final[dict[str, object]] = {
         "required": ["decisions"],
     },
 }
+AI_CLEANUP_REVIEWS_JSON_SCHEMA: Final[dict[str, object]] = {
+    "name": "maw_ai_cleanup_reviews",
+    "schema": {
+        "type": "object",
+        "properties": {
+            "reviews": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "reason": {"type": "string"},
+                    },
+                    "required": ["id", "reason"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        "required": ["reviews"],
+        "additionalProperties": False,
+    },
+}
+
+
+def _cleanup_response_schema(clips: list[dict[str, str]]) -> dict[str, object]:
+    # Readthrough rows carry the proposed first-pass outcome, including their
+    # read-only neighbors. Decision rows never carry this field. Select the
+    # grammar from that internal payload contract, not from user prompt text;
+    # the cached endpoint mode is shared by both operations, but their schemas
+    # must remain separate.
+    if clips and all("proposed" in row for row in clips):
+        return AI_CLEANUP_REVIEWS_JSON_SCHEMA
+    return AI_CLEANUP_DECISIONS_JSON_SCHEMA
+
+
 MARKER_REVIEW_COLOR: Final[str] = "#f5a623"
 MARKER_REVIEW_REASON_MAX_LENGTH: Final[int] = 300
 MARKER_NOTE_MAX_LENGTH: Final[int] = 500
@@ -164,7 +199,7 @@ def llm_complete(
                 current_prompt,
                 clips,
                 on_delta=None,
-                response_json_schema=AI_CLEANUP_DECISIONS_JSON_SCHEMA,
+                response_json_schema=_cleanup_response_schema(clips),
             )
             content = _response_content(body)
             try:
