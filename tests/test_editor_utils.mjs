@@ -115,6 +115,49 @@ test('time offsets keep allowing existing overlaps without changing cue order', 
   }
 });
 
+for (const fps of [30, 29.97]) {
+  const frameClock = {
+    unit: 'frames',
+    getStart: segment => segment.start_frame,
+    getEnd: segment => segment.end_frame,
+    fromMs: value => helpers.frameNumberFromMilliseconds(value, fps),
+    toMs: value => helpers.millisecondsFromFrameNumber(value, fps),
+  };
+  const frameRange = (start, end, extra = {}) => ({
+    start_frame: start, end_frame: end,
+    start: frameClock.toMs(start), end: frameClock.toMs(end), ...extra,
+  });
+  for (const direction of [1, -1]) {
+    test(`frame-coordinate time offsets accept touching ${direction > 0 ? 'positive' : 'negative'} boundaries at ${fps} FPS`, () => {
+      const end = fps === 30 ? 5 : 7;
+      const source = direction > 0
+        ? [frameRange(end - 3, end), frameRange(end + 2, end + 5, { disabled: true })]
+        : [frameRange(0, 2, { disabled: true }), frameRange(4, 7)];
+      const index = direction > 0 ? 0 : 1;
+      const before = structuredClone(source);
+      const offset = direction * frameClock.toMs(2);
+      const plan = helpers.planSubtitleTimeOffset(source, [index], offset, 12000, frameClock);
+      assert.equal(plan.ok, true);
+      assert.deepEqual(JSON.parse(JSON.stringify(plan.changes)), [{
+        index,
+        start: frameClock.toMs(source[index].start_frame + direction * 2),
+        end: frameClock.toMs(source[index].end_frame + direction * 2),
+        start_frame: source[index].start_frame + direction * 2,
+        end_frame: source[index].end_frame + direction * 2,
+      }]);
+      assert.deepEqual(source, before, 'frame planning must not mutate any cue');
+    });
+  }
+  test(`frame-coordinate time offsets still reject real overlap and exact media bounds at ${fps} FPS`, () => {
+    const source = [frameRange(4, 7), frameRange(8, 11, { disabled: true })];
+    assert.equal(helpers.planSubtitleTimeOffset(source, [0], frameClock.toMs(2), 12000, frameClock).reason, 'overlap');
+    const touchingEnd = frameClock.toMs(9);
+    assert.equal(helpers.planSubtitleTimeOffset([source[0]], [0], frameClock.toMs(2), touchingEnd, frameClock).ok, true);
+    assert.equal(helpers.planSubtitleTimeOffset([source[0]], [0], frameClock.toMs(2), touchingEnd - 1, frameClock).reason, 'media_bounds');
+    assert.equal(helpers.planSubtitleTimeOffset([frameRange(1, 4)], [0], -frameClock.toMs(2), 12000, frameClock).reason, 'media_bounds');
+  });
+}
+
 test('accepts legacy and current project schemas but rejects unknown versions', () => {
   assert.equal(helpers.supportsProjectSchema({ segments: [] }), true);
   assert.equal(helpers.supportsProjectSchema({ schema: helpers.PROJECT_SCHEMA, segments: [] }), true);

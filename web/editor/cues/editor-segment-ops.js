@@ -273,16 +273,20 @@
       MaweHint.flashHint(ui('偏移量必须是整数毫秒', 'Offset must be a whole number of milliseconds'), 'invalid');
       return false;
     }
-    let offsetMs = Number(rawOffset);
-    if (MaweTimeline.timelineIsFrameMode()) {
-      offsetMs = Math.sign(offsetMs)
-        * MaweTimeline.timelineFrameAlignedMilliseconds(Math.abs(offsetMs));
-    }
+    const timebase = MaweTimeline.projectTimebase();
+    const timing = MaweTimeline.timelineTimingAdapter();
+    const frameMode = timing.unit === 'frames';
+    const requestedOffset = Number(rawOffset);
+    const offset = frameMode
+      ? Math.sign(requestedOffset) * timing.fromMs(Math.abs(requestedOffset)) : requestedOffset;
+    const offsetMs = frameMode ? Math.sign(offset) * timing.toMs(Math.abs(offset)) : offset;
+    const durationMs = MaweMultiSubtitleCore.getSubtitleTimelineDuration();
     const plan = window.AsrEditorUtils.planSubtitleTimeOffset(
       MaweBoot.DATA.segments,
       indices,
       offsetMs,
-      MaweMultiSubtitleCore.getSubtitleTimelineDuration(),
+      durationMs,
+      timing,
     );
     const failures = {
       invalid_selection: ui('无法调整：选中的字幕已失效', 'Cannot adjust: the selected cues are no longer available'),
@@ -305,50 +309,64 @@
     let boundConflict = false;
     const changedSegments = [];
     const followerMoves = new Map();
+    const moveSegment = (segment, change) => {
+      const delta = frameMode ? change.start_frame - timing.getStart(segment) : change.start - Number(segment.start);
+      if (Array.isArray(segment.items)) {
+        segment.items = segment.items.map((item) => {
+          const moved = { ...item };
+          if (frameMode) {
+            timing.setItemStart(moved, timing.getItemStart(item) + delta);
+            timing.setItemEnd(moved, timing.getItemEnd(item) + delta);
+          } else {
+            moved.start = Number(item.start) + delta;
+            moved.end = Number(item.end) + delta;
+          }
+          return moved;
+        });
+      }
+      segment.start = change.start;
+      segment.end = change.end;
+      if (frameMode) {
+        segment.start_frame = change.start_frame;
+        segment.end_frame = change.end_frame;
+      }
+      MaweTimeline.syncSegmentTimebase(segment, timebase, { preferFrames: frameMode });
+      segment._dirty = true;
+    };
     const applied = MaweCommands.run('调整字幕时间', (command) => {
       plan.changes.forEach((change) => {
-        const segment = MaweBoot.DATA.segments[change.index];
-        if (!segment) return;
-        const oldStart = Number(segment.start);
-        const delta = change.start - oldStart;
-        segment.start = change.start;
-        segment.end = change.end;
-        if (Array.isArray(segment.items)) {
-          segment.items = segment.items.map((item) => ({
-            ...item,
-            start: Number(item.start) + delta,
-            end: Number(item.end) + delta,
-          }));
-        }
-        MaweTimeline.syncSegmentTimebase(segment, MaweTimeline.projectTimebase(), { preferFrames: false });
-        segment._dirty = true;
-        changedSegments.push(segment);
         if (!MaweMultiSubtitleCore.multiSubtitleVisible()) return;
         const binding = MaweMultiSubtitleCore.bindingForMainIndex(change.index);
         const extension = MaweMultiSubtitleCore.extensionForMainIndex(change.index);
         const track = binding && MaweMultiSubtitleCore.getExtensionTrack(binding.track_id);
         if (!binding || !extension || !track) return;
-        const desiredStart = Number(extension.start) + delta;
-        const desiredEnd = Number(extension.end) + delta;
-        const safe = MaweMultiSubtitleCore.setExtensionSegmentRange(extension, desiredStart, desiredEnd);
-        if (safe.start !== desiredStart || safe.end !== desiredEnd) boundConflict = true;
         if (!followerMoves.has(track)) followerMoves.set(track, new Set());
-        followerMoves.get(track).add(extension);
-        linkedChanged = true;
+        followerMoves.get(track).add(track.segments.indexOf(extension));
       });
+      const followerPlans = new Map();
       followerMoves.forEach((followers, track) => {
-        if (boundConflict) return;
-        const result = MaweMultiSubtitleCore.reconcileExtensionTrack(track, [...followers]);
-        if (result.squeezedCount || result.removedCount || result.unboundCount) boundConflict = true;
-        if (track.segments.some((segment) => Number(segment.start) < 0 || Number(segment.end) > MaweMultiSubtitleCore.getSubtitleTimelineDuration())) {
-          boundConflict = true;
-        }
+        const followerPlan = window.AsrEditorUtils.planSubtitleTimeOffset(
+          track.segments, followers, offsetMs, durationMs, timing,
+        );
+        if (!followerPlan.ok) boundConflict = true;
+        else followerPlans.set(track, followerPlan);
       });
       if (boundConflict) {
         command.cancel();
         return false;
       }
-      followerMoves.forEach((_followers, track) => { track._dirty = true; });
+      // 先完成两个轨道的计划，任一受阻都不写入；绑定字幕/items 使用相同的
+      // 帧位移，不能复用主字幕某一端点取整后得到的毫秒差。
+      plan.changes.forEach((change) => {
+        const segment = MaweBoot.DATA.segments[change.index];
+        moveSegment(segment, change);
+        changedSegments.push(segment);
+      });
+      followerPlans.forEach((followerPlan, track) => {
+        followerPlan.changes.forEach((change) => moveSegment(track.segments[change.index], change));
+        track._dirty = true;
+        linkedChanged = true;
+      });
       MaweMultiSubtitleCore.markMainSegmentsDirty(changedSegments);
       if (linkedChanged) MaweMultiSubtitleCore.markMultiSubtitleStateDirty();
       MaweMultiSubtitleCore.syncBindingOffsets();

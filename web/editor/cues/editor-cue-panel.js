@@ -264,25 +264,31 @@
   const oldEnd = seg.end;
   const minimumDurationMs = MaweTimeline.timelineMinimumDurationMs();
   const requestedStart = parsePanelTime(MaweDom.cuePanelStart.value, oldStart);
-  const requestedDuration = Math.max(
-    minimumDurationMs,
-    parsePanelTime(MaweDom.cuePanelDuration.value, oldEnd - oldStart),
-  );
-  const previousEnd = idx > 0 ? segments[idx - 1].end : 0;
-  const nextStart = idx + 1 < segments.length ? segments[idx + 1].start : (MaweCoreState.waveformEditor?.durationMs || oldEnd);
-  if (nextStart - previousEnd < minimumDurationMs) {
-    MaweHint.flashHint('相邻字幕之间不足 100ms，无法调整当前字幕', 'warning');
-    renderCurrentCuePanel();
-    MaweCuePanelState.resetCuePanelEditState();
-    return false;
-  }
-  const newStart = Math.max(previousEnd, Math.min(requestedStart, nextStart - minimumDurationMs));
-  const newEnd = Math.min(nextStart, newStart + requestedDuration);
-  if (newEnd - newStart < minimumDurationMs) {
-    MaweHint.flashHint('字幕时长不能小于 100ms', 'warning');
-    renderCurrentCuePanel();
-    MaweCuePanelState.resetCuePanelEditState();
-    return false;
+  const requestedDuration = parsePanelTime(MaweDom.cuePanelDuration.value, oldEnd - oldStart);
+  const timing = MaweTimeline.timelineTimingAdapter();
+  const timingRequested = timing.fromMs(requestedStart) !== timing.getStart(seg)
+    || timing.fromMs(requestedDuration) !== timing.getEnd(seg) - timing.getStart(seg);
+  let newStart = oldStart;
+  let newEnd = oldEnd;
+  // 文字提交不调整合法短字幕的范围；帧时长也按帧比较，避免整数毫秒投影
+  // 产生 1ms 差异，把未修改的时长误当成时间编辑。
+  if (timingRequested) {
+    const previousEnd = idx > 0 ? segments[idx - 1].end : 0;
+    const nextStart = idx + 1 < segments.length ? segments[idx + 1].start : (MaweCoreState.waveformEditor?.durationMs || oldEnd);
+    if (nextStart - previousEnd < minimumDurationMs) {
+      MaweHint.flashHint('相邻字幕之间不足 100ms，无法调整当前字幕', 'warning');
+      renderCurrentCuePanel();
+      MaweCuePanelState.resetCuePanelEditState();
+      return false;
+    }
+    newStart = Math.max(previousEnd, Math.min(requestedStart, nextStart - minimumDurationMs));
+    newEnd = Math.min(nextStart, newStart + Math.max(minimumDurationMs, requestedDuration));
+    if (newEnd - newStart < minimumDurationMs) {
+      MaweHint.flashHint('字幕时长不能小于 100ms', 'warning');
+      renderCurrentCuePanel();
+      MaweCuePanelState.resetCuePanelEditState();
+      return false;
+    }
   }
   const changed = nextText !== previousText || newStart !== oldStart || newEnd !== oldEnd;
   if (!changed) {
@@ -293,17 +299,13 @@
   ensureCuePanelUndo();
   seg.text = nextText;
   seg.start = newStart;
-  seg.end = Math.max(newStart + minimumDurationMs, newEnd);
-  if (seg.end > nextStart) {
-    seg.end = nextStart;
-    seg.start = Math.max(previousEnd, seg.end - minimumDurationMs);
-  }
+  seg.end = newEnd;
+  const timingChanged = seg.start !== oldStart || seg.end !== oldEnd;
   if (target.kind === 'main') {
-    seg.items = remapPanelItems(seg.items, oldStart, oldEnd, seg.start, seg.end);
+    if (timingChanged) seg.items = remapPanelItems(seg.items, oldStart, oldEnd, seg.start, seg.end);
     MaweWordTiming.syncTextChange(seg, previousText);
   }
   seg._dirty = true;
-  const timingChanged = seg.start !== oldStart || seg.end !== oldEnd;
   if (target.kind === 'main') {
     if (timingChanged) {
       const syncPatch = { oldStart, oldEnd, mode: 'range' };

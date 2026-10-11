@@ -49,6 +49,8 @@
   let toolboxOpenMode = "manual";
   let busy = false;
   let activePostprocessOperationId = "";
+  let displayedPostprocessOperationId = "";
+  let postprocessOperationReady = false;
   let postprocessOperationSequence = 0;
   let postprocessCancelling = false;
   let postprocessSettingsActionVisible = false;
@@ -988,9 +990,10 @@
     const stop = $("stopToolboxPostprocess");
     const settings = $("toolboxPostprocessSettings");
     if (stop) {
+      const canStop = busy && activePostprocessOperationId && postprocessOperationReady;
       stop.textContent = t(postprocessCancelling ? "toolbox_status_cancelling_ai" : "toolbox_stop_ai");
-      stop.classList.toggle("hidden", !busy || !activePostprocessOperationId);
-      stop.disabled = !busy || !activePostprocessOperationId || postprocessCancelling;
+      stop.classList.toggle("hidden", !canStop);
+      stop.disabled = !canStop || postprocessCancelling;
     }
     if (settings) settings.classList.toggle("hidden", !postprocessSettingsActionVisible);
   }
@@ -1013,15 +1016,21 @@
 
   function beginAiPostprocessOperation() {
     activePostprocessOperationId = newPostprocessOperationId();
+    displayedPostprocessOperationId = activePostprocessOperationId;
+    postprocessOperationReady = false;
     postprocessCancelling = false;
     postprocessSettingsActionVisible = false;
     renderPostprocessResultActions();
     return activePostprocessOperationId;
   }
 
-  function finishAiPostprocessOperation(operationId) {
+  function finishAiPostprocessOperation(operationId, cancelled = false) {
     if (!operationId || activePostprocessOperationId !== operationId) return false;
+    // The event pump can deliver the last stream batch after the bridge result.
+    // Keep that display identity until the next run, unless cancellation won.
+    if (cancelled) displayedPostprocessOperationId = "";
     activePostprocessOperationId = "";
+    postprocessOperationReady = false;
     postprocessCancelling = false;
     renderPostprocessResultActions();
     return true;
@@ -1029,13 +1038,14 @@
 
   async function cancelAiPostprocess() {
     const operationId = activePostprocessOperationId;
-    if (!operationId || !busy || postprocessCancelling) return;
+    if (!operationId || !busy || !postprocessOperationReady || postprocessCancelling) return;
     postprocessCancelling = true;
     setResult(t("toolbox_status_cancelling_ai"));
     try {
       const result = await bridge("cancel_postprocess", { operationId });
       if (activePostprocessOperationId !== operationId) return;
       if (!result?.ok) throw new Error(postprocessErrorText(result));
+      if (result?.cancelled === true) displayedPostprocessOperationId = "";
       if (result?.cancelled === false) {
         postprocessCancelling = false;
         renderPostprocessResultActions();
@@ -1079,6 +1089,7 @@
     if (!busy || postprocessCancelling) return;
     if (activePostprocessOperationId && event.operationId !== activePostprocessOperationId) return;
     if (!activePostprocessOperationId && event.operationId) return;
+    if (activePostprocessOperationId && event.stage === "admitted") postprocessOperationReady = true;
     let message = t(event.key || "toolbox_running");
     Object.entries(event).forEach(([key, value]) => {
       message = message.replaceAll(`{${key}}`, String(value));
@@ -1108,8 +1119,7 @@
   }
 
   function renderPostprocessStream(event) {
-    if (!activePostprocessOperationId || event.operationId !== activePostprocessOperationId) return;
-    if (postprocessCancelling) return;
+    if (!displayedPostprocessOperationId || event.operationId !== displayedPostprocessOperationId) return;
     if (event.kind === "reset") {
       beginStreamOutput();
       return;
@@ -1976,6 +1986,7 @@
     const operationId = beginAiPostprocessOperation();
     beginStreamOutput();
     setBusy(true, "toolbox_status_ai_cleanup");
+    let cancelled = false;
     try {
       const result = await bridge("run_ai_cleanup", {
         ...paths,
@@ -1985,11 +1996,12 @@
         cleanMarkdownSymbols: $("postprocessCleanMarkdownSymbols").checked,
         notes: $("postprocessAiCleanupNotes")?.value.trim() || "",
       });
+      cancelled = result.code === "postprocess_cancelled";
       if (result.ok) applySubtitleResult(result, { kind: "ai_cleanup" });
       else if (result.code === "postprocess_cancelled") setResult(t("toolbox_ai_cancelled"));
       else setResult(postprocessErrorText(result), "error");
     } finally {
-      finishAiPostprocessOperation(operationId);
+      finishAiPostprocessOperation(operationId, cancelled);
       setBusy(false);
     }
   }
@@ -2282,6 +2294,7 @@
     const operationId = beginAiPostprocessOperation();
     beginStreamOutput();
     setBusy(true, "toolbox_status_starting");
+    let cancelled = false;
     try {
       const result = await bridge("run_llm_postprocess", {
         ...paths,
@@ -2295,6 +2308,7 @@
         embedTranslations: Boolean($("postprocessBackfill")?.checked),
         bilingualLineOrder: $("postprocessBilingualOrder")?.value || "",
       });
+      cancelled = result.code === "postprocess_cancelled";
       if (result.ok) applySubtitleResult(result, { kind: "llm", operation });
       else if (result.code === "postprocess_cancelled") setResult(t("toolbox_ai_cancelled"));
       else {
@@ -2306,7 +2320,7 @@
         setResult(message, "error");
       }
     } finally {
-      finishAiPostprocessOperation(operationId);
+      finishAiPostprocessOperation(operationId, cancelled);
       setBusy(false);
     }
   }

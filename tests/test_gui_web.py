@@ -2403,6 +2403,59 @@ class GuiWebBridgeTests(CompactContainerAssertions, unittest.TestCase):
         self.assertTrue(output_project.is_file())
         self.assertNotEqual(output_project, project)
 
+    def test_ai_postprocess_admission_precedes_settings_and_can_cancel_preparation(self) -> None:
+        emit = self.api._emit
+        for method_name, process_name in (
+            ("run_ai_cleanup", "process_ai_cleanup"),
+            ("run_llm_postprocess", "process_llm_postprocess"),
+        ):
+            with self.subTest(method=method_name):
+                operation_id = f"admit-{method_name}"
+                events: list[dict[str, object]] = []
+
+                def record_event(event):
+                    events.append(dict(event))
+                    emit(event)
+
+                def read_settings(*_args):
+                    self.assertIn(operation_id, self.api._postprocess_operations)
+                    self.assertEqual(events, [{
+                        "type": "postprocess_status",
+                        "key": "toolbox_status_starting",
+                        "stage": "admitted",
+                        "operationId": operation_id,
+                    }])
+                    self.assertEqual(
+                        self.api.cancel_postprocess({"operationId": operation_id}),
+                        {"ok": True, "active": True, "cancelled": True},
+                    )
+                    return {"apiKey": "sk-test", "baseUrl": "", "model": "", "reasoningMode": "off"}
+
+                with (
+                    mock.patch.object(self.api, "_emit", side_effect=record_event),
+                    mock.patch("maw.gui_web._postprocess_values", side_effect=read_settings),
+                    mock.patch(f"maw.gui_web.{process_name}") as process,
+                ):
+                    result = getattr(self.api, method_name)({
+                        "operationId": operation_id,
+                        "scriptPath": str(self.root / "unused.txt"),
+                    })
+                self.assertEqual(result["code"], "postprocess_cancelled")
+                process.assert_not_called()
+                self.assertEqual(self.api._postprocess_operations, {})
+
+    def test_ai_postprocess_conflicting_operation_is_not_admitted(self) -> None:
+        operation = self.api._begin_postprocess_operation({"operationId": "already-active"})
+        self.assertIsNotNone(operation)
+        try:
+            with mock.patch.object(self.api, "_emit") as emit:
+                for method_name in ("run_ai_cleanup", "run_llm_postprocess"):
+                    result = getattr(self.api, method_name)({"operationId": "already-active"})
+                    self.assertEqual(result["code"], "postprocess_operation_conflict")
+                emit.assert_not_called()
+        finally:
+            self.api._finish_postprocess_operation(operation)
+
     def test_ai_postprocess_cancel_while_loading_settings_does_not_run(self) -> None:
         import maw.gui_web as gui_web
 

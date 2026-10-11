@@ -23,6 +23,9 @@ async function seed(page) {
   await disableOnboarding(page);
   await page.goto(server.url);
   await page.evaluate(() => {
+    // 保存/重载用例会更新同一服务端工程；每个用例从独立空隙决定开始。
+    MaweBoot.DATA.gap_remove = null;
+    MaweGapRemoveUi.updateGapRemoveUi();
     MaweBoot.DATA.markers = window.AsrEditorUtils.normalizeMarkers([
       { id: 'human', start: 100, name: '人工标记', note: '请保留' },
       { id: 'ai-delete', start: 1000, end: 2000, name: '试麦', color: '#8e4ec6', note: '[AI] 删除：试麦' },
@@ -269,6 +272,102 @@ for (const [edit, fields, label] of [
     await expect(muteButton).toBeHidden();
   });
 }
+
+test('AI review mute undo restores controls after rebuilding a non-AI card without interrupting typing', async ({ page }) => {
+  await seed(page);
+  const row = page.locator('[data-marker-id="ai-review"]');
+  await row.locator('.markers-item-edit').click();
+  const muteButton = row.locator('.markers-ai-review-mute-toggle');
+  const reviewToggle = row.locator('.markers-review-toggle');
+  await muteButton.click();
+  await page.evaluate(() => MaweMarkerEditing.updateMarkerFields('ai-review', { note: '已听审' }));
+  await muteButton.click();
+  await page.evaluate(() => {
+    MaweMarkersPanel.closePanel();
+    MaweMarkersPanel.openPanel();
+  });
+  await expect(muteButton).toBeHidden();
+  const noteInput = row.locator('.markers-item-editor textarea');
+  await noteInput.fill('尚未提交的备注');
+  await noteInput.evaluate(el => el.setSelectionRange(2, 4));
+
+  await page.evaluate(() => MaweHistory.performUndo());
+  await expect(muteButton).toBeVisible();
+  await expect(muteButton).toHaveText('已静音');
+  await expect(reviewToggle).toHaveText('已移除');
+  await expect(reviewToggle).toBeDisabled();
+  await expect(noteInput).toBeFocused();
+  await expect(noteInput).toHaveValue('尚未提交的备注');
+  expect(await noteInput.evaluate(el => [el.selectionStart, el.selectionEnd])).toEqual([2, 4]);
+  expect(await page.evaluate(() => MaweGapRemoveData.getGapRemoveData(false).provenance.sources.ai_cleanup_review))
+    .toMatchObject([{ start: 3000, end: 4000, review_marker_id: 'ai-review' }]);
+
+  await page.evaluate(() => MaweHistory.performRedo());
+  await expect(muteButton).toBeHidden();
+  await expect(reviewToggle).toHaveText('待复核');
+  await expect(reviewToggle).toBeEnabled();
+  await expect(noteInput).toBeFocused();
+  await expect(noteInput).toHaveValue('尚未提交的备注');
+  expect(await noteInput.evaluate(el => [el.selectionStart, el.selectionEnd])).toEqual([2, 4]);
+  expect(await page.evaluate(() => MaweGapRemoveData.getGapRemoveData(false).provenance.sources.ai_cleanup_review)).toEqual([]);
+});
+
+test('AI review mute reports partial removal after linked source clipping through history and reload', async ({ page }) => {
+  await seed(page);
+  const row = page.locator('[data-marker-id="ai-review"]');
+  await row.locator('.markers-item-edit').click();
+  const muteButton = row.locator('.markers-ai-review-mute-toggle');
+  const reviewToggle = row.locator('.markers-review-toggle');
+  await muteButton.click();
+  await page.evaluate(() => {
+    MaweGapRemoveUi.applyManualGapRange(3300, 3500, false);
+    MaweGapRemoveUi.clearGap(1);
+  });
+  const splitRanges = [
+    { start: 3000, end: 3300, review_marker_id: 'ai-review' },
+    { start: 3500, end: 4000, review_marker_id: 'ai-review' },
+  ];
+  await expect(muteButton).toHaveText('部分静音');
+  await expect(reviewToggle).toHaveText('部分移除');
+  await expect(reviewToggle).toBeDisabled();
+  expect(await page.evaluate(() => MaweGapRemoveData.getGapRemoveData(false).provenance.sources.ai_cleanup_review))
+    .toMatchObject(splitRanges);
+  expect(await page.evaluate(() => {
+    const marker = MaweMarkerEditing.findMarker('ai-review');
+    return [marker.start, marker.end];
+  })).toEqual([3000, 4000]);
+
+  await page.evaluate(() => MaweHistory.performUndo());
+  await expect(muteButton).toHaveText('部分静音');
+  await expect(reviewToggle).toHaveText('部分移除');
+  await page.evaluate(() => MaweHistory.performRedo());
+  await expect(muteButton).toHaveText('部分静音');
+  await expect(reviewToggle).toHaveText('部分移除');
+  await expect(reviewToggle).toBeDisabled();
+  await page.evaluate(() => MaweGapRemoveUi.applyManualGapRange(3300, 3500, true));
+  await expect(muteButton).toHaveText('已静音');
+  await expect(reviewToggle).toHaveText('已移除');
+  await expect(reviewToggle).toBeDisabled();
+  await page.evaluate(() => MaweHistory.performUndo());
+  await expect(muteButton).toHaveText('部分静音');
+  await expect(reviewToggle).toHaveText('部分移除');
+  const response = page.waitForResponse(res => res.url().endsWith('/api/project') && res.request().method() === 'POST');
+  await page.locator('#save-project').click();
+  expect((await response).ok()).toBe(true);
+  await page.reload();
+  await page.evaluate(() => MaweMarkersPanel.openPanel());
+  await row.locator('.markers-item-edit').click();
+  await expect(muteButton).toHaveText('部分静音');
+  await expect(reviewToggle).toHaveText('部分移除');
+  await expect(reviewToggle).toBeDisabled();
+  expect(await page.evaluate(() => MaweGapRemoveData.getGapRemoveData(false).provenance.sources.ai_cleanup_review))
+    .toMatchObject(splitRanges);
+  // 包围全部归属片段的区段扩大继续按几何关联计算，而不撤销旧来源。
+  await page.evaluate(() => MaweMarkerEditing.updateMarkerFields('ai-review', { start: 2900, end: 4100 }));
+  await expect(muteButton).toHaveText('部分静音');
+  await expect(reviewToggle).toHaveText('部分移除');
+  await expect(reviewToggle).toBeDisabled();
+});
 
 test('AI review mute keeps full marker ids through project save and reload', async ({ page }) => {
   await seed(page);

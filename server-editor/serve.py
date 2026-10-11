@@ -27,6 +27,7 @@ import webbrowser
 import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
+from decimal import Decimal, InvalidOperation
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -378,6 +379,11 @@ class GapRemovedVideoStream(NamedTuple):
     handler_name: str | None
 
 
+class GapRemovedVideoProbe(NamedTuple):
+    streams: tuple[GapRemovedVideoStream, ...]
+    start_time: Decimal
+
+
 def normalize_gap_removed_intervals(value: object) -> list[tuple[int, int]]:
     """Validate ordered half-open source-media intervals in integer milliseconds."""
     if not isinstance(value, list) or not value:
@@ -404,22 +410,29 @@ def normalize_gap_removed_intervals(value: object) -> list[tuple[int, int]]:
     return intervals
 
 
-def _gap_removed_ffconcat_text(media_path: Path, intervals: list[tuple[int, int]]) -> str:
+def _gap_removed_ffconcat_text(
+    media_path: Path,
+    intervals: list[tuple[int, int]],
+    *,
+    start_time: Decimal = Decimal(0),
+) -> str:
     source = str(media_path).replace("\\", "/")
     quoted_source = "'" + source.replace("'", "'\\''") + "'"
     lines = ["ffconcat version 1.0"]
     for start_ms, end_ms in intervals:
-        start = f"{start_ms // 1000}.{start_ms % 1000:03d}"
-        end = f"{end_ms // 1000}.{end_ms % 1000:03d}"
+        # Project/PCM times start at zero; concat points use source-file
+        # timestamps. Use the file origin so inter-stream offsets stay intact.
+        start = format(start_time + Decimal(start_ms).scaleb(-3), "f")
+        end = format(start_time + Decimal(end_ms).scaleb(-3), "f")
         lines.extend((f"file {quoted_source}", f"inpoint {start}", f"outpoint {end}"))
     return "\n".join(lines) + "\n"
 
 
-def _probe_video_stream_signature(path: Path, ffprobe_path: Path) -> tuple[GapRemovedVideoStream, ...]:
+def _probe_gap_removed_video(path: Path, ffprobe_path: Path) -> GapRemovedVideoProbe:
     command = [
         str(ffprobe_path), "-v", "error", "-show_entries",
         "stream=codec_type,codec_name,profile,codec_tag_string,width,height,channels,sample_rate,channel_layout"
-        ":stream_disposition:stream_tags",
+        ":stream_disposition:stream_tags:format=start_time",
         "-of", "json", str(path),
     ]
     try:
@@ -464,7 +477,26 @@ def _probe_video_stream_signature(path: Path, ffprobe_path: Path) -> tuple[GapRe
         ))
     if not any(item.codec_signature[0] == "video" for item in signature):
         raise GapRemovedVideoExportError("当前媒体没有视频流")
-    return tuple(signature)
+    format_info = payload.get("format", {})
+    if not isinstance(format_info, dict):
+        raise GapRemovedVideoExportError("ffprobe 返回了无效的媒体起始时间")
+    raw_start_time = format_info.get("start_time")
+    # FFprobe omits an unavailable start time. An explicit malformed or
+    # non-finite value must fail instead of silently shifting the kept regions.
+    if raw_start_time is None:
+        start_time = Decimal(0)
+    else:
+        if isinstance(raw_start_time, bool) or not isinstance(raw_start_time, (str, int, float)):
+            raise GapRemovedVideoExportError("ffprobe 返回了无效的媒体起始时间")
+        try:
+            start_time = Decimal(str(raw_start_time))
+        except InvalidOperation as error:
+            raise GapRemovedVideoExportError("ffprobe 返回了无效的媒体起始时间") from error
+        # FFmpeg timestamps use signed 64-bit microseconds. Reject impossible
+        # finite magnitudes before arithmetic/formatting can overflow.
+        if not start_time.is_finite() or start_time.copy_abs() > Decimal("9223372036854.775807"):
+            raise GapRemovedVideoExportError("ffprobe 返回了无效的媒体起始时间")
+    return GapRemovedVideoProbe(tuple(signature), start_time)
 
 
 def _gap_removed_video_streams_match(
@@ -503,10 +535,14 @@ def rebuild_gap_removed_video(
     if not intervals:
         raise GapRemovedVideoExportError("去空隙保留区间为空")
 
-    input_signature = _probe_video_stream_signature(source, ffprobe_path)
+    input_probe = _probe_gap_removed_video(source, ffprobe_path)
+    input_signature = input_probe.streams
     output_path.parent.mkdir(parents=True, exist_ok=True)
     concat_path = output_path.with_suffix(".ffconcat")
-    concat_path.write_text(_gap_removed_ffconcat_text(source, intervals), encoding="utf-8")
+    concat_path.write_text(
+        _gap_removed_ffconcat_text(source, intervals, start_time=input_probe.start_time),
+        encoding="utf-8",
+    )
     command = [
         str(ffmpeg_path), "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
         "-f", "concat", "-safe", "0", "-i", str(concat_path),
@@ -539,7 +575,7 @@ def rebuild_gap_removed_video(
         output_path.unlink(missing_ok=True)
         raise GapRemovedVideoExportError("FFmpeg 没有生成有效的视频文件")
     try:
-        output_signature = _probe_video_stream_signature(output_path, ffprobe_path)
+        output_signature = _probe_gap_removed_video(output_path, ffprobe_path).streams
     except GapRemovedVideoExportError:
         output_path.unlink(missing_ok=True)
         raise

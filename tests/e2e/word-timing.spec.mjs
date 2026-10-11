@@ -474,6 +474,55 @@ test('equal-length typo replacement syncs item texts through the cue panel', asy
   expect([restored.text, restored.items.map(item => item.text)]).toEqual(['我非常喜欢！', ['我', '最喜欢！']]);
 });
 
+for (const { timebase, startFrame } of [
+  { timebase: { unit: 'milliseconds', fps: 30 }, startFrame: 30 },
+  ...[30, 29.97].flatMap(fps => [1, 30].map(startFrame => ({ timebase: { unit: 'frames', fps }, startFrame }))),
+]) {
+  for (const adjacent of [true, false]) {
+    test(`pure text edits preserve narrow ${timebase.unit} cues at ${timebase.fps} FPS from frame ${startFrame} with ${adjacent ? 'adjacent' : 'spaced'} neighbors`, async ({ page }) => {
+      await page.evaluate(({ timebase, startFrame, adjacent }) => {
+        MaweSettings.updateEditorSettings({ autoSaveProject: false, cueEditorCancelOnEscape: true });
+        MaweCuePanelState.currentCuePanelIdx = -1;
+        MaweCuePanelState.resetCuePanelEditState({ discard: true });
+        MaweSelection.clearSelection({ commitCuePanel: false });
+        MaweHistory.editorHistory.clear();
+        const start = timebase.unit === 'frames' ? MaweTimeline.millisecondsFromFrameNumber(startFrame, timebase.fps) : 1000;
+        const end = timebase.unit === 'frames' ? MaweTimeline.millisecondsFromFrameNumber(startFrame + 1, timebase.fps) : 1060;
+        MaweBoot.DATA.timebase = timebase;
+        MaweBoot.DATA.segments.splice(0, MaweBoot.DATA.segments.length,
+          { id: 'narrow-before', start: 0, end: start, text: 'Before' },
+          { id: 'narrow-text', start, end, text: 'a', items: [{ start, end, text: 'a' }] },
+          { id: 'narrow-after', start: adjacent ? end : 4000, end: 5000, text: 'After' },
+        );
+        MaweCuePanel.renderAll();
+      }, { timebase, startFrame, adjacent });
+      await page.locator('.cue[data-idx="1"]').click();
+      const read = () => page.evaluate(() => JSON.parse(JSON.stringify(MaweBoot.DATA.segments)));
+      const before = await read();
+      const expected = structuredClone(before);
+      expected[1].text = 'b';
+      expected[1].items[0].text = 'b';
+      const withoutDirty = segments => segments.map(({ _dirty, ...segment }) => segment);
+      const panel = page.locator('#cue-panel-text');
+      await panel.fill('b');
+      await panel.blur();
+      expect(withoutDirty(await read())).toEqual(withoutDirty(expected));
+      expect(await page.evaluate(() => MaweHistory.editorHistory.undoLength())).toBe(1);
+      await page.evaluate(() => MaweHistory.performUndo());
+      expect(withoutDirty(await read())).toEqual(withoutDirty(before));
+      await page.evaluate(() => MaweHistory.performRedo());
+      expect(withoutDirty(await read())).toEqual(withoutDirty(expected));
+      await page.locator('.cue[data-idx="1"]').click();
+      await panel.fill('c');
+      await panel.press('Escape');
+      expect(withoutDirty(await read())).toEqual(withoutDirty(expected));
+      const saved = await page.evaluate(() => JSON.parse(MaweJsonRepair.buildJson()).segments[1]);
+      expect(saved).toMatchObject({ start: expected[1].start, end: expected[1].end, text: 'b' });
+      expect(saved.items[0]).toMatchObject({ start: expected[1].items[0].start, end: expected[1].items[0].end, text: 'b' });
+    });
+  }
+}
+
 test('saving focused cue panel text syncs word labels before resetting the edit snapshot', async ({ page }) => {
   await page.evaluate(() => {
     MaweSettings.updateEditorSettings({ cueEditorCancelOnEscape: true });

@@ -621,12 +621,20 @@ class LauncherApi:
         run: Callable[[_PostprocessOperation], dict[str, object]],
         cancelled_detail: str,
     ) -> dict[str, object]:
-        # Register before reading settings so a stop request during preparation
-        # can cancel the same operation that the UI has already started.
+        # Register and announce before reading settings. The UI enables Stop
+        # only after this admission, including while preparation is blocked.
         operation = self._begin_postprocess_operation(payload)
         if operation is None:
             return _error_result("postprocessInput", "postprocess_operation_conflict", "This AI operation is already active or has an invalid operation id.")
         try:
+            if operation.operation_id:
+                self.pump.start()
+                self._emit({
+                    "type": "postprocess_status",
+                    "key": "toolbox_status_starting",
+                    "stage": "admitted",
+                    "operationId": operation.operation_id,
+                })
             result = run(operation)
             if not operation.cancel_event.is_set():
                 return result

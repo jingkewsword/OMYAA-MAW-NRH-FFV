@@ -167,9 +167,12 @@
     }
     const markerStart = Math.round(Number(marker?.start));
     const markerEnd = Math.round(Number(marker?.end));
-    const matchingRanges = Number.isFinite(markerStart) && Number.isFinite(markerEnd)
-      ? ownedRanges.filter((range) => range.start === markerStart && range.end === markerEnd)
-      : [];
+    // 来源裁剪可拆出多条归属片段；当前区段包含全部片段时仍关联同一静音。
+    // 没有另存原始几何，包围这些片段的区段扩大也按此几何关联解释。
+    const matchesCurrentRange = Number.isFinite(markerStart) && Number.isFinite(markerEnd)
+      && markerEnd > markerStart
+      && ownedRanges.every((range) => range.start >= markerStart && range.end <= markerEnd)
+      && ownedRanges.some((range) => range.start < markerEnd && range.end > markerStart);
 
     const removedGaps = (Array.isArray(state?.gaps) ? state.gaps : [])
       .filter((gap) => gap?.removed !== false)
@@ -188,13 +191,13 @@
       }
       return cursor >= end;
     };
-    const removedCount = matchingRanges.filter(isFullyRemoved).length;
-    const overlapsCount = matchingRanges.filter(overlapsRemoved).length;
+    const currentRange = { start: markerStart, end: markerEnd };
+    const removed = matchesCurrentRange && isFullyRemoved(currentRange);
     return {
       owned: true,
-      matchesCurrentRange: matchingRanges.length > 0,
-      removed: matchingRanges.length > 0 && removedCount === matchingRanges.length,
-      partiallyRemoved: overlapsCount > 0 && removedCount < matchingRanges.length,
+      matchesCurrentRange,
+      removed,
+      partiallyRemoved: matchesCurrentRange && !removed && overlapsRemoved(currentRange),
     };
   }
 
@@ -433,8 +436,8 @@
     const reviewToggle = document.createElement('button');
     reviewToggle.type = 'button';
     reviewToggle.className = `markers-review-toggle${marker.review ? ' has-review' : ''}${marker.review?.status === 'pending' ? ' pending' : ''}${marker.review?.status === 'confirmed' ? ' confirmed' : ''}`;
-    const aiCleanupReview = isAiCleanupReviewMarker(marker);
-    if (aiCleanupReview) reviewToggle.dataset.aiCleanupReviewStatus = marker.id;
+    // 资格可在 gap history 恢复时变化；保持控件身份，刷新时不重建编辑卡片。
+    reviewToggle.dataset.aiCleanupReviewStatus = marker.id;
     reviewToggle.textContent = utils.markerReviewStatusLabel(marker);
     if (marker.review?.reason) {
       reviewToggle.title = marker.review.reason;
@@ -443,27 +446,25 @@
     reviewToggle.addEventListener('click', () => {
       MaweMarkerEditing.updateMarkerFields(marker.id, { review: utils.nextMarkerReviewStatus(marker) });
     });
-    if (aiCleanupReview) updateAiCleanupReviewStatusButton(reviewToggle, marker);
+    updateAiCleanupReviewStatusButton(reviewToggle, marker);
     actions.appendChild(reviewToggle);
-    if (isAiCleanupReviewMarker(marker)) {
-      const muteButton = document.createElement('button');
-      muteButton.type = 'button';
-      muteButton.className = 'markers-ai-review-mute-toggle';
-      muteButton.dataset.aiCleanupReviewMute = marker.id;
-      updateAiCleanupReviewMuteButton(muteButton, marker.id);
-      muteButton.addEventListener('click', () => {
-        const result = MaweGapRemoveUi.toggleAiCleanupReviewMute(marker);
-        if (!result?.changed) {
-          MaweHint.flashHint('无法静音此复核区段；请检查起止时间', 'warning');
-          return;
-        }
-        MaweHint.flashHint(
-          result.muted ? '已静音 AI 复核区段' : '已取消 AI 复核静音',
-          'success',
-        );
-      });
-      actions.appendChild(muteButton);
-    }
+    const muteButton = document.createElement('button');
+    muteButton.type = 'button';
+    muteButton.className = 'markers-ai-review-mute-toggle';
+    muteButton.dataset.aiCleanupReviewMute = marker.id;
+    updateAiCleanupReviewMuteButton(muteButton, marker.id);
+    muteButton.addEventListener('click', () => {
+      const result = MaweGapRemoveUi.toggleAiCleanupReviewMute(marker);
+      if (!result?.changed) {
+        MaweHint.flashHint('无法静音此复核区段；请检查起止时间', 'warning');
+        return;
+      }
+      MaweHint.flashHint(
+        result.muted ? '已静音 AI 复核区段' : '已取消 AI 复核静音',
+        'success',
+      );
+    });
+    actions.appendChild(muteButton);
     const locateButton = document.createElement('button');
     locateButton.type = 'button';
     locateButton.textContent = '定位试听';

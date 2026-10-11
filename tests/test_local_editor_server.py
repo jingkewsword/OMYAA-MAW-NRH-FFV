@@ -137,6 +137,81 @@ class LocalEditorServerTests(CompactContainerAssertions, unittest.TestCase):
                 )
         self.assertFalse(output.exists())
 
+    def test_rebuild_gap_removed_video_maps_project_intervals_to_file_timestamps(self) -> None:
+        source = self.root / "clip.mp4"
+        source.write_bytes(b"source")
+        streams = [
+            {"codec_type": "video", "codec_name": "h264", "start_time": "1.421333"},
+            {"codec_type": "audio", "codec_name": "aac", "start_time": "1.400000"},
+        ]
+        cases = [
+            ({}, ["0.000", "0.001", "2.000", "3.500"]),
+            ({"format": {}}, ["0.000", "0.001", "2.000", "3.500"]),
+            ({"format": {"start_time": None}}, ["0.000", "0.001", "2.000", "3.500"]),
+            ({"format": {"start_time": "0.000000"}}, ["0.000000", "0.001000", "2.000000", "3.500000"]),
+            ({"format": {"start_time": "1.400000"}}, ["1.400000", "1.401000", "3.400000", "4.900000"]),
+            ({"format": {"start_time": "-0.250123"}}, ["-0.250123", "-0.249123", "1.749877", "3.249877"]),
+            ({"format": {"start_time": "0.000001"}}, ["0.000001", "0.001001", "2.000001", "3.500001"]),
+            ({"format": {"start_time": "10000000000.000001"}}, [
+                "10000000000.000001", "10000000000.001001", "10000000002.000001", "10000000003.500001",
+            ]),
+        ]
+        for index, (metadata, expected) in enumerate(cases):
+            with self.subTest(metadata=metadata):
+                output = self.root / f"rebuilt-{index}.mp4"
+                calls: list[list[str]] = []
+
+                def run(command, **kwargs):
+                    calls.append(command)
+                    if command[0] == "ffprobe":
+                        # The output muxer may choose a different origin; only
+                        # the source file's origin can locate the kept content.
+                        probe_metadata = metadata if command[-1] == str(source.resolve()) else {"format": {"start_time": "0.000000"}}
+                        return subprocess.CompletedProcess(command, 0, stdout=json.dumps({"streams": streams, **probe_metadata}), stderr="")
+                    Path(command[-1]).write_bytes(b"rebuilt-media")
+                    return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+                with mock.patch.object(server_editor.subprocess, "run", side_effect=run):
+                    server_editor.rebuild_gap_removed_video(
+                        source, [(0, 1), (2000, 3500)], output,
+                        ffmpeg_path=Path("ffmpeg"), ffprobe_path=Path("ffprobe"),
+                    )
+                actual = [
+                    line.split(" ", 1)[1] for line in output.with_suffix(".ffconcat").read_text(encoding="utf-8").splitlines()
+                    if line.startswith(("inpoint ", "outpoint "))
+                ]
+                self.assertEqual(actual, expected)
+                probe_calls = [command for command in calls if command[0] == "ffprobe"]
+                self.assertEqual(len(probe_calls), 2)
+                self.assertIn(":format=start_time", probe_calls[0][probe_calls[0].index("-show_entries") + 1])
+                self.assertEqual(len([command for command in calls if command[0] == "ffmpeg"]), 1)
+
+    def test_rebuild_gap_removed_video_rejects_invalid_file_start_times_before_ffmpeg(self) -> None:
+        source = self.root / "clip.mp4"
+        source.write_bytes(b"source")
+        invalid_metadata = [
+            {"format": None}, {"format": []}, {"format": "1.4"},
+            *({"format": {"start_time": value}} for value in (
+                True, {}, [], "", "N/A", "not-a-time", "NaN", "sNaN", "Infinity", "-Infinity", float("nan"), float("inf"),
+                "1e999999", "-9223372036854.775808",
+            )),
+        ]
+        for index, metadata in enumerate(invalid_metadata):
+            with self.subTest(metadata=metadata):
+                output = self.root / f"invalid-{index}.mp4"
+                payload = {"streams": [{"codec_type": "video", "codec_name": "h264"}], **metadata}
+                with mock.patch.object(server_editor.subprocess, "run", return_value=subprocess.CompletedProcess(
+                    [], 0, stdout=json.dumps(payload), stderr="",
+                )) as run:
+                    with self.assertRaisesRegex(server_editor.GapRemovedVideoExportError, "无效的媒体起始时间"):
+                        server_editor.rebuild_gap_removed_video(
+                            source, [(0, 1000)], output,
+                            ffmpeg_path=Path("ffmpeg"), ffprobe_path=Path("ffprobe"),
+                        )
+                self.assertEqual(run.call_count, 1)
+                self.assertFalse(output.exists())
+                self.assertFalse(output.with_suffix(".ffconcat").exists())
+
     def test_rebuild_gap_removed_video_preserves_track_dispositions_and_metadata(self) -> None:
         source = self.root / "clip.mp4"
         source.write_bytes(b"source")
