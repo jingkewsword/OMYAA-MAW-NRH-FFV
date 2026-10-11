@@ -314,6 +314,40 @@ async function useFrameTimebase(page, fps = 25) {
   await expect.poll(() => page.evaluate(() => MaweTimeline.timelineIsFrameMode())).toBe(true);
 }
 
+for (const timebase of ['milliseconds', 'frames']) {
+  test(`advanced ${timebase} offset rejects a disabled neighbor without moving any cue`, async ({ page }) => {
+    await loadAttachedCues(page);
+    await page.evaluate(() => {
+      MaweBoot.DATA.segments.splice(
+        0,
+        MaweBoot.DATA.segments.length,
+        { id: 'offset-main', start: 1000, end: 2000, text: 'Selected', items: [] },
+        { id: 'offset-disabled', start: 2400, end: 3000, text: 'Disabled neighbor', items: [], disabled: true },
+        { id: 'offset-other', start: 4000, end: 5000, text: 'Other', items: [] },
+      );
+      MaweBoot.DATA.multi_subtitle = {
+        schema: 'moy.asr.multi_subtitle.v1', enabled: false, display_mode: 'both', tracks: [], bindings: [],
+      };
+      // The fixture starts without overlaps; only the attempted offset would
+      // create one, through the production command and renderAll path.
+      MaweCuePanel.renderAll();
+    });
+    if (timebase === 'frames') await useFrameTimebase(page);
+    await page.locator('.cue[data-idx="0"]').click();
+    const readRanges = () => page.evaluate(() => MaweBoot.DATA.segments.map((segment) => ({
+      start: segment.start, end: segment.end,
+      start_frame: segment.start_frame, end_frame: segment.end_frame,
+    })));
+    const before = await readRanges();
+
+    await openTimeOffsetForCue(page, 0, 600);
+
+    await expect(page.locator('#subtitle-time-offset-dialog')).toBeVisible();
+    await expect(page.locator('.hint-card.hint-invalid').first()).toContainText('未选中的字幕');
+    expect(await readRanges()).toEqual(before);
+  });
+}
+
 test('advanced time offset shifts a bound secondary cue with its main cue', async ({ page }) => {
   await loadAttachedCues(page);
   await seedBoundSubtitleForOffset(page);

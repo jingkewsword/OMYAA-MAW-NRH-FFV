@@ -135,22 +135,23 @@
 
 
   function isAiCleanupReviewMarker(marker) {
+    if (typeof marker?.id !== 'string') return false;
+    if (isAiCleanupReviewMuted(marker.id)) return true;
     const start = Number(marker?.start);
     const end = Number(marker?.end);
     const hasReviewState = marker.review?.status === 'pending' || marker.review?.status === 'confirmed';
-    return typeof marker?.id === 'string'
-      && /^\[AI\]\s*/i.test(String(marker.note || '').trim())
+    return /^\[AI\]\s*/i.test(String(marker.note || '').trim())
       && Number.isFinite(start)
       && Number.isFinite(end)
       && end > start
-      && (hasReviewState || isAiCleanupReviewMuted(marker.id));
+      && hasReviewState;
   }
 
 
   function isAiCleanupReviewMuted(markerId) {
     const source = MaweGapRemoveData.getGapRemoveData(false)?.provenance?.sources?.ai_cleanup_review;
     return Array.isArray(source) && source.some((range) => (
-      range.review_marker_id === markerId || range.id === markerId
+      (range.review_marker_id || range.id) === markerId
     ));
   }
 
@@ -159,7 +160,7 @@
     const state = MaweGapRemoveData.getGapRemoveData(false);
     const ranges = state?.provenance?.sources?.ai_cleanup_review;
     const ownedRanges = Array.isArray(ranges) ? ranges.filter((range) => (
-      range.review_marker_id === markerId || range.id === markerId
+      (range.review_marker_id || range.id) === markerId
     )) : [];
     if (!ownedRanges.length) {
       return { owned: false, matchesCurrentRange: false, removed: false, partiallyRemoved: false };
@@ -199,6 +200,7 @@
 
 
   function updateAiCleanupReviewMuteButton(button, markerId) {
+    button.hidden = !isAiCleanupReviewMarker(MaweMarkerEditing.findMarker(markerId));
     const status = aiCleanupReviewMuteState(markerId);
     const label = !status.owned ? '设静音'
       : !status.matchesCurrentRange ? '取消原静音'

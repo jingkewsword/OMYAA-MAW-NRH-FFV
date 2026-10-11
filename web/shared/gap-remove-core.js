@@ -226,7 +226,7 @@
     };
     if (source === 'ai_cleanup_review') {
       const reviewMarkerId = typeof item.review_marker_id === 'string'
-        ? item.review_marker_id.trim().slice(0, 160)
+        ? item.review_marker_id.trim()
         : '';
       if (reviewMarkerId) result.review_marker_id = reviewMarkerId;
     }

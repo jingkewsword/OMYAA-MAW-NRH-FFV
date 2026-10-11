@@ -384,7 +384,7 @@ export function createUtilsModule(dependencies) {
 
 
   // 统一平移一组主字幕的时间区间。计划阶段不修改输入；任一条越出媒体范围，
-  // 或与未选中的启用字幕产生新冲突时，整批拒绝，调用方不会得到部分变更。
+  // 或与未选中的字幕产生新冲突时，整批拒绝，调用方不会得到部分变更。
   function planSubtitleTimeOffset(segments, indices, offsetMs, durationMs) {
     const source = Array.isArray(segments) ? segments : [];
     const requested = Array.from(indices || [], Number);
@@ -417,10 +417,18 @@ export function createUtilsModule(dependencies) {
       for (let otherIndex = 0; otherIndex < source.length; otherIndex++) {
         if (selected.has(otherIndex)) continue;
         const other = source[otherIndex];
-        if (!other || other.disabled === true) continue;
+        if (!other) continue;
         const otherStart = Number(other.start);
+        if (!Number.isFinite(otherStart)) continue;
+        // 主轨的播放查找、波形绘制和邻居调整都依赖数组按 start 排序。
+        // 即使落点不重叠，也不能越过未选中的字幕；禁用字幕同样参与排序。
+        const wasOutOfOrder = index < otherIndex ? start > otherStart : start < otherStart;
+        const willBeOutOfOrder = index < otherIndex ? nextStart > otherStart : nextStart < otherStart;
+        if (!wasOutOfOrder && willBeOutOfOrder) {
+          return { ok: false, reason: 'overlap', indices: targets, changes: [] };
+        }
         const otherEnd = Number(other.end);
-        if (!Number.isFinite(otherStart) || !Number.isFinite(otherEnd) || otherEnd <= otherStart) continue;
+        if (!Number.isFinite(otherEnd) || otherEnd <= otherStart) continue;
         const wasOverlapping = start < otherEnd && end > otherStart;
         const willOverlap = nextStart < otherEnd && nextEnd > otherStart;
         if (!wasOverlapping && willOverlap) {

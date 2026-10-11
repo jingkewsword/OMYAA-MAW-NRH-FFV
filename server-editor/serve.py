@@ -370,6 +370,14 @@ class GapRemovedVideoExportInProgressError(RuntimeError):
     """Another gap-removed video export is currently using FFmpeg."""
 
 
+class GapRemovedVideoStream(NamedTuple):
+    codec_signature: tuple[object, ...]
+    disposition: tuple[str, ...]
+    language: str | None
+    title: str | None
+    handler_name: str | None
+
+
 def normalize_gap_removed_intervals(value: object) -> list[tuple[int, int]]:
     """Validate ordered half-open source-media intervals in integer milliseconds."""
     if not isinstance(value, list) or not value:
@@ -407,10 +415,11 @@ def _gap_removed_ffconcat_text(media_path: Path, intervals: list[tuple[int, int]
     return "\n".join(lines) + "\n"
 
 
-def _probe_video_stream_signature(path: Path, ffprobe_path: Path) -> tuple[tuple[object, ...], ...]:
+def _probe_video_stream_signature(path: Path, ffprobe_path: Path) -> tuple[GapRemovedVideoStream, ...]:
     command = [
         str(ffprobe_path), "-v", "error", "-show_entries",
-        "stream=codec_type,codec_name,profile,codec_tag_string,width,height,channels,sample_rate,channel_layout",
+        "stream=codec_type,codec_name,profile,codec_tag_string,width,height,channels,sample_rate,channel_layout"
+        ":stream_disposition:stream_tags",
         "-of", "json", str(path),
     ]
     try:
@@ -433,14 +442,45 @@ def _probe_video_stream_signature(path: Path, ffprobe_path: Path) -> tuple[tuple
         "codec_type", "codec_name", "profile", "codec_tag_string", "width", "height",
         "channels", "sample_rate", "channel_layout",
     )
-    signature: list[tuple[object, ...]] = []
+    signature: list[GapRemovedVideoStream] = []
     for stream in streams:
         if not isinstance(stream, dict) or not isinstance(stream.get("codec_type"), str):
             raise GapRemovedVideoExportError("ffprobe 返回了无效的媒体流信息")
-        signature.append(tuple(stream.get(field) for field in signature_fields))
-    if not any(item[0] == "video" for item in signature):
+        dispositions = stream.get("disposition") or {}
+        tags = stream.get("tags") or {}
+        if not isinstance(dispositions, dict) or not isinstance(tags, dict):
+            raise GapRemovedVideoExportError("ffprobe 返回了无效的媒体流信息")
+        metadata = {
+            key.lower(): value for key, value in tags.items()
+            if isinstance(key, str) and isinstance(value, str) and value
+        }
+        signature.append(GapRemovedVideoStream(
+            tuple(stream.get(field) for field in signature_fields),
+            tuple(sorted(key for key, value in dispositions.items() if isinstance(key, str) and value == 1)),
+            metadata.get("language"),
+            # MOV/MP4 exposes the track title as "name"; Matroska uses "title".
+            metadata.get("title") or metadata.get("name"),
+            metadata.get("handler_name"),
+        ))
+    if not any(item.codec_signature[0] == "video" for item in signature):
         raise GapRemovedVideoExportError("当前媒体没有视频流")
     return tuple(signature)
+
+
+def _gap_removed_video_streams_match(
+    source: tuple[GapRemovedVideoStream, ...],
+    output: tuple[GapRemovedVideoStream, ...],
+) -> bool:
+    if len(source) != len(output):
+        return False
+    for original, rebuilt in zip(source, output):
+        if original.codec_signature != rebuilt.codec_signature or original.disposition != rebuilt.disposition:
+            return False
+        for metadata_key in ("language", "title", "handler_name"):
+            expected = getattr(original, metadata_key)
+            if expected is not None and expected != getattr(rebuilt, metadata_key):
+                return False
+    return True
 
 
 def rebuild_gap_removed_video(
@@ -470,8 +510,17 @@ def rebuild_gap_removed_video(
     command = [
         str(ffmpeg_path), "-y", "-nostdin", "-hide_banner", "-loglevel", "error",
         "-f", "concat", "-safe", "0", "-i", str(concat_path),
-        "-map", "0", "-c", "copy", str(output_path),
+        "-map", "0", "-c", "copy",
     ]
+    # The concat demuxer drops dispositions and track titles. Restore them for
+    # every stream so the muxer cannot choose a different default audio track.
+    for index, stream in enumerate(input_signature):
+        command.extend((f"-disposition:{index}", "+".join(stream.disposition) or "0"))
+        for metadata_key in ("language", "title", "handler_name"):
+            value = getattr(stream, metadata_key)
+            if value is not None:
+                command.extend((f"-metadata:s:{index}", f"{metadata_key}={value}"))
+    command.append(str(output_path))
     try:
         completed = subprocess.run(
             command, capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -494,7 +543,7 @@ def rebuild_gap_removed_video(
     except GapRemovedVideoExportError:
         output_path.unlink(missing_ok=True)
         raise
-    if output_signature != input_signature:
+    if not _gap_removed_video_streams_match(input_signature, output_signature):
         output_path.unlink(missing_ok=True)
         raise GapRemovedVideoExportError("重组结果的媒体流与源视频不一致，已取消导出")
     return output_path

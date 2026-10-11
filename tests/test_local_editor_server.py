@@ -137,6 +137,91 @@ class LocalEditorServerTests(CompactContainerAssertions, unittest.TestCase):
                 )
         self.assertFalse(output.exists())
 
+    def test_rebuild_gap_removed_video_preserves_track_dispositions_and_metadata(self) -> None:
+        source = self.root / "clip.mp4"
+        source.write_bytes(b"source")
+        output = self.root / "restructured.mp4"
+        input_streams = [
+            {"codec_type": "video", "codec_name": "h264", "disposition": {"default": 1}},
+            {
+                "codec_type": "audio", "codec_name": "aac", "disposition": {"default": 0},
+                "tags": {"language": "eng", "NAME": "English", "HANDLER_NAME": "SoundHandler"},
+            },
+            {
+                "codec_type": "audio", "codec_name": "aac", "disposition": {"default": 1, "dub": 1},
+                "tags": {"language": "zho", "title": "Chinese", "handler_name": "Chinese audio"},
+            },
+        ]
+        output_streams = [
+            {**input_streams[0], "tags": {"handler_name": "VideoHandler"}},
+            {**input_streams[1], "tags": {"language": "eng", "TITLE": "English", "handler_name": "SoundHandler"}},
+            {**input_streams[2], "tags": {"language": "zho", "name": "Chinese", "handler_name": "Chinese audio"}},
+        ]
+        outputs = [input_streams, output_streams]
+        calls: list[list[str]] = []
+
+        def run(command, **kwargs):
+            calls.append(command)
+            if command[0] == "ffprobe":
+                return subprocess.CompletedProcess(command, 0, stdout=json.dumps({"streams": outputs.pop(0)}), stderr="")
+            Path(command[-1]).write_bytes(b"rebuilt-media")
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+        with mock.patch.object(server_editor.subprocess, "run", side_effect=run):
+            server_editor.rebuild_gap_removed_video(
+                source, [(0, 1000)], output,
+                ffmpeg_path=Path("ffmpeg"), ffprobe_path=Path("ffprobe"),
+            )
+
+        command = next(command for command in calls if command[0] == "ffmpeg")
+        self.assertEqual(command[command.index("-disposition:0") + 1], "default")
+        self.assertEqual(command[command.index("-disposition:1") + 1], "0")
+        self.assertEqual(command[command.index("-disposition:2") + 1], "default+dub")
+        self.assertEqual(
+            {value for flag, value in zip(command, command[1:]) if flag == "-metadata:s:1"},
+            {"language=eng", "title=English", "handler_name=SoundHandler"},
+        )
+        self.assertEqual(
+            {value for flag, value in zip(command, command[1:]) if flag == "-metadata:s:2"},
+            {"language=zho", "title=Chinese", "handler_name=Chinese audio"},
+        )
+        probe_command = next(command for command in calls if command[0] == "ffprobe")
+        self.assertIn(":stream_disposition:stream_tags", probe_command[probe_command.index("-show_entries") + 1])
+        self.assertTrue(output.is_file())
+
+    def test_rebuild_gap_removed_video_rejects_changed_track_flags_and_metadata(self) -> None:
+        source = self.root / "clip.mp4"
+        source.write_bytes(b"source")
+        output = self.root / "restructured.mp4"
+        audio = {
+            "codec_type": "audio", "codec_name": "aac", "disposition": {"default": 1},
+            "tags": {"language": "zho", "name": "Chinese", "handler_name": "Chinese audio"},
+        }
+        altered_streams = [
+            {**audio, "disposition": {"default": 0}},
+            {**audio, "tags": {**audio["tags"], "language": "eng"}},
+            {**audio, "tags": {"language": "zho", "handler_name": "Chinese audio"}},
+            {**audio, "tags": {**audio["tags"], "handler_name": "SoundHandler"}},
+        ]
+        for altered in altered_streams:
+            with self.subTest(audio=altered):
+                video = {"codec_type": "video", "codec_name": "h264"}
+                outputs = [[video, audio], [video, altered]]
+
+                def run(command, **kwargs):
+                    if command[0] == "ffprobe":
+                        return subprocess.CompletedProcess(command, 0, stdout=json.dumps({"streams": outputs.pop(0)}), stderr="")
+                    Path(command[-1]).write_bytes(b"changed-track-metadata")
+                    return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+                with mock.patch.object(server_editor.subprocess, "run", side_effect=run):
+                    with self.assertRaisesRegex(server_editor.GapRemovedVideoExportError, "媒体流与源视频不一致"):
+                        server_editor.rebuild_gap_removed_video(
+                            source, [(0, 1000)], output,
+                            ffmpeg_path=Path("ffmpeg"), ffprobe_path=Path("ffprobe"),
+                        )
+                self.assertFalse(output.exists())
+
     def test_gap_removed_video_endpoint_streams_bound_source_without_accepting_paths(self) -> None:
         source = self.root / "bound.mp4"
         source.write_bytes(b"source")

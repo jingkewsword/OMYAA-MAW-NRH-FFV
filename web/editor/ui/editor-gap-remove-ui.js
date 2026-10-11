@@ -53,7 +53,7 @@
     const markerId = typeof marker?.id === 'string' ? marker.id.trim() : '';
     const start = Math.max(0, Math.round(Number(marker?.start)));
     const end = Math.max(0, Math.round(Number(marker?.end)));
-    if (!markerId || !Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+    if (!markerId) {
       return { changed: false, muted: false };
     }
 
@@ -61,12 +61,18 @@
     const state = MaweGapRemoveData.getGapRemoveData(true);
     const provenance = core.normalizeGapRemoveProvenance(state?.provenance, state?.gaps);
     const currentRanges = provenance.sources.ai_cleanup_review;
+    // 拆分区间的 id 可变化；优先按稳定的标记归属匹配，旧记录才回退到 id。
     const isMuted = currentRanges.some((range) => (
-      range.review_marker_id === markerId || range.id === markerId
+      (range.review_marker_id || range.id) === markerId
     ));
+    const hasReviewState = marker.review?.status === 'pending' || marker.review?.status === 'confirmed';
+    if (!isMuted && (!/^\[AI\]\s*/i.test(String(marker.note || '').trim())
+        || !hasReviewState || !Number.isFinite(start) || !Number.isFinite(end) || end <= start)) {
+      return { changed: false, muted: false };
+    }
     const nextRanges = isMuted
       ? currentRanges.filter((range) => (
-        range.review_marker_id !== markerId && range.id !== markerId
+        (range.review_marker_id || range.id) !== markerId
       ))
       : [...currentRanges, {
         id: markerId,

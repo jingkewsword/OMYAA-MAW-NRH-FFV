@@ -290,7 +290,7 @@
       duration_unavailable: ui('无法调整：请先加载媒体并确认媒体时长', 'Cannot adjust: load media and confirm its duration first'),
       invalid_range: ui('无法调整：选中字幕的时间范围无效', 'Cannot adjust: a selected cue has an invalid time range'),
       media_bounds: ui('无法调整：时间范围会超出媒体边界', 'Cannot adjust: the time range would exceed the media bounds'),
-      overlap: ui('无法调整：会与未选中的字幕重叠', 'Cannot adjust: the cues would overlap unselected subtitles'),
+      overlap: ui('无法调整：会越过或重叠未选中的字幕', 'Cannot adjust: the cues would cross or overlap unselected subtitles'),
     };
     if (!plan.ok) {
       MaweHint.flashHint(failures[plan.reason] || ui('无法调整：时间范围受阻', 'Cannot adjust: the time range is blocked'), 'invalid');

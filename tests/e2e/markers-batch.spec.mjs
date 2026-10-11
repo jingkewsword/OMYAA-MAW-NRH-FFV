@@ -170,6 +170,53 @@ test('AI review mute is source-scoped and updates through undo, redo, and unmute
   });
 });
 
+test('AI review mute keeps split records with another marker owner', async ({ page }) => {
+  await seed(page);
+  await page.evaluate(() => {
+    MaweBoot.DATA.markers = window.AsrEditorUtils.normalizeMarkers([
+      { id: 'review-a', start: 1000, end: 3000, note: '[AI] 复核 A', review: { status: 'pending' } },
+      { id: 'review-a-2', start: 1800, end: 3000, note: '[AI] 复核 B', review: { status: 'pending' } },
+    ]);
+    const core = window.AsrGapRemoveCore;
+    const initial = core.normalizeGapRemoveProvenance({ sources: {
+      ai_cleanup_review: [{ id: 'review-a', review_marker_id: 'review-a', start: 1000, end: 3000 }],
+    } });
+    // Splitting A assigns its second record the same id as marker B.
+    const provenance = core.removeGapRemoveProvenanceRange(initial, 1500, 1800);
+    MaweGapRemoveUi.setGapRemoveData({ gaps: core.gapRangesFromProvenance(provenance) }, { dirty: false, provenance });
+    MaweMarkerEditing.afterExternalMarkersChange();
+  });
+  const row = page.locator('[data-marker-id="review-a-2"]');
+  await row.locator('.markers-item-edit').click();
+  const muteButton = row.locator('.markers-ai-review-mute-toggle');
+  const reviewToggle = row.locator('.markers-review-toggle');
+  const reviewSources = () => page.evaluate(() => MaweGapRemoveData.getGapRemoveData(false).provenance.sources.ai_cleanup_review);
+  const aRanges = [
+    { id: 'review-a', source: 'ai_cleanup_review', start: 1000, end: 1500, review_marker_id: 'review-a', removed: true },
+    { id: 'review-a-2', source: 'ai_cleanup_review', start: 1800, end: 3000, review_marker_id: 'review-a', removed: true },
+  ];
+  const bRange = { id: 'review-a-2-2', source: 'ai_cleanup_review', start: 1800, end: 3000, review_marker_id: 'review-a-2', removed: true };
+
+  await expect(muteButton).toHaveText('设静音');
+  await expect(reviewToggle).toHaveText('待复核');
+  await expect(reviewToggle).toBeEnabled();
+  expect(await reviewSources()).toEqual(aRanges);
+  await muteButton.click();
+  await expect(muteButton).toHaveText('已静音');
+  await expect(reviewToggle).toHaveText('已移除');
+  expect(await reviewSources()).toEqual([...aRanges, bRange]);
+  await muteButton.click();
+  await expect(muteButton).toHaveText('设静音');
+  await expect(reviewToggle).toHaveText('待复核');
+  expect(await reviewSources()).toEqual(aRanges);
+  await page.locator('#undo-btn').click();
+  await expect(muteButton).toHaveText('已静音');
+  expect(await reviewSources()).toEqual([...aRanges, bRange]);
+  await page.locator('#redo-btn').click();
+  await expect(muteButton).toHaveText('设静音');
+  expect(await reviewSources()).toEqual(aRanges);
+});
+
 test('editing a muted AI review range keeps the old source explicit until it is removed', async ({ page }) => {
   await seed(page);
   const row = page.locator('[data-marker-id="ai-review"]');
@@ -193,6 +240,63 @@ test('editing a muted AI review range keeps the old source explicit until it is 
   await expect(reviewToggle).toHaveText('已移除');
   expect(await page.evaluate(() => MaweGapRemoveData.getGapRemoveData(false).provenance.sources.ai_cleanup_review))
     .toMatchObject([{ start: 3100, end: 4100, review_marker_id: 'ai-review' }]);
+});
+
+for (const [edit, fields, label] of [
+  ['changing its AI note', { note: '已听审' }, '已静音'],
+  ['turning it into a point marker', { end: null }, '取消原静音'],
+]) {
+  test(`AI review mute can be cancelled after ${edit}`, async ({ page }) => {
+    await seed(page);
+    const row = page.locator('[data-marker-id="ai-review"]');
+    await row.locator('.markers-item-edit').click();
+    const muteButton = row.locator('.markers-ai-review-mute-toggle');
+    await muteButton.click();
+    await page.evaluate(fields => MaweMarkerEditing.updateMarkerFields('ai-review', fields), fields);
+    await expect(muteButton).toBeVisible();
+    await expect(muteButton).toHaveText(label);
+    await muteButton.click();
+    await expect(muteButton).toBeHidden();
+    expect(await page.evaluate(() => MaweGapRemoveData.getGapRemoveData(false).provenance.sources.ai_cleanup_review)).toEqual([]);
+    expect(await page.evaluate(() => MaweGapRemoveUi.toggleAiCleanupReviewMute(MaweMarkerEditing.findMarker('ai-review'))))
+      .toEqual({ changed: false, muted: false });
+    await page.locator('#undo-btn').click();
+    await expect(muteButton).toBeVisible();
+    await expect(muteButton).toHaveText(label);
+    expect(await page.evaluate(() => MaweGapRemoveData.getGapRemoveData(false).provenance.sources.ai_cleanup_review))
+      .toMatchObject([{ start: 3000, end: 4000, review_marker_id: 'ai-review' }]);
+    await page.locator('#redo-btn').click();
+    await expect(muteButton).toBeHidden();
+  });
+}
+
+test('AI review mute keeps full marker ids through project save and reload', async ({ page }) => {
+  await seed(page);
+  const markerId = `review-${'x'.repeat(180)}😀`;
+  await page.evaluate(id => {
+    MaweBoot.DATA.markers = window.AsrEditorUtils.normalizeMarkers([
+      { id, start: 3000, end: 4000, note: '[AI] 复核', review: { status: 'pending' } },
+    ]);
+    MaweMarkerEditing.afterExternalMarkersChange();
+  }, markerId);
+  const row = page.locator(`[data-marker-id="${markerId}"]`);
+  await row.locator('.markers-item-edit').click();
+  await row.locator('.markers-ai-review-mute-toggle').click();
+  await expect(row.locator('.markers-ai-review-mute-toggle')).toHaveText('已静音');
+  expect(await page.evaluate(() => MaweGapRemoveData.getGapRemoveData(false).provenance.sources.ai_cleanup_review[0].review_marker_id))
+    .toBe(markerId);
+  const response = page.waitForResponse(res => res.url().endsWith('/api/project') && res.request().method() === 'POST');
+  await page.locator('#save-project').click();
+  expect((await response).ok()).toBe(true);
+  await page.reload();
+  await page.evaluate(() => MaweMarkersPanel.openPanel());
+  await row.locator('.markers-item-edit').click();
+  await expect(row.locator('.markers-ai-review-mute-toggle')).toHaveText('已静音');
+  expect(await page.evaluate(() => MaweGapRemoveData.getGapRemoveData(false).provenance.sources.ai_cleanup_review[0].review_marker_id))
+    .toBe(markerId);
+  await row.locator('.markers-ai-review-mute-toggle').click();
+  await expect(row.locator('.markers-ai-review-mute-toggle')).toHaveText('设静音');
+  expect(await page.evaluate(() => MaweGapRemoveData.getGapRemoveData(false).provenance.sources.ai_cleanup_review)).toEqual([]);
 });
 
 test('filter-select-delete is one undo and preserves manual markers and clip decisions', async ({ page }) => {

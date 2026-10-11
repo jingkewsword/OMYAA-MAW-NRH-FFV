@@ -572,7 +572,7 @@ def _normalize_provenance_ranges(
         if source == "ai_cleanup_review":
             review_marker_id = raw_range.get("review_marker_id")
             if isinstance(review_marker_id, str) and review_marker_id.strip():
-                normalized["review_marker_id"] = review_marker_id.strip()[:160]
+                normalized["review_marker_id"] = review_marker_id.strip()
         if source == "manual" and raw_range.get("operation") == "move":
             base_start = _provenance_time(raw_range.get("base_start"))
             base_end = _provenance_time(raw_range.get("base_end"))

@@ -202,7 +202,7 @@
     "shared/host/files.js": "1beb4a24c0bee93eb2e7fce58aa403796ffee4a4c99ab1e247d972254a5dce5d",
     "shared/host/server-api.js": "b319e6fd4825c8422c41d79ef5e801f4ffac322b510e91b6ece77ab5306789c4",
     "editor/boot/editor-host.js": "6063c26cfbf3faec6890a5f46c9b925e1dc0049179643c42626b7bef1bc4d052",
-    "shared/gap-remove-core.js": "29013215388bc12c828e78090e1182f3c3693fbe6cb98330d3665c914d7f4453",
+    "shared/gap-remove-core.js": "45a11b38e0d1bd577a8d3f5b8d5ef2b0d5e17b513f582c7468632e2d3b9587a8",
     "shared/utils/data.js": "6bab03f16179de53d0a66c2bb4bcd96b69249687432010164b802df2f72da4e5",
     "shared/utils/fonts.js": "e79c90bc1e0538c1316890643f995c4092c918fc6ea6ad046f1c260b430f1648",
     "shared/utils/speakers.js": "6549e243fa65b53144f2b19ad6f609df7a6747e2173a34aa1612e2b498c37d46",
@@ -213,7 +213,7 @@
     "shared/utils/timed-text-plans.js": "6beda14f3b784ec33ca74d6db0cb7be35c3c4599337c47a32c2930ccbaef4cbb",
     "shared/utils/timed-text-edit.js": "faa4bb7cc7331382b2091fce1aef3da13896154683a54e2d8376c83f4d82bcfe",
     "shared/utils/text-metrics.js": "b5e487d57d1bf04fabf9747da4b700683a423499413b3a1124331f978107836f",
-    "shared/utils/segment-timing.js": "5e50060ed23df81a35f68a7f0fbc7e12eba6d6dca3382c4ba5fb67264e1ad02b",
+    "shared/utils/segment-timing.js": "952df0d4e12f677f54afdc1a62f5ca17b27ea3672354dcc385037b836c22a33f",
     "shared/utils/split-alignment.js": "ccfe3b928bf9acd9302e0bb8a0cd1a4cecdd7251cbadc9caca8b9215f88a8d3d",
     "shared/utils/split-trim.js": "322d10161f098d7730c5c1e3ff9d0c293a2b12e16311bd98d8f0cd69938ac54d",
     "shared/utils/timeline.js": "906181e39d7a1aa59919ed5b073383d19d4be545f1ff18ec721fcf013a283182",
@@ -295,7 +295,7 @@
     "editor/io/editor-export-timeline.js": "37b65ef34272ee0d92e36c4a09c240f0f78982b512745821baad7411e800689e",
     "editor/io/editor-server-save.js": "d49528b92ccfdc8320a1319fa1558ad2e8a12e518d7b18e48cfabbe5b9c09ba8",
     "editor/ui/editor-workspaces.js": "6a0dcfab40bffcce3b10dae025d4ca20413f059a0905df93a11af9132cc7d58c",
-    "editor/io/editor-project-save.js": "4dc5ce43ba2d97ab0d16f80153da111738c2f43014b223df0ea04c11886bf9ce",
+    "editor/io/editor-project-save.js": "2b16f83483f2859750bffa2e610b121190cf2a92095fc728cb9635560413f74d",
     "editor/io/editor-dynamic-exports.js": "3fceb191759ed43375d21ebc1cdbd8b6a0d2bc034377977e579d3dce925c7495",
     "editor/ui/editor-export-menus.js": "cfa4973df5672ea759702ef096c7b71e237d060ed4d8043d04e4ae72904fc213",
     "editor/io/editor-project-media-inputs.js": "107eaf3c7f006a9c67f9427f82cb85186343c5ddd684edbc8e4fbbab17a8a879",
@@ -323,9 +323,9 @@
     "editor/io/editor-json-repair.js": "101238bc0e3c415682ccb942c216f395d4c25417f81e59343ec3778ab634cad0",
     "editor/ui/editor-help-panel.js": "09d0778f0720704c94315df5f2b80b9d24e336ea09d1d336b74fcde832441ab4",
     "editor/ui/editor-theme.js": "6a8a3a01eb7a4a976fa0dd9f56ea8f374027249270c876f62cde5f7fb6dc1aec",
-    "editor/ui/editor-gap-remove-ui.js": "f6b84df3661c13434dfb6e06089f18a217049267049179543751db3880e0c9ec",
+    "editor/ui/editor-gap-remove-ui.js": "99d7c86b85695cbe75615ec1fc63ea1473f18f3ad250b4f6ff8f6fb4b52e0124",
     "editor/markers/editor-marker-editing.js": "2b8d6d0a7f5cbf8f111c2c23c714d6075d7e15981335e2d94fd32926b2cf6ae4",
-    "editor/markers/editor-markers-panel.js": "01db12ff55c9c5c69fbb0a9b92a475adaef02cc5549b7b5baeaea9c36eed9f6c",
+    "editor/markers/editor-markers-panel.js": "70939691f1051b4da63690ed74b3d856bdb0839d98e7922ed4af619fa112e92f",
     "editor/cues/editor-selection.js": "4fef8b3aaba828227d6b2fe67637b5c43357096b9cf1e538c961704a44b249d4",
     "editor/cues/editor-binding-align.js": "1ce502fb39e5e453b11740d524b9628372d83117e398e7ffa7a9a3a04110945a",
     "editor/cues/editor-cue-panel.js": "81f4280710f52832a38cb714d6c9de0da3b234371ce3eea4733991c561456f69",
@@ -335,7 +335,7 @@
     "editor/cues/editor-inline-edit.js": "c34a4c91e3092126ce33ec5ec78a3f07a0b8dc1322363f958c0f12f35147c66a",
     "editor/cues/editor-split-core.js": "03e9fb243e0347c70757b8372103892f20e2ffe4d8c91d523222c2c738c13038",
     "editor/cues/editor-split-context.js": "8a1923d98b8c4c258fe430edec926f66ceb091811b6a48487a4fc94cf67820f1",
-    "editor/cues/editor-segment-ops.js": "14ecdb884cd49acdbdf4c2578570c46f37cea925220f3caa1bb5f90864e7dd7e",
+    "editor/cues/editor-segment-ops.js": "91096260114fbaff32121d5cacf5511870ecae8b29d4a05a0abd4e924d86c63f",
     "editor/cues/editor-nav-preview.js": "9b6037718ea9c17e4883a610164d8974785f1bdf17265f994318559a3f0abef7",
     "editor/cues/editor-cue-events.js": "d55a8ea5871d231a3817b2d3fb65ead419f0fefd14b72381fa035fd4eaefa1ce",
     "editor/cues/editor-cue-list-anchor.js": "776b7c951eb4148a6a52a0a4724cbd2b3c7225d46bdf03e0ddda2506c96a3975",
@@ -452,7 +452,7 @@
         "format": "esm"
       },
       "web/shared/utils/segment-timing.js": {
-        "bytes": 22370,
+        "bytes": 22896,
         "imports": [],
         "format": "esm"
       },
@@ -692,7 +692,7 @@
         "format": "esm"
       },
       "web/editor-entry.mjs": {
-        "bytes": 1775276,
+        "bytes": 1776237,
         "imports": [
           {
             "path": "web/shared/host/storage.js",
@@ -1049,7 +1049,7 @@
             "bytesInOutput": 849
           },
           "web/shared/utils/segment-timing.js": {
-            "bytesInOutput": 8177
+            "bytesInOutput": 8275
           },
           "web/shared/utils/split-alignment.js": {
             "bytesInOutput": 3692
@@ -1193,10 +1193,10 @@
             "bytesInOutput": 4423
           },
           "web/editor-entry.mjs": {
-            "bytesInOutput": 1033160
+            "bytesInOutput": 1033693
           }
         },
-        "bytes": 1374927
+        "bytes": 1375558
       }
     }
   }

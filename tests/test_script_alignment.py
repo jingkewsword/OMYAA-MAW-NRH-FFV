@@ -193,6 +193,27 @@ class ScriptAlignmentTests(unittest.TestCase):
             [(50, 90, "ai_cleanup_review"), (200, 300, "audio_gate"), (400, 500, "manual")],
         )
 
+    def test_alignment_preserves_full_ai_review_marker_owner(self) -> None:
+        marker_id = "review-" + "x" * 180 + "😀"
+        project = {
+            "segments": [segment("s1", 0, 1000, "hello")],
+            "markers": {"schema": "moy.asr.markers.v1", "items": [{
+                "id": marker_id, "start": 50, "end": 90,
+                "note": "[AI] 复核", "review": {"status": "pending"},
+            }]},
+            "gap_remove": {"provenance": {"sources": {"ai_cleanup_review": [{
+                "id": marker_id, "review_marker_id": f" {marker_id} ",
+                "start": 50, "end": 90,
+            }]}}},
+        }
+        alignment = align_project_to_script(project, "hello")
+        selection = make_selection_manifest(alignment, alignment["defaultSelection"])
+        output = apply_alignment_to_project(project, alignment, selection, detect_audio_gaps=False)
+        review_range = output["gap_remove"]["provenance"]["sources"]["ai_cleanup_review"][0]
+        self.assertEqual(review_range["id"], marker_id[:160])
+        self.assertEqual(review_range["review_marker_id"], marker_id)
+        self.assertEqual(output["markers"]["items"][0]["id"], marker_id)
+
     def test_alignment_preserves_moved_gap_provenance_semantics(self) -> None:
         project = {"segments": [segment("s1", 0, 7000, "hello")]}
         alignment = align_project_to_script(project, "hello")

@@ -474,6 +474,37 @@ test('equal-length typo replacement syncs item texts through the cue panel', asy
   expect([restored.text, restored.items.map(item => item.text)]).toEqual(['我非常喜欢！', ['我', '最喜欢！']]);
 });
 
+test('saving focused cue panel text syncs word labels before resetting the edit snapshot', async ({ page }) => {
+  await page.evaluate(() => {
+    MaweSettings.updateEditorSettings({ cueEditorCancelOnEscape: true });
+    MaweServerSave.projectFileHandle = {
+      name: 'word-label-save.mosp',
+      async createWritable() {
+        return {
+          async write(blob) { window.__savedWordLabelProject = JSON.parse(await blob.text()); },
+          async close() {},
+        };
+      },
+    };
+  });
+  await page.locator('.cue[data-idx="0"]').click();
+  const panel = page.locator('#cue-panel-text');
+  await panel.fill('我最喜欢！');
+  await panel.press('Control+s');
+  await expect.poll(() => page.evaluate(() => window.__savedWordLabelProject?.segments[0].text)).toBe('我最喜欢！');
+  expect(await page.evaluate(() => window.__savedWordLabelProject.segments[0].items.map(item => item.text)))
+    .toEqual(['我', '最喜欢！']);
+  await expect(panel).toBeFocused();
+  expect((await source(page)).items.map(item => item.text)).toEqual(['我', '最喜欢！']);
+  await panel.fill('我更喜欢！');
+  await panel.blur();
+  expect((await source(page)).items.map(item => item.text)).toEqual(['我', '更喜欢！']);
+  await panel.fill('我很喜欢！');
+  await page.keyboard.press('Escape');
+  expect([ (await source(page)).text, (await source(page)).items.map(item => item.text) ])
+    .toEqual(['我更喜欢！', ['我', '更喜欢！']]);
+});
+
 test('selected sentence gains edge handles in word timing mode and drags only its own range', async ({ page }) => {
   await setWordTiming(page);
   const block = page.locator('.waveform-cue-block[data-track="main"][data-idx="0"]');

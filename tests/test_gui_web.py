@@ -2403,6 +2403,123 @@ class GuiWebBridgeTests(CompactContainerAssertions, unittest.TestCase):
         self.assertTrue(output_project.is_file())
         self.assertNotEqual(output_project, project)
 
+    def test_ai_postprocess_cancel_while_loading_settings_does_not_run(self) -> None:
+        import maw.gui_web as gui_web
+
+        load_values = gui_web._postprocess_values
+        for method_name, process_name in (
+            ("run_ai_cleanup", "process_ai_cleanup"),
+            ("run_llm_postprocess", "process_llm_postprocess"),
+        ):
+            for read_error in (False, True):
+                with self.subTest(method=method_name, read_error=read_error):
+                    reading = threading.Event()
+                    release = threading.Event()
+                    results: list[object] = []
+                    operation_id = f"prepare-{method_name}-{read_error}"
+
+                    def delayed_values(*args):
+                        reading.set()
+                        if not release.wait(5):
+                            raise AssertionError("test did not release settings read")
+                        if read_error:
+                            raise OSError("settings read failed after cancellation")
+                        return load_values(*args)
+
+                    def run() -> None:
+                        try:
+                            results.append(getattr(self.api, method_name)({
+                                "operationId": operation_id,
+                                "projectPath": str(self.root / "unused.mosp"),
+                                "scriptPath": str(self.root / "unused.txt"),
+                                "apiKey": "sk-test",
+                            }))
+                        except BaseException as error:
+                            results.append(error)
+
+                    with (
+                        mock.patch("maw.gui_web._postprocess_values", side_effect=delayed_values),
+                        mock.patch(f"maw.gui_web.{process_name}") as process,
+                    ):
+                        runner = threading.Thread(target=run, daemon=True)
+                        runner.start()
+                        try:
+                            self.assertTrue(reading.wait(1), "operation should read settings")
+                            self.assertEqual(
+                                self.api.cancel_postprocess({"operationId": operation_id}),
+                                {"ok": True, "active": True, "cancelled": True},
+                            )
+                            release.set()
+                            runner.join(timeout=1)
+                            self.assertFalse(runner.is_alive())
+                            self.assertEqual(len(results), 1)
+                            self.assertIsInstance(results[0], dict)
+                            self.assertEqual(results[0]["code"], "postprocess_cancelled")  # type: ignore[index]
+                            process.assert_not_called()
+                            self.assertEqual(self.api._postprocess_operations, {})
+                        finally:
+                            release.set()
+                            runner.join(timeout=2)
+
+    def test_ai_postprocess_preparation_errors_release_operation(self) -> None:
+        for method_name, payload, expected_code in (
+            ("run_ai_cleanup", {}, "script_invalid"),
+            ("run_llm_postprocess", {"operation": "custom"}, "custom_prompt_required"),
+        ):
+            with self.subTest(method=method_name, stage="validation"):
+                result = getattr(self.api, method_name)({"operationId": "prepare-error", **payload})
+                self.assertEqual(result["code"], expected_code)
+                self.assertEqual(self.api._postprocess_operations, {})
+            with self.subTest(method=method_name, stage="settings"):
+                with mock.patch("maw.gui_web._postprocess_values", side_effect=OSError("settings unavailable")):
+                    with self.assertRaisesRegex(OSError, "settings unavailable"):
+                        getattr(self.api, method_name)({
+                            "operationId": "prepare-error",
+                            "scriptPath": str(self.root / "unused.txt"),
+                        })
+                self.assertEqual(self.api._postprocess_operations, {})
+
+    def test_llm_translation_and_repair_cancel_are_reported_as_cancelled(self) -> None:
+        for operation, text in (("translate_zh", "hello"), ("translate_en", "你好")):
+            project = self.root / f"cancel-{operation}.mosp"
+            project.write_text(json.dumps({
+                "segments": [{"id": "seg-1", "start": 0, "end": 1000, "text": text}],
+            }, ensure_ascii=False), encoding="utf-8")
+            for repair in (False, True):
+                for cancel_via_api in (False, True):
+                    with self.subTest(operation=operation, repair=repair, cancel_via_api=cancel_via_api):
+                        requests = 0
+                        operation_id = f"cancel-{operation}-{repair}-{cancel_via_api}"
+
+                        def complete(*_args, **_kwargs):
+                            nonlocal requests
+                            requests += 1
+                            if repair and requests == 1:
+                                return {"groups": []}
+                            if cancel_via_api:
+                                self.assertEqual(
+                                    self.api.cancel_postprocess({"operationId": operation_id}),
+                                    {"ok": True, "active": True, "cancelled": True},
+                                )
+                            raise LlmClientError("操作已取消。", category="cancelled", operation="completion")
+
+                        with (
+                            mock.patch("maw.gui_web.complete_subtitle_groups", side_effect=complete),
+                            mock.patch("maw.postprocess._write") as write,
+                        ):
+                            result = self.api.run_llm_postprocess({
+                                "projectPath": str(project),
+                                "outputMode": "json",
+                                "operation": operation,
+                                "apiKey": "sk-test",
+                                "operationId": operation_id,
+                            })
+                        self.assertFalse(result["ok"])
+                        self.assertEqual(result["code"], "postprocess_cancelled")
+                        self.assertEqual(requests, 2 if repair else 1)
+                        write.assert_not_called()
+                        self.assertEqual(self.api._postprocess_operations, {})
+
     def test_llm_bridge_forwards_bilingual_merge_option(self) -> None:
         artifact = SimpleNamespace(
             source_project_path=None,

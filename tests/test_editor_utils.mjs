@@ -60,6 +60,61 @@ test('plans an all-or-nothing subtitle time offset within media bounds', () => {
   assert.equal(helpers.planSubtitleTimeOffset(segments, [2], 2000, 7000).reason, 'media_bounds');
 });
 
+test('rejects time offsets that jump past unselected cues into clear space', () => {
+  const segments = [
+    { start: 1000, end: 2000 },
+    { start: 3000, end: 4000 },
+  ];
+  for (const [index, offset] of [[0, 4000], [1, -3000]]) {
+    const plan = helpers.planSubtitleTimeOffset(segments, [index], offset, 10000);
+    assert.equal(plan.ok, false);
+    assert.equal(plan.reason, 'overlap');
+    assert.deepEqual(JSON.parse(JSON.stringify(plan.changes)), []);
+  }
+  assert.deepEqual(segments, [{ start: 1000, end: 2000 }, { start: 3000, end: 4000 }]);
+});
+
+test('time offsets preserve ordering around disabled unselected cues', () => {
+  const segments = [
+    { start: 1000, end: 2000 },
+    { start: 3000, end: 4000, disabled: true },
+    { start: 6000, end: 7000 },
+  ];
+  assert.equal(helpers.planSubtitleTimeOffset(segments, [0], 3500, 10000).reason, 'overlap');
+  assert.equal(helpers.planSubtitleTimeOffset(segments, [2], -3500, 10000).reason, 'overlap');
+  // Disabled cues still participate in the saved project's timing contract.
+  assert.equal(helpers.planSubtitleTimeOffset(segments, [0], 1500, 10000).reason, 'overlap');
+  assert.equal(helpers.planSubtitleTimeOffset(segments, [2], -2500, 10000).reason, 'overlap');
+});
+
+test('time offsets allow touching boundaries for noncontiguous selections', () => {
+  const segments = [
+    { start: 1000, end: 2000 },
+    { start: 2500, end: 3000 },
+    { start: 3500, end: 4500 },
+    { start: 5000, end: 6000 },
+  ];
+  for (const offset of [-500, 500]) {
+    const plan = helpers.planSubtitleTimeOffset(segments, [0, 2], offset, 10000);
+    assert.equal(plan.ok, true);
+    assert.deepEqual(JSON.parse(JSON.stringify(plan.changes)), [
+      { index: 0, start: 1000 + offset, end: 2000 + offset },
+      { index: 2, start: 3500 + offset, end: 4500 + offset },
+    ]);
+  }
+});
+
+test('time offsets keep allowing existing overlaps without changing cue order', () => {
+  for (const disabled of [false, true]) {
+    const segments = [
+      { start: 1000, end: 2500 },
+      { start: 2000, end: 4000, disabled },
+    ];
+    assert.equal(helpers.planSubtitleTimeOffset(segments, [0], 500, 10000).ok, true);
+    assert.equal(helpers.planSubtitleTimeOffset(segments, [1], -500, 10000).ok, true);
+  }
+});
+
 test('accepts legacy and current project schemas but rejects unknown versions', () => {
   assert.equal(helpers.supportsProjectSchema({ segments: [] }), true);
   assert.equal(helpers.supportsProjectSchema({ schema: helpers.PROJECT_SCHEMA, segments: [] }), true);
@@ -929,6 +984,35 @@ test('replaces one provenance source without losing the other layers', () => {
     JSON.parse(JSON.stringify(replaced.sources.script_alignment)),
     [{ id: 'align', source: 'script_alignment', start: 0, end: 100, removed: true }],
   );
+});
+
+test('preserves full AI review marker ownership through browser and Python normalization', () => {
+  const markerId = `review-${'x'.repeat(180)}😀`;
+  const initial = gapCore.normalizeGapRemoveProvenance({ sources: {
+    ai_cleanup_review: [{ id: markerId, review_marker_id: ` ${markerId} `, start: 100, end: 300 }],
+  } });
+  assert.equal(initial.sources.ai_cleanup_review[0].review_marker_id, markerId);
+  assert.equal(initial.sources.ai_cleanup_review[0].id, markerId.slice(0, 160));
+  const result = spawnSync(PYTHON_COMMAND, pythonCommandArgs(['-c', [
+    'import json, sys',
+    'from maw.script_alignment import _normalize_gap_provenance',
+    'print(json.dumps(_normalize_gap_provenance(json.load(sys.stdin)), ensure_ascii=False))',
+  ].join('\n')]), {
+    input: JSON.stringify(initial), encoding: 'utf8', timeout: 20_000,
+    env: { ...process.env, PYTHONUTF8: '1' },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const roundTrip = gapCore.normalizeGapRemoveProvenance(JSON.parse(result.stdout));
+  assert.deepEqual(JSON.parse(JSON.stringify(roundTrip)), JSON.parse(JSON.stringify(initial)));
+  const split = gapCore.removeGapRemoveProvenanceRange(roundTrip, 150, 180);
+  assert.equal(split.sources.ai_cleanup_review.length, 2);
+  assert.ok(split.sources.ai_cleanup_review.every(range => range.review_marker_id === markerId));
+  const cancelled = gapCore.replaceGapRemoveProvenanceSource(
+    split, 'ai_cleanup_review',
+    split.sources.ai_cleanup_review.filter(range => range.review_marker_id !== markerId),
+  );
+  assert.equal(cancelled.sources.ai_cleanup_review.length, 0);
+  assert.deepEqual(JSON.parse(JSON.stringify(gapCore.gapRangesFromProvenance(cancelled))), []);
 });
 
 test('unmuting an AI review range removes only its linked review source after range edits', () => {
