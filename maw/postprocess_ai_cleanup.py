@@ -27,6 +27,7 @@ from maw.postprocess_io import SubtitleArtifact, write_artifacts
 from maw.postprocess_llm import (
     MAX_RESPONSE_ATTEMPTS,
     LlmClientError,
+    LlmDelta,
     LlmSettings,
     _request_completion,
     _response_content,
@@ -117,6 +118,10 @@ class _Clip:
 
 def llm_complete(
     settings: LlmSettings,
+    *,
+    on_delta: LlmDelta | None = None,
+    is_cancelled: Callable[[], bool] | None = None,
+    on_response: Callable[[object | None], None] | None = None,
 ) -> Callable[[str, list[dict[str, str]]], Mapping[str, object]]:
     """Build the transport closure used by :func:`run_ai_cleanup`.
 
@@ -132,7 +137,18 @@ def llm_complete(
             current_prompt = (
                 prompt if not attempt else _retry_prompt(prompt, last_error)
             )
-            body = _request_completion(settings, current_prompt, clips, on_delta=None)
+            if on_delta is not None:
+                # Each request is a distinct batch/protocol attempt. Clear
+                # partial text before retrying malformed provider output.
+                on_delta("reset", "")
+            body = _request_completion(
+                settings,
+                current_prompt,
+                clips,
+                on_delta=on_delta,
+                is_cancelled=is_cancelled,
+                on_response=on_response,
+            )
             content = _response_content(body)
             try:
                 return json.loads(_strip_json_fence(content))
@@ -152,6 +168,8 @@ def run_ai_cleanup(
     *,
     complete: Callable[[str, list[dict[str, str]]], Mapping[str, object]],
     on_status: Callable[[str], None] | None = None,
+    is_cancelled: Callable[[], bool] | None = None,
+    begin_commit: Callable[[], bool] | None = None,
 ) -> SubtitleArtifact:
     """Run the recording-first cleanup and write ``ai_cleanup`` artifacts."""
 
@@ -170,9 +188,11 @@ def run_ai_cleanup(
         raise AiCleanupError("字幕工程中没有可整理的字幕段。")
 
     clips = _build_clips(segments, script_lines)
+    _raise_if_cancelled(is_cancelled)
     decisions = _collect_decisions(
         complete, clips, script_lines, on_status=on_status, notes=request.notes
     )
+    _raise_if_cancelled(is_cancelled)
     resolved, reasons = _resolve_decisions(clips, decisions)
     if request.review_enabled and DECISION_DISCARD in resolved.values():
         flags = review_decisions(
@@ -181,6 +201,7 @@ def run_ai_cleanup(
             notes=request.notes,
             on_status=on_status,
         )
+        _raise_if_cancelled(is_cancelled)
         for clip_id, reason in flags.items():
             resolved[clip_id] = DECISION_REVIEW
             reasons[clip_id] = reason
@@ -251,10 +272,16 @@ def run_ai_cleanup(
     if ai_markers:
         project["markers"] = _build_markers_field(ai_markers, project.get("markers"))
 
+    _raise_if_cancelled(is_cancelled)
+
     warnings = (
         f"文稿来源：{script_path}",
         f"AI 整理：自动移除 {stats['removed']} 段，待复核 {stats['pendingReview']} 段。",
     )
+    if begin_commit is not None and not begin_commit():
+        raise LlmClientError(
+            "操作已取消。", category="cancelled", operation="ai_cleanup"
+        )
     return write_artifacts(
         project,
         source_project_path=source_project,
@@ -267,6 +294,13 @@ def run_ai_cleanup(
         media_path=request.media_path,
         stats=stats,
     )
+
+
+def _raise_if_cancelled(is_cancelled: Callable[[], bool] | None) -> None:
+    if is_cancelled is not None and is_cancelled():
+        raise LlmClientError(
+            "操作已取消。", category="cancelled", operation="ai_cleanup"
+        )
 
 
 def build_clips(
