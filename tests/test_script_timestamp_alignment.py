@@ -164,7 +164,7 @@ class ScriptTimestampTests(unittest.TestCase):
                 with self.subTest(manual=manual):
                     artifact, _ = run_script_alignment(ScriptAlignmentRequest(script, media, language="fr", anchors_path=manual), backend=backend)
                     self.assertEqual(backend.align.call_args.args[1], "café!")
-                    self.assertEqual(json.loads(artifact.project_path.read_text())["segments"][0]["text"], "cafe\u0301!")
+                    self.assertEqual(json.loads(artifact.project_path.read_text(encoding="utf-8"))["segments"][0]["text"], "cafe\u0301!")
             with wave.open(str(media), "wb") as wav:
                 wav.setparams((1, 2, 16000, 0, "NONE", "not compressed"))
                 wav.writeframes(bytes(32000))
