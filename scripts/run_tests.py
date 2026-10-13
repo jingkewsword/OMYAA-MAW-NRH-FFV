@@ -143,7 +143,7 @@ def pack_suite(pack: str):
     selected = unittest.TestSuite()
     for path in sorted((ROOT / "tests").glob("test_*.py")):
         names = source_test_ids(path)
-        if not any(python_pack(name) == pack for name in names):
+        if names and not any(python_pack(name) == pack for name in names):
             continue
         loaded = loader.loadTestsFromName(f"tests.{path.stem}")
         selected.addTests(case for case in cases(loaded)
@@ -202,14 +202,17 @@ def main(argv=None) -> int:
               "platform_not_applicable": allowed_platform_skip(test.id(), reason)}
              for test, reason in result.skipped]
     required_skips = [skip for skip in skips if not skip["platform_not_applicable"]]
-    code = 0 if result.wasSuccessful() and not (args.required and required_skips) else 1
+    code = 0 if result.wasSuccessful() and not (args.required and (required_skips or result.expectedFailures)) else 1
     if args.report:
         args.report.parent.mkdir(parents=True, exist_ok=True)
         args.report.write_text(json.dumps({"selected_ids": selected_ids, "run": result.testsRun,
             "failures": len(result.failures), "errors": len(result.errors), "skips": skips,
+            "expected_failures": len(result.expectedFailures),
             "exit_code": code}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     if args.required and required_skips:
         print(f"[run_tests] required gate failed: {len(required_skips)} unsupported skips; inspect report")
+    if args.required and result.expectedFailures:
+        print("[run_tests] required gate failed: expected failures remain unverified")
     return code
 
 

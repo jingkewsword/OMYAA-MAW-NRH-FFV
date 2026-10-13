@@ -31,7 +31,7 @@ uv run --no-sync python scripts/test_workflow.py --stage merge --changed maw/rea
 | 纯文档 | 文档导航、发布归档与对应回归 | Schema 文档视为共享契约，扩大所有业务组 |
 | 网站 | 文档检查、网站构建 | 业务源码同批变化时合并相关组 |
 | 工具 | 文档检查、tools | 公共测试入口/依赖锁/工作流变更扩大全部组 |
-| 发布 | 所有 required 组 | 打包平台分别验证 Python/媒体/长媒体/工具与 Node 语义；Linux 单独执行完整浏览器组 |
+| 发布 | 所有 required 组 | 打包平台分别验证 Python/媒体/长媒体/生命周期/工具与 Node 语义；完整 Chromium 在四个独立 Linux runner 执行并汇总 |
 
 `--stage merge --plan-only` 输出选择与原因；`--pack` 可以显式选择组进行复现。`pnpm run test:dev`、`test:merge`、`test:release` 是同一入口的快捷方式。历史 `pnpm run test:unit` 仍运行全部顶层 `.mjs`，其中含真实浏览器与进程测试；无参数 `scripts/run_tests.py` 仍保留历史全量 unittest 行为，不能拿其允许 skip 的结果代替 required 门禁。
 
@@ -53,7 +53,24 @@ uv run --no-sync python scripts/test_workflow.py --stage merge --changed maw/rea
 
 每次运行的计划、聚合结果、Python IDs/skip 原因、Node JUnit 与 Playwright JSON 写入 `.artifacts/test-workflow/<id>/`，子命令的 bounded 日志与 PID/时限证据仍走 `scripts/run_check.py`。失败后停止当前批次，后续门禁尚未运行，不能宣称通过。NumPy/soundfile/Pillow/FFmpeg/内核缺失、编码器不支持、必需 fixture 缺失、Node/Playwright skip、超时均不能得到 required 成功。Windows 的特定 symlink 权限与 OS opener、不适用的 Unix checksum，以及非 Windows 的 LOCALAPPDATA/startfile 测试单独登记为 platform_not_applicable；Linux CI 必须运行符号链接边界。
 
-CI 有独立选择、文档、业务、Windows 生命周期与网站任务，最后由 `Required test gate` 汇总实际必需 job 的成功。预览打包只在打包/资源/依赖/共享基础设施或未知路径触发，避免每个文案改动生成 Windows 包。正式发布 `publish` 依赖完整 Linux 测试质量任务和各平台打包任务。仓库外的 branch protection 要将该汇总 job 设为 required，改源码不会自动修改 GitHub 的保护设置；既有 required job 名称需维护者迁移。
+CI 有独立选择、文档、业务、Windows 生命周期、完整浏览器分片与网站任务，最后由 `Required test gate` 汇总实际必需 job 的成功。选择器必须输出全部 11 个准入 flag，缺失、非法值或互相矛盾的输出直接失败，不能当作未选择。选中的 job 失败、取消或跳过也不能通过。
+
+预览打包只在打包/资源/依赖/共享基础设施或未知路径触发，避免每个文案改动生成 Windows 包。正式发布先完成 Linux 质量组和完整浏览器汇总，再开始各平台打包；`publish` 的条件显式要求质量、完整浏览器和 Windows 打包成功。各平台发布验证包含 lifecycle，不依赖 PR 阶段曾跑过另一个 SHA。仓库外的 branch protection 要将汇总 `Required test gate` 设为 required，改源码不会自动修改 GitHub 的保护设置；既有 required job 名称需维护者迁移。
+
+## 完整浏览器分片与结果
+
+`.github/workflows/browser-gates.yml` 为合并与发布复用同一完整集合。四个独立 Linux runner 各运行一片，每片 2 workers、900s 执行期限；`fullyParallel=false` 保留文件隔离。增加 CI 机器可缩短墙钟关键路径，不意味着 CPU、总计 runner 时间或内存降低；四片案例数相近也不能证明耗时平衡，需以真实运行校准。
+
+```sh
+uv run --no-sync python scripts/test_workflow.py --stage merge --pack editor-e2e --browser-shard 1/4
+uv run --no-sync python scripts/browser_results.py --reports .artifacts/browser-shards --total 4
+```
+
+分片命令会先发现完整集，再发现本片计划，最后执行本片；发现与运行都禁用 `.only`、retry 和 repeat。运行 JSON 必须包含计划中的每个用例，且每个用例实际成功一次，不能用 `--list` 的未执行状态或零退出码代替。Node required 报告同样拒绝空集和 skip；Python expected failure 也不能成为 required 成功。
+
+每片写入 `browser-run.json`，记录 Git SHA、配置、选择范围、完整 ID 集、片号、计划 ID 与实际通过 ID。完整汇总只接受同 SHA、干净工作区、完整 `editor-e2e` 范围的全部分片，要求计划不重不漏、实际结果与计划一致。单片或叶子 `e2e` 成功只证明其自身范围；缺片、重复片、scope 不同、失败、skip、重试、空完整集均失败。非空完整集确实没有分配用例的片必须明示 `empty-shard`，不能伪造运行成功。
+
+2026-10-13 第二阶段已验证 794 例实际发现与四片分配，并通过针对性故障检出回归；真实四片运行与远端 CI 尚未完成。这是已实现的流程，完整验收仍见计划账本。
 
 ## 控制长期膨胀
 

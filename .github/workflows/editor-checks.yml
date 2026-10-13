@@ -109,7 +109,6 @@ jobs:
           LONG_MEDIA: ${{ needs.selection.outputs.long_media }}
           LIFECYCLE: ${{ needs.selection.outputs.lifecycle }}
           TOOLS: ${{ needs.selection.outputs.tools }}
-          EDITOR_E2E: ${{ needs.selection.outputs.editor_e2e }}
           E2E: ${{ needs.selection.outputs.e2e }}
           E2E_SPECS: ${{ needs.selection.outputs.e2e_specs }}
         run: |
@@ -121,7 +120,6 @@ jobs:
           [[ "$LONG_MEDIA" != true ]] || packs+=(--pack long-media)
           [[ "$LIFECYCLE" != true ]] || packs+=(--pack lifecycle)
           [[ "$TOOLS" != true ]] || packs+=(--pack tools)
-          [[ "$EDITOR_E2E" != true ]] || packs+=(--pack editor-e2e)
           [[ "$E2E" != true ]] || packs+=(--pack e2e)
           uv run --no-sync python scripts/test_workflow.py --stage merge --e2e-specs "$E2E_SPECS" "${packs[@]}"
       - uses: actions/upload-artifact@v6
@@ -180,22 +178,23 @@ jobs:
       - run: pnpm --dir website install --frozen-lockfile
       - run: python scripts/test_workflow.py --stage merge --pack website
 
+  browser-gates:
+    needs: selection
+    if: needs.selection.outputs.editor_e2e == 'true'
+    uses: ./.github/workflows/browser-gates.yml
+
   test-gate:
     name: Required test gate
     if: always()
-    needs: [selection, documentation, editor, windows-lifecycle, website]
+    needs: [selection, documentation, editor, windows-lifecycle, browser-gates, website]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
       - name: Reject failure, cancellation and unexpected skipped jobs
         env:
           RESULTS: ${{ toJSON(needs) }}
         run: |
-          python - <<'PY'
-          import json, os
-          jobs = json.loads(os.environ['RESULTS'])
-          required = ['selection', 'documentation']
-          for key, flag in [('editor', 'app'), ('windows-lifecycle', 'lifecycle'), ('website', 'website')]:
-              if jobs['selection']['outputs'].get(flag) == 'true': required.append(key)
-          failed = [key for key in required if jobs[key]['result'] != 'success']
-          if failed: raise SystemExit('Required jobs did not succeed: ' + ', '.join(failed))
-          PY
+          python scripts/check_test_gate.py

@@ -7,14 +7,21 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
 import uuid
 import xml.etree.ElementTree as ET
 
-from run_check import run
-from test_policy import DEV_NODE, DEV_PYTHON, PYTHON_PACKS, node_pack, select_packs
+if __package__:
+    from .run_check import run
+    from .browser_results import SCHEMA, browser_config, discovery, verify_run
+    from .test_policy import DEV_NODE, DEV_PYTHON, PYTHON_PACKS, node_pack, select_packs
+else:
+    from run_check import run
+    from browser_results import SCHEMA, browser_config, discovery, verify_run
+    from test_policy import DEV_NODE, DEV_PYTHON, PYTHON_PACKS, node_pack, select_packs
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKS = ("docs", "common", "browser", "smoke", "media", "long-media", "lifecycle", "tools", "e2e", "editor-e2e", "website", "manual")
@@ -31,10 +38,11 @@ def changed_paths(base_ref: str | None) -> list[str]:
     return sorted(set(paths))
 
 
-def commands(packs: list[str], report_dir: Path, *, dev: bool = False, component: str = "all", specs=()):
+def commands(packs: list[str], report_dir: Path, *, dev: bool = False, component: str = "all", specs=(), shard=None):
     python = sys.executable
     node = shutil.which("node") or "node"
-    playwright = [node, "node_modules/@playwright/test/cli.js", "test", "--project=chromium"]
+    playwright = [node, "node_modules/@playwright/test/cli.js", "test", "--project=chromium",
+                  "--forbid-only", "--workers=2", "--retries=0"]
     if dev:
         if component in {"python", "all"}:
             yield "python-kernel", [python, "scripts/run_tests.py", "--required", *DEV_PYTHON], 60
@@ -64,14 +72,65 @@ def commands(packs: list[str], report_dir: Path, *, dev: bool = False, component
                 yield f"node-{pack}", [node, "--test", "--test-reporter=spec", "--test-reporter-destination=stdout",
                        "--test-reporter=junit", f"--test-reporter-destination={report_dir / ('node-' + pack + '.xml')}", *targets], 240
         if pack == "smoke":
-            yield "editor-http-smoke", [*playwright, "--reporter=line,json", "tests/e2e/editor-bundle.spec.mjs", "tests/e2e/editor-transactions.spec.mjs"], 300
+            yield "editor-http-smoke", [*playwright, "--reporter=line,json", f"--output={report_dir / 'smoke-artifacts'}", "tests/e2e/editor-bundle.spec.mjs", "tests/e2e/editor-transactions.spec.mjs"], 300
         if pack == "editor-e2e":
             # Includes Launcher specs: shared browser/host code crosses both UIs.
-            yield "browser-regressions", [*playwright, "--reporter=line,json"], 900
+            yield "browser-regressions", [*playwright, "--reporter=line,json", f"--output={report_dir / 'browser-artifacts'}",
+                   *([f"--shard={shard[0]}/{shard[1]}"] if shard else [])], 900
         if pack == "e2e":
-            yield "browser-regressions", [*playwright, "--reporter=line,json", *specs], 900
+            yield "browser-regressions", [*playwright, "--reporter=line,json", f"--output={report_dir / 'browser-artifacts'}",
+                   *([f"--shard={shard[0]}/{shard[1]}"] if shard else []), *specs], 900
         if pack == "website":
             yield "website-build", [shutil.which("pnpm") or "pnpm", "--dir", "website", "build"], 240
+
+
+def parse_shard(value: str) -> tuple[int, int]:
+    if not re.fullmatch(r"[1-9]\d*/[1-9]\d*", value):
+        raise argparse.ArgumentTypeError("browser-shard must be index/total, for example 1/4")
+    index, total = map(int, value.split("/"))
+    if index > total:
+        raise argparse.ArgumentTypeError("browser-shard index exceeds total")
+    return index, total
+
+
+def execute(name: str, command: list[str], timeout: int) -> dict:
+    print(f"Running {name} (deadline {timeout}s)", flush=True)
+    _, result = run(command, timeout, ROOT / ".artifacts/checks")
+    print(f"{name}: exit={result['exit_code']}; seconds={result['duration_seconds']}; log={result['log']}", flush=True)
+    return {"gate": name, **result}
+
+
+def prepare_browser(name, command, directory, shard, specs, selection, results):
+    full_command = [arg.replace("--reporter=line,json", "--reporter=json")
+                    for arg in command if not arg.startswith("--shard=")]
+
+    def capture(label, argv):
+        report_path = directory / f"{name}-{label}.json"
+        os.environ["PLAYWRIGHT_JSON_OUTPUT_NAME"] = str(report_path)
+        result = execute(f"{name}-discover-{label}", [*argv, "--list"], 60)
+        results.append(result)
+        if result["exit_code"]:
+            raise ValueError(f"Browser discovery failed; log={result['log']}")
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        return report, discovery(report)
+
+    full_report, full_ids = capture("full", full_command)
+    if not full_ids:
+        raise ValueError("Required full browser discovery is empty")
+    if shard:
+        part_report, planned = capture("shard", [*full_command, f"--shard={shard[0]}/{shard[1]}", "--pass-with-no-tests"])
+        if part_report["config"]["shard"] != {"current": shard[0], "total": shard[1]}:
+            raise ValueError("Browser discovery returned incorrect shard metadata")
+        if browser_config(part_report) != browser_config(full_report) or not set(planned).issubset(full_ids):
+            raise ValueError("Browser shard discovery does not belong to the full scope")
+    else:
+        planned = full_ids
+    scope = {"revision": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+             "worktree_clean": not subprocess.check_output(["git", "status", "--porcelain=v1"], text=True).strip(),
+             "config": browser_config(full_report), "selection": selection, "specs": list(specs), "case_ids": full_ids}
+    return {"schema": SCHEMA, "scope": scope,
+            "shard": {"current": shard[0], "total": shard[1]} if shard else {"current": 1, "total": 1},
+            "planned_ids": planned, "passed_ids": [], "status": "pending"}
 
 
 def main(argv=None) -> int:
@@ -84,6 +143,7 @@ def main(argv=None) -> int:
     parser.add_argument("--plan-only", action="store_true")
     parser.add_argument("--github-output", type=Path)
     parser.add_argument("--e2e-specs", help="JSON concrete spec paths from the CI selector")
+    parser.add_argument("--browser-shard", type=parse_shard, help="explicit browser partition; full success requires every shard")
     args = parser.parse_args(argv)
     os.chdir(ROOT)
     paths = args.changed if args.changed is not None else changed_paths(args.base_ref)
@@ -99,7 +159,14 @@ def main(argv=None) -> int:
         # The kernel is fixed; changed modules are run with --stage merge after
         # inspection, rather than hidden inside every edit/save cycle.
         packs = []
-    plan.update(stage=args.stage, changed_paths=paths, packs=packs, e2e_specs=specs)
+    if "e2e" in packs and "editor-e2e" in packs:
+        parser.error("e2e and editor-e2e are mutually exclusive")
+    if len(packs) != len(set(packs)):
+        parser.error("duplicate packs would repeat the same gate")
+    if args.browser_shard and not set(packs) & {"e2e", "editor-e2e"}:
+        parser.error("browser-shard requires e2e or editor-e2e")
+    plan.update(stage=args.stage, changed_paths=paths, packs=packs, e2e_specs=specs,
+                browser_shard=args.browser_shard)
     output_dir = ROOT / ".artifacts/test-workflow" / uuid.uuid4().hex[:12]
     output_dir.mkdir(parents=True)
     (output_dir / "plan.json").write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -137,23 +204,50 @@ def main(argv=None) -> int:
     for key in ("TEMP", "TMP", "TMPDIR"):
         os.environ[key] = str(temp)
     results = []
-    for name, command, timeout in commands(packs, output_dir, dev=args.stage == "dev" and not args.pack, component=args.component, specs=specs):
+    for name, command, timeout in commands(packs, output_dir, dev=args.stage == "dev" and not args.pack, component=args.component, specs=specs, shard=args.browser_shard):
+        browser_record = None
+        if name in {"editor-http-smoke", "browser-regressions"}:
+            try:
+                browser_record = prepare_browser(name, command, output_dir,
+                    args.browser_shard if name == "browser-regressions" else None,
+                    specs if "e2e" in packs and name == "browser-regressions" else [],
+                    "smoke" if name == "editor-http-smoke" else "e2e" if "e2e" in packs else "editor-e2e", results)
+            except (OSError, ValueError, KeyError, TypeError) as error:
+                print(str(error))
+                results.append({"gate": name, "status": "invalid-discovery", "exit_code": 1, "error": str(error)})
+                break
+            if not browser_record["planned_ids"]:
+                browser_record["status"] = "empty-shard"
+                (output_dir / "browser-run.json").write_text(json.dumps(browser_record, indent=2) + "\n", encoding="utf-8")
+                results.append({"gate": name, "status": "empty-shard", "exit_code": 0})
+                print(f"{name}: explicit zero-assignment shard of a nonempty full scope")
+                continue
         browser_report = output_dir / f"{name}.json"
         os.environ["PLAYWRIGHT_JSON_OUTPUT_NAME"] = str(browser_report)
-        print(f"Running {name} (deadline {timeout}s)", flush=True)
-        code, result = run(command, timeout, ROOT / ".artifacts/checks")
-        if not code and name.startswith("node-"):
-            xml = ET.parse(output_dir / f"{name}.xml")
-            if xml.findall(".//skipped"):
-                code = 1
-                result.update(exit_code=1, status="required-skip")
-        if not code and name in {"editor-http-smoke", "browser-regressions"}:
-            report = json.loads(browser_report.read_text(encoding="utf-8"))
-            if report["stats"]["skipped"]:
-                code = 1
-                result.update(exit_code=1, status="required-skip")
-        results.append({"gate": name, **result})
-        print(f"{name}: exit={code}; seconds={result['duration_seconds']}; log={result['log']}", flush=True)
+        result = execute(name, command, timeout)
+        code = result["exit_code"]
+        try:
+            if not code and name.startswith("node-"):
+                xml = ET.parse(output_dir / f"{name}.xml")
+                if not xml.findall(".//testcase") or xml.findall(".//skipped"):
+                    raise ValueError("Required Node report is empty or contains skipped cases")
+            if not code and browser_record:
+                report = json.loads(browser_report.read_text(encoding="utf-8"))
+                if browser_config(report) != browser_record["scope"]["config"]:
+                    raise ValueError("Browser runtime configuration differs from discovery")
+                browser_record["passed_ids"] = verify_run(browser_record["planned_ids"], report)
+                if subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip() != browser_record["scope"]["revision"]:
+                    raise ValueError("Git revision changed while the browser gate was running")
+                browser_record["status"] = "passed"
+        except (OSError, ValueError, KeyError, TypeError, ET.ParseError) as error:
+            code = 1
+            result.update(exit_code=1, status="invalid-required-report", error=str(error))
+            print(str(error))
+        if browser_record:
+            if code:
+                browser_record["status"] = "failed"
+            (output_dir / "browser-run.json").write_text(json.dumps(browser_record, indent=2) + "\n", encoding="utf-8")
+        results.append(result)
         if code:
             print("\n".join(dict.fromkeys(result["diagnostics"] + result["tail"])))
             break

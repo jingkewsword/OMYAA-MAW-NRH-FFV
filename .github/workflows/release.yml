@@ -38,7 +38,7 @@ jobs:
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: pnpm exec playwright install --with-deps chromium
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-noto-cjk
-      - run: uv run --no-sync python scripts/test_workflow.py --stage release
+      - run: uv run --no-sync python scripts/test_workflow.py --stage release --pack common --pack browser --pack smoke --pack media --pack long-media --pack lifecycle --pack tools --pack docs
       - uses: actions/upload-artifact@v6
         if: always()
         with:
@@ -48,10 +48,14 @@ jobs:
             test-results/
           include-hidden-files: true
           retention-days: 14
+
+  browser-gates:
+    uses: ./.github/workflows/browser-gates.yml
   # Windows 是发布门禁：它失败则整个 Release 不发布；
   # macOS / Linux 失败仅提醒（publish 追加警告），不阻断。
   build-windows:
     name: Build Windows x64 bundle
+    needs: [test-quality, browser-gates]
     runs-on: windows-2022
     env:
       PYTHONUTF8: '1'
@@ -127,7 +131,7 @@ jobs:
         run: choco install ffmpeg -y --no-progress
 
       - name: Required Python and media tests
-        run: uv run --no-sync python scripts/test_workflow.py --stage merge --pack common --pack media --pack long-media --pack tools
+        run: uv run --no-sync python scripts/test_workflow.py --stage merge --pack common --pack media --pack long-media --pack tools --pack lifecycle
 
       - name: Download embedded Python bootstrap assets
         run: |
@@ -281,6 +285,7 @@ jobs:
           if-no-files-found: error
 
   build-aux:
+    needs: [test-quality, browser-gates]
     name: Build ${{ matrix.name }}
     strategy:
       fail-fast: false
@@ -382,7 +387,7 @@ jobs:
         run: brew install ffmpeg
 
       - name: Required Python and media tests
-        run: uv run --no-sync python scripts/test_workflow.py --stage merge --pack common --pack media --pack long-media --pack tools
+        run: uv run --no-sync python scripts/test_workflow.py --stage merge --pack common --pack media --pack long-media --pack tools --pack lifecycle
 
       # ---------- macOS 专属 ----------
 
@@ -676,8 +681,8 @@ jobs:
 
   publish:
     name: Publish GitHub Release
-    if: ${{ startsWith(github.ref, 'refs/tags/v') && !cancelled() && needs.build-windows.result == 'success' }}
-    needs: [test-quality, build-windows, build-aux]
+    if: ${{ startsWith(github.ref, 'refs/tags/v') && !cancelled() && needs.test-quality.result == 'success' && needs.browser-gates.result == 'success' && needs.build-windows.result == 'success' }}
+    needs: [test-quality, browser-gates, build-windows, build-aux]
     runs-on: ubuntu-latest
     permissions:
       contents: write

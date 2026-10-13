@@ -10,7 +10,7 @@ MEDIA_MODULES = {"test_gap_removed_audio_export", "test_gap_removed_video_compat
                  "test_media_cache", "test_quapeaks_generation"}
 TOOL_MODULES = {"test_docs_check", "test_release_notes", "test_run_check", "test_run_tests_runner",
                 "test_verification_checklist", "test_verify_sha256_script", "test_macos_icon",
-                "test_packaging_contract", "test_test_workflow"}
+                "test_packaging_contract", "test_test_workflow", "test_browser_results"}
 MEDIA_METHODS = {
     "test_streaming_extraction_and_cache_match", "test_low_rate_multichannel_keeps_opposite_and_one_sided_audio",
     "test_mono_stays_identical_and_third_channel_is_included", "test_mopeaks_generation_does_not_need_native_quapeaks",
@@ -82,13 +82,13 @@ ALL_MERGE = {"common", "browser", "smoke", "media", "long-media", "lifecycle", "
 # Leaf risks select existing consumer families. Shared state/host/schema/layout
 # and an unrecognized leaf deliberately keep the full-browser fallback.
 E2E_FAMILIES = (
-    (("gap",), ("gap-", "ai-cleanup", "script-alignment", "script-timestamp")),
+    (("gap",), ("gap-", "ai-cleanup", "script-alignment", "script-timestamp", "waveform-history", "waveform-deletion")),
     (("ai_cleanup", "ai-cleanup", "postprocess_ai"), ("ai-cleanup", "gap-", "marker")),
     (("script_match", "script-match", "script_alignment", "script_timestamp", "server-align/"), ("script-", "server-align", "launcher-script-match", "gap-")),
     (("waveform", "reapeaks", "quapeaks", "media_cache", "playback", "seek", "audition"), ("waveform-", "playback-", "playhead-", "hover-seek", "subtitle-seek", "cue-context", "media-controls", "gap-")),
     (("segmentation", "punctuation", "word_timing", "word-timing", "timed-text", "text-tools", "split", "merge"), ("word-timing", "timed-text", "split-", "keyboard-timing", "editor-text-tools", "launcher-resegment")),
     (("ass_", "ass-", "/ass.", "font", "subtitle-preview"), ("ass-", "subtitle-preview", "bilingual-label")),
-    (("export", "fcp7", "otio"), ("ass-export", "fcp7-export", "otio-export", "gap-", "multi-subtitle", "speaker-label")),
+    (("export", "fcp7", "otio"), ("ass-export", "fcp7-export", "otio-export", "gap-", "multi-subtitle", "speaker-label", "waveform-history")),
     (("marker", "speaker", "overlay", "multi-subtitle", "multi_subtitle"), ("marker", "speaker-label", "overlay-track", "multi-subtitle")),
     (("cue-scroll", "cue-list", "cue-render"), ("cue-", "click-behavior", "layout-feedback")),
     (("tooltip",), ("shared-tooltip", "launcher-keycaps")),
@@ -133,7 +133,7 @@ def select_packs(paths: list[str], *, release: bool = False) -> dict:
             selected.add("tools")
             continue
         # Shared test infrastructure/locks/workflows can invalidate every gate.
-        if path.startswith(("scripts/test_", "scripts/run_", ".github/workflows/", "tests/e2e/", "tests/fixtures/")) or path in {"pyproject.toml", "uv.lock", "package.json", "pnpm-lock.yaml", "playwright.config.mjs"}:
+        if path.startswith(("scripts/test_", "scripts/run_", "scripts/browser_results", "scripts/check_test_gate", ".github/workflows/", "tests/e2e/", "tests/fixtures/")) or path in {"pyproject.toml", "uv.lock", "package.json", "pnpm-lock.yaml", "playwright.config.mjs"}:
             selected.update(ALL_MERGE)
             preview = True
             reasons.append(f"shared infrastructure: {path}")
@@ -145,7 +145,12 @@ def select_packs(paths: list[str], *, release: bool = False) -> dict:
                     selected.update(ALL_MERGE)
                     reasons.append(f"deleted/unavailable test source: {path}")
                     continue
-                owners = {python_pack(name) for name in source_test_ids(source)} - {"manual"}
+                ids = source_test_ids(source)
+                if not ids:
+                    selected.update(ALL_MERGE)
+                    reasons.append(f"unrecognized/dynamic test discovery: {path}")
+                    continue
+                owners = {python_pack(name) for name in ids} - {"manual"}
                 selected.update(owners)
             else:
                 owners = {node_pack(Path(path).name)}

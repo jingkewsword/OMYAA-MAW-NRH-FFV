@@ -223,3 +223,34 @@ docs 检查结果：0 新断链、14 个登记历史断链，但还有 1 个结�
 后续顺序：先恢复完整 Chromium/CI 验收并校准分片和预算，再跑 Linux/macOS 进程与媒体/实际打包；核对 GitHub 保护规则，将汇总 `Required test gate` 设为 required。此阶段 CI 配置只是已提交的实现，不能冒充实际远端结果。
 
 原始证据位于 `.artifacts/fixture-refactor/summary.json`、`.artifacts/test-workflow/3e125ce66216/`、`9092281d980b/` 与 `7f5f2c56cb70/user-stop.json`；第一次缺 soundfile 和第二次 Pages 断言失败均保留。完整日志只定向读取，阶段导出不提交媒体、venv、bundle 或个人绝对路径。
+
+## 第二阶段开发发现与阶段保存（2026-10-13）
+
+接续基线 `0735166b3206d53259053b5d69388d6871420082`，维护者授权继续推进，随后要求阶段性提交、推送与本地 docs 更新。实施前预期已写入[计划](../../../plans/TEST_SUITE_GOVERNANCE.md#第二阶段预期与验收)。一个 Sol 子代理只读审查入口与 CI；主代理集成修复并核验实际文件和结果。
+
+本阶段没有再删除产品行为测试。重点是完整浏览器预算及测试结果可信度：测试组织如果能把“没执行”变成绿灯，增加数量也无法守住产品边界。
+
+| 发现 / 预期 | 实际改动与结果 | 未完成边界 |
+| --- | --- | --- |
+| 完整 Chromium 超出开发反馈预算 | 新增可复用四片 CI，独立机器各 2 workers、900s，保留文件隔离。实际 Playwright 全集 794 例，四片 200/198/217/179，集合无重无漏 | 只验证发现与分配，未执行真实四片；没有证明墙钟、CPU 或 RSS 改善 |
+| 部分执行可能被当作完整成功 | 完整发现 → 分片计划 → 实际 JSON 检查 → 同 SHA / 配置 / 范围的四片汇总；缺片、重复、失败、skip、retry、空完整集和脏 scope 故障注入均被拒绝 | 小型真实 Playwright fixture 验证 CLI 语义，未代替 794 例真实浏览器运行 |
+| 聚焦与未执行报告假绿 | `--forbid-only` 同时用于发现与执行；运行必须每个计划 ID 实际成功一次；`--list` 的空 results 不算通过 | 保留拒绝 .only 的真实 CLI 回归；不放宽 retry 使失败消失 |
+| 发布可能绕过质量失败 | 原 `!cancelled()` 条件只约束 Windows success；现显式要求 test-quality、browser-gates 和 Windows success，打包也先等待质量与浏览器汇总 | 发布条件契约通过，未创建 tag 或运行真实发布 |
+| selector 缺失输出被当作 false | 汇总严格校验 11 个 flag，并拒绝失败、取消、意外 skip 的 required job | 远端 CI 和 branch protection 设置尚未验收 |
+| 混合消费者漏选 | export / gap 族补 waveform-history，gap 另补 waveform-deletion；保留现有真实用户操作与导出断言 | 没有按每个便宜案例增加路径规则，后续新增未知路径仍保守扩大 |
+| AST 无法看到动态 unittest | pack 加载后按实际 ID 分组；变更无法静态判断的模块时扩大 required 组。全发现集合归属与合成动态模块回归通过 | 动态发现不再静默省略；不引入新的永久 loader 框架 |
+| 发布平台生命周期缺口 | Windows 与辅助平台发布校验补 lifecycle；Python required 同时拒绝 expected failure；Node required 拒绝空集 | Linux/macOS 真实进程树与实际发布产物未验证 |
+
+最新针对性验证运行 63 项，全部通过、0 skip，内部 60.728s、外层 65.05s。涵盖 browser_results、test_workflow、run_tests_runner、packaging_contract 与 release_notes；不是 63 个真实浏览器旅程。小型 CLI fixture 只有四个纯断言，用来验证 Playwright 发现、文件分片、实际结果和 `.only` 拒绝。
+
+证据路径：
+
+- 63 项 required 回归：`.artifacts/checks/20261013T091912Z-a77fcb2e/result.json`。
+- ruff：`.artifacts/checks/20261013T092021Z-0d4a3342/result.json`，通过。
+- 三份工作流 actionlint：最新 `.artifacts/checks/20261013T092857Z-6271dffc/result.json`，通过；未启用 ShellCheck/Pyflakes。
+- 文档：`.artifacts/checks/20261013T092901Z-14b6b880/result.json`，0 新断链、0 结构错误；14 个已登记历史断链保留。`git diff --check` 通过。
+- 794 例发现与分片：`.artifacts/checks/20261013T091658Z-07a2128f/result.json`、`.artifacts/phase2/discovery/summary.json`，后者明确 `runtime_complete=false`；各片完整/分片发现 JSON 保留。
+
+首轮 packaging/release 回归 `.artifacts/checks/20261013T091356Z-77a2ed10/` 有 22 个系统 Temp 权限错误，以及一个沿用旧发布条件文本的断言失败。22 个错误不能归因产品；改用仓库私有 Temp 与正常本机权限复验，旧条件断言改为必要准入契约，最终上述 63 项全通过。保留首轮结果，避免把环境失败隐藏或重复重建依赖。
+
+阶段保存后接续顺序：在固定、干净的提交上执行代表性 Windows 分片；再取得远端四片和汇总实际结果，记录每片耗时与资源；完成 Linux/macOS 生命周期、媒体与实际打包。运行过程中不改变 HEAD，发现成功或单片成功都不能宣称全套通过。只有取得实际 CI 后才校准片数/时间预算；required 保护设置是仓库外配置，仍需独立确认。原第一阶段中“本轮未实现分片”描述的是当时状态，当前实现与验收以上表为准。

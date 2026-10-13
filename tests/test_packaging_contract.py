@@ -502,8 +502,12 @@ class PackagingContractTests(CompactContainerAssertions, unittest.TestCase):
         self.assertIn("scripts/prepare_release_notes.py", workflow)
         self.assertIn("gh release edit", workflow)
         self.assertIn("--notes-file release-notes.md", workflow)
-        # publish 必须同时满足 tag 触发 + Windows 构建成功，否则 dispatch 会误发 Release
-        self.assertIn("startsWith(github.ref, 'refs/tags/v') && !cancelled() && needs.build-windows.result == 'success'", workflow)
+        # tag、质量、完整浏览器和 Windows 构建必须都成功；状态函数不能绕过质量失败。
+        publish = workflow[workflow.index("  publish:"):]
+        for clause in ("startsWith(github.ref, 'refs/tags/v')", "!cancelled()",
+                       "needs.test-quality.result == 'success'", "needs.browser-gates.result == 'success'",
+                       "needs.build-windows.result == 'success'"):
+            self.assertIn(clause, publish)
         # 不完整构建警告：needs 上下文只提供单数 result（矩阵 job 的聚合结果），
         # 复数 results 不是有效属性，会让警告永不触发
         self.assertIn("needs.build-aux.result == 'failure'", workflow)
@@ -629,7 +633,12 @@ class PackagingContractTests(CompactContainerAssertions, unittest.TestCase):
         self.assertNotIn("dtolnay/rust-toolchain@stable", workflow)
         self.assertIn("uv sync --group build --group test --frozen", workflow)
         self.assertIn("scripts/test_workflow.py --stage merge --pack common --pack media --pack long-media --pack tools", workflow)
-        self.assertIn("needs: [test-quality, build-windows, build-aux]", workflow)
+        self.assertIn("needs: [test-quality, browser-gates, build-windows, build-aux]", workflow)
+        publish = workflow[workflow.index("  publish:"):]
+        self.assertIn("needs.test-quality.result == 'success'", publish)
+        self.assertIn("needs.browser-gates.result == 'success'", publish)
+        windows = workflow[workflow.index("  build-windows:"):workflow.index("  build-aux:")]
+        self.assertIn("--pack tools --pack lifecycle", windows)
         self.assertIn("pyproject.toml", workflow)
         self.assertIn("github.ref_name", workflow)
         self.assertIn(r's/^version = "\(.*\)"$/\1/p', workflow)

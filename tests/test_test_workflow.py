@@ -5,6 +5,7 @@ import contextlib
 import io
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -12,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests"))
 from scripts import run_tests
+from scripts import test_policy
 from scripts.test_policy import ALL_MERGE, PYTHON_PACKS, select_packs
 
 
@@ -41,6 +43,13 @@ class TestWorkflowTests(unittest.TestCase):
         for path in ("web/editor/state/editor-state.js", "web/editor/unknown-module.js"):
             self.assertIn("editor-e2e", select_packs([path])["packs"])
 
+    def test_export_and_gap_keep_the_mixed_waveform_consumer(self):
+        consumer = "tests/e2e/waveform-history.spec.mjs"
+        for path in ("web/editor/io/editor-export-timeline.js", "web/editor/ui/editor-export-menus.js", "web/shared/gap-remove-core.js"):
+            with self.subTest(path=path):
+                plan = select_packs([path])
+                self.assertTrue("editor-e2e" in plan["packs"] or consumer in plan["e2e_specs"])
+
     def test_every_discovered_case_belongs_to_exactly_one_pack(self):
         def normalize(name):
             return name.removeprefix("tests.")
@@ -59,6 +68,23 @@ class TestWorkflowTests(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(run_tests.main(["--required"]), 1)
                 self.assertEqual(run_tests.main([]), 0)
+
+    def test_dynamic_discovery_is_loaded_and_its_change_broadens(self):
+        area = ROOT / ".artifacts/dynamic-test-fixtures"
+        area.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=area) as directory:
+            root = Path(directory)
+            (root / "tests").mkdir()
+            source = root / "tests/test_dynamic.py"
+            source.write_text("# tests are produced by a factory\n", encoding="utf-8")
+            case = type("DynamicCase", (unittest.TestCase,), {
+                "__module__": "tests.test_dynamic", "test_boundary": lambda self: None})
+            loaded = unittest.defaultTestLoader.loadTestsFromTestCase(case)
+            with patch.object(run_tests, "ROOT", root), patch.object(unittest.TestLoader, "loadTestsFromName", return_value=loaded):
+                self.assertEqual([test.id() for test in run_tests.cases(run_tests.pack_suite("common"))],
+                                 ["tests.test_dynamic.DynamicCase.test_boundary"])
+            with patch.object(test_policy, "__file__", str(root / "scripts/test_policy.py")):
+                self.assertTrue(ALL_MERGE.issubset(select_packs(["tests/test_dynamic.py"])["packs"]))
 
 
 if __name__ == "__main__":
