@@ -66,7 +66,9 @@ async function runScenario(kind, scenario, action = 'stop') {
   const evidence = join(root, 'evidence');
   mkdirSync(evidence);
   const bystander = await startBystander();
-  const child = spawn(process.execPath, [driver, kind, action], { cwd: root, env: {
+  const readinessTimeoutMs = process.platform === 'win32' ? 10_000 : 1_500;
+  const scenarioDeadlineMs = readinessTimeoutMs + 8_000;
+  const child = spawn(process.execPath, [driver, kind, action, String(readinessTimeoutMs)], { cwd: root, env: {
     ...process.env, MAW_E2E_PYTHON: scenario === 'missing-command' ? join(root, 'missing-python')
       : process.env.MAW_E2E_PYTHON || 'python', MAW_SCROLL_EVIDENCE: evidence,
   }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'], windowsHide: true });
@@ -90,7 +92,7 @@ async function runScenario(kind, scenario, action = 'stop') {
   const timer = setTimeout(() => {
     timedOut = true;
     try { killOwned(child.pid); } catch {}
-  }, scenario === 'hang' ? 52000 : 15000);
+  }, scenarioDeadlineMs);
   try {
     const result = await exited;
     assert.equal(timedOut, false, `driver exceeded deadline: ${output}`);
@@ -105,7 +107,7 @@ async function runScenario(kind, scenario, action = 'stop') {
       assert.equal(result.code, { SIGINT: 130, SIGTERM: 143, SIGBREAK: 149, SIGHUP: 129 }[action.slice(7)]);
     } else if (action === 'exit') assert.equal(result.code, 0, output);
     else if (action === 'exception') assert.equal(result.code, 1, output);
-    assert.ok(Date.now() - started < (scenario === 'hang' ? 52000 : 15000));
+    assert.ok(Date.now() - started < scenarioDeadlineMs);
     const dir = join(evidence, readdirSync(evidence)[0]);
     const { port } = JSON.parse(readFileSync(join(dir, 'runtime.json')));
     if (scenario !== 'missing-command') {
@@ -131,7 +133,7 @@ async function runScenario(kind, scenario, action = 'stop') {
 for (const kind of ['scroll', 'helpers']) {
   for (const scenario of ['ready', 'startup-error', 'wrapper-exit', 'missing-command', 'hang']) {
     test(`${kind}: ${scenario} reaps descendants, frees port, and returns within deadline`,
-      { timeout: 58000 }, () => runScenario(kind, scenario));
+      { timeout: 24_000 }, () => runScenario(kind, scenario));
   }
   for (const action of ['exit', 'exception', 'signal:SIGINT', 'signal:SIGTERM',
     process.platform === 'win32' ? 'signal:SIGBREAK' : 'signal:SIGHUP', 'hold']) {

@@ -14,6 +14,40 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  test-quality:
+    name: Release test quality (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.28.4
+          run_install: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - run: uv sync --frozen --group test --group dev --no-group build
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-noto-cjk
+      - run: uv run --no-sync python scripts/test_workflow.py --stage release
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: release-test-evidence
+          path: |
+            .artifacts/
+            test-results/
+          include-hidden-files: true
+          retention-days: 14
   # Windows 是发布门禁：它失败则整个 Release 不发布；
   # macOS / Linux 失败仅提醒（publish 追加警告），不阻断。
   build-windows:
@@ -72,7 +106,7 @@ jobs:
         run: python scripts/sync_launcher_version.py --check
 
       - name: Install locked dependencies
-        run: uv sync --group build --frozen
+        run: uv sync --group build --group test --frozen --group dev
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v6
@@ -86,15 +120,14 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
       - name: Build web bundles
-        # bundle 是构建产物（不入库）：Python 全量测试与打包都会读取，在测试前
-        # 显式构建（pnpm install 的 postinstall 也会构建，这里保持显式不依赖钩子）。
-        run: pnpm install --frozen-lockfile && pnpm run build
+        # The test workflow builds once; PyInstaller consumes the same bundles.
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
-      - name: Run packaging contract tests
-        run: uv run python scripts/run_tests.py tests/test_packaging_contract.py
+      - name: Install real test media tools
+        run: choco install ffmpeg -y --no-progress
 
-      - name: Run Python tests
-        run: uv run python scripts/run_tests.py
+      - name: Required Python and media tests
+        run: uv run --no-sync python scripts/test_workflow.py --stage merge --pack common --pack media --pack long-media --pack tools
 
       - name: Download embedded Python bootstrap assets
         run: |
@@ -104,7 +137,7 @@ jobs:
 
       - name: Build MAW bundle
         shell: pwsh
-        run: .\scripts\build-windows.ps1 -SkipTests
+        run: .\scripts\build-windows.ps1 -SkipTests -PreparedEnvironment
 
       - name: Verify bundled FAQ
         shell: pwsh
@@ -317,7 +350,7 @@ jobs:
         run: python scripts/sync_launcher_version.py --check
 
       - name: Install locked dependencies
-        run: uv sync --group build --frozen
+        run: uv sync --group build --group test --frozen --group dev
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v6
@@ -331,12 +364,8 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
       - name: Build web bundles
-        # bundle 是构建产物（不入库）：Python 全量测试与打包都会读取，在测试前
-        # 显式构建（pnpm install 的 postinstall 也会构建，这里保持显式不依赖钩子）。
-        run: pnpm install --frozen-lockfile && pnpm run build
-
-      - name: Run packaging contract tests
-        run: uv run python -m unittest tests/test_packaging_contract.py
+        # The test workflow builds once; PyInstaller consumes the same bundles.
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Install Linux CJK test font
         if: matrix.platform == 'linux'
@@ -344,8 +373,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y fonts-noto-cjk
 
-      - name: Run Python tests
-        run: uv run python -m unittest discover -s tests -p "test_*.py"
+      - name: Install Linux test FFmpeg
+        if: matrix.platform == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install macOS test FFmpeg
+        if: matrix.platform == 'macos'
+        run: brew install ffmpeg
+
+      - name: Required Python and media tests
+        run: uv run --no-sync python scripts/test_workflow.py --stage merge --pack common --pack media --pack long-media --pack tools
 
       # ---------- macOS 专属 ----------
 
@@ -543,7 +580,7 @@ jobs:
 
       - name: Build AppImage
         if: matrix.platform == 'linux'
-        run: bash scripts/build-appimage.sh
+        run: bash scripts/build-appimage.sh --prepared-environment
 
       - name: Verify AppImage output
         if: matrix.platform == 'linux'
@@ -640,7 +677,7 @@ jobs:
   publish:
     name: Publish GitHub Release
     if: ${{ startsWith(github.ref, 'refs/tags/v') && !cancelled() && needs.build-windows.result == 'success' }}
-    needs: [build-windows, build-aux]
+    needs: [test-quality, build-windows, build-aux]
     runs-on: ubuntu-latest
     permissions:
       contents: write

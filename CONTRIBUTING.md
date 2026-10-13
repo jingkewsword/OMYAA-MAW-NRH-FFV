@@ -20,7 +20,7 @@
 
 文档分类、稳定入口、临时输出与退役遵循[文档约定](docs/README.md#doc-policy)。文档变更在根目录运行 `python scripts/check_docs.py`；新增检查的回归使用 `python scripts/run_tests.py tests/test_docs_check.py`。Agent 执行时按根规则用 `scripts/run_check.py` 包装命令。
 
-- Python：遵循现有代码风格；安装环境后使用 `uv run --no-sync python scripts/run_tests.py`。
+- Python：遵循现有代码风格；开发先跑 `uv run --no-sync python scripts/test_workflow.py --stage dev`，再跑修改涉及的测试。分支合并使用 `--stage merge --base-ref origin/main`；分组、环境与 required skip 规则见[测试分层](docs/INDEX.md#engineering-test-workflow)。
 - 前端（web/）：LF 换行，保持既有缩进风格
 
 所有文本使用 UTF-8 与 LF。前端装配检查、类型检查与浏览器回归见 [开发概览](docs/INDEX.md#engineering-development)。

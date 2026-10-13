@@ -30,13 +30,14 @@ def usable_bash() -> str | None:
         " && command -v grep >/dev/null"
     )
     try:
-        proc = subprocess.run([candidate, "-c", probe], capture_output=True, text=True, timeout=60)
+        proc = subprocess.run([candidate, "-c", probe], capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=5)
     except (OSError, subprocess.TimeoutExpired):
         return None
     return candidate if proc.returncode == 0 else None
 
 
-BASH = usable_bash()
+BASH = None
 
 
 def manifest_line(name: str, digest: str) -> str:
@@ -44,11 +45,17 @@ def manifest_line(name: str, digest: str) -> str:
     return f"{digest}  {name}\n"
 
 
-@unittest.skipUnless(BASH, "需要能读取仓库路径且带 sha256sum/awk/grep 的 bash（WSL bash 看不到 C:\\ 路径）")
 class VerifySha256ScriptTests(unittest.TestCase):
     """Given the checksum verifier, When the manifest lists bare file names while the archive sits
     in a sub-directory, Then it validates the target by the path it was given, and fails loudly on
     tampered content, a missing entry, or a missing file."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        global BASH
+        BASH = usable_bash()
+        if not BASH:
+            raise unittest.SkipTest("需要能读取仓库路径且带 sha256sum/awk/grep 的 bash")
 
     def setUp(self) -> None:
         tmp = tempfile.TemporaryDirectory()

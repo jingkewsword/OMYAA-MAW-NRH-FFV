@@ -193,3 +193,33 @@ docs 检查结果：0 新断链、14 个登记历史断链，但还有 1 个结�
 维护者要求将本次测试梳理保存为独立分支，并把推荐测试规则放入 plan，待后续讨论通过再升级流程。已建立 `docs/test-suite-governance-20261013`，基于本次固定审计提交。当前 fork/main 与 upstream/main 的实时引用均仍为该基线。
 
 分支内容限定为本计划、审计记录、主题索引与日志索引；不提交 `.artifacts/`、测试音频、依赖环境、采集器或本地输出。计划已明确标记“待讨论，未批准实施”，并列出讨论事项及通过后的实施/验收/规则升级路径。
+
+
+## 第一阶段开发发现与结论（2026-10-13）
+
+维护者随后授权按 plan 在同一分支实施，一个 Sol 子代理负责媒体/HTTP 夹具。因额度接近触底，维护者要求先整理提交；以下记录是阶段验收，不表示完整集合或远端 CI 已成功。现行入口见[测试分层](../../../INDEX.md#engineering-test-workflow)，剩余验收见[计划](../../../plans/TEST_SUITE_GOVERNANCE.md)。
+
+1. **冻结 cache 解析无需生成源媒体。** 原读取测试只需现存文件 stat 与 cache 内容；它们现为 6 个独立 frozen cases，缺 NumPy/FFmpeg 的 probe 仍 6/6 通过。全部原 `self.assert*` 表达式保留，另外检查 30 分钟 cache 的 8 个 wave/spectral/loudness mip header。短生成 2 例、长生成 1 例独立；生成器输出指向私有临时目录，不改写提交中的 cache 或维护者已有 WAV。长例只合成一次 tone30，17.636s；仍保留约 1.8GiB 的真实长生成成本，没有声称内核内存降低。
+2. **HTTP 空等可直接消除。** 6 个文件的 37 处启动线程仅增加 `poll_interval=0.01`；去掉该参数后的 AST 与原文件一致。154 个 HTTP/媒体/取消/SSE/探活用例通过、无 skip。相同 102 例单次 A/B：57.648s → 39.953s，减少 30.7%；CPU 36.109s → 35.641s，RSS 187.523 → 192.582MiB。没有证明 p95 或内存改善。审计原 104 例含额外 2 个 bind-only 测试，本次 A/B 不包含它们，不混用分母。
+3. **失活期限不是业务边界。** 真实 helper 的 30s/45s 默认仍保留，合成进程矩阵显式注入 Windows 10s / POSIX 1.5s。Windows 生命周期组 30/30、无 skip，71.81s；其中仍含所有 22 个进程树/端口/旁观进程保护场景。Linux/macOS 尚未在本机验证，不把 Windows 结果外推。
+4. **required skip 揭露了缺依赖。** 首轮 common 无业务失败，却有 11 个 energy-valley skip。实际是 NumPy 与 soundfile 一起导入，提示文本只写 NumPy。补 soundfile 后全部执行；test 组为 NumPy/Pillow/soundfile，dev 组提供 ruff，不引入 ASR 模型。锁文件仍为原 185 个 package name/version，uv 更新了锁格式与解析元数据；`uv lock --check` 通过。
+5. **分组避免维护精细映射的膨胀。** cheap Python/Node 常驻，只有昂贵边界按类/方法或文件分流；全发现集合与 pack 并集一致、无重复。新用例默认 common。叶子浏览器改动选择消费者族，共享 schema/state/host/history/boot/布局、测试基础设施和未知改动扩大。纯 docs/网站/工具各走对应入口。required 依赖/编码器/fixture skip、Node/Playwright skip 和 timeout 阻断；明确的 OS 不适用项保留原因。
+6. **只退役有替代证明的实现形态。** 删除完整 188 项清单快照和 gap core 函数/缓存变量命名集合这两个方法；依赖装配、路径逃逸、冻结无 Node、持久化/格式、安全和 CSS 混合契约保留。原审计的命名等价/显示错误故障注入证明区分能力，当前全体 Node common 行为集通过；本轮没有把剩余混合静态文件整批删除。
+7. **复用构建也要验证新鲜度。** test workflow 每批构建 editor/Launcher 一次；CI install 禁用重复 postinstall。Windows `-PreparedEnvironment`、AppImage `--prepared-environment` 在复用前执行两个 bundle `--check`；缺失/过期会失败。独立手动打包仍准备并构建。PowerShell 对依赖、freezer、测试与 PyInstaller 非零退出显式失败。实际 PyInstaller/AppImage 产物尚未验证。
+
+| 已执行集合 | 结果 | 范围说明 |
+| --- | --- | --- |
+| 开发核心 | Python 65、Node 33 通过 | 两项子命令 0.66s / 1.58s |
+| Python common | 2017 运行，0 失败/错误，4 平台不适用 | 3 Windows symlink 权限 + 1 非 Windows opener；131.86s 是该次环境测量，不当作稳定预算 |
+| Python media / long-media | 66 / 2 通过、无 skip | 44.42s / 22.75s |
+| Node common / browser / tools | 584 / 5 / 27 用例，无 skip/失败 | JUnit 结果已验证；browser 使用真实 Chromium |
+| HTTP/browser smoke | 13 通过 | 两个真实 server/文件事务 specs，24.23s 外层 |
+| Python tools | 101 运行，0 失败/错误 | Unix checksum 的 Windows 不适用单独记录；首轮 Pages 构建断言失败修复后复验通过 |
+| lint / workflow / 文档 | ruff、actionlint v1.7.12、YAML/表达式、锁一致性、文档结构与归档通过 | actionlint 本机没有启用 ShellCheck/Pyflakes；打包脚本另做 PowerShell parse/Bash -n |
+| 完整 Chromium | **未完成** | 794 例，停止前进度标记 317/794；外层 489.36s，按维护者要求终止自身进程树，退出 1 来自主动终止，不作为业务失败 |
+
+完整浏览器运行尚未形成最终 Playwright 统计，因此进度标记既不是通过数，也不是完成数。这个运行再次说明：全量浏览器不适合每次开发调用。当前 900s 完整门禁是否适合 Linux CI 仍需实测；若不足，应先按 spec 分片并汇总所有片的 required 结果，不能放宽为“部分通过即可”。本轮未实现该分片方案，也没有绕过完整验收。
+
+后续顺序：先恢复完整 Chromium/CI 验收并校准分片和预算，再跑 Linux/macOS 进程与媒体/实际打包；核对 GitHub 保护规则，将汇总 `Required test gate` 设为 required。此阶段 CI 配置只是已提交的实现，不能冒充实际远端结果。
+
+原始证据位于 `.artifacts/fixture-refactor/summary.json`、`.artifacts/test-workflow/3e125ce66216/`、`9092281d980b/` 与 `7f5f2c56cb70/user-stop.json`；第一次缺 soundfile 和第二次 Pages 断言失败均保留。完整日志只定向读取，阶段导出不提交媒体、venv、bundle 或个人绝对路径。

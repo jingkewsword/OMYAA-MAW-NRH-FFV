@@ -81,6 +81,11 @@
 
 ## 工程说明
 
+<a name="engineering-test-workflow"></a>
+### 测试分层与准入
+
+[打开正文](engineering/TEST_WORKFLOW.md)
+
 <a name="engineering-long-commands"></a>
 ### Agent 长命令防卡死指南（Windows / PowerShell 5.1）
 

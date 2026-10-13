@@ -27,7 +27,8 @@ export function syntheticScrollProject(count = 107, mode = 'main', paired = fals
   };
 }
 
-export async function startScrollFixture({ count = 107, mode = 'main', paired = false, blank = false } = {}) {
+export async function startScrollFixture({ count = 107, mode = 'main', paired = false, blank = false, readinessTimeoutMs = 45_000 } = {}) {
+  if (!Number.isFinite(readinessTimeoutMs) || readinessTimeoutMs <= 0) throw new RangeError('readinessTimeoutMs must be finite and positive');
   const evidenceRoot = resolve(process.env.MAW_SCROLL_EVIDENCE || 'output/playwright/cue-scroll');
   mkdirSync(evidenceRoot, { recursive: true });
   const directory = mkdtempSync(join(evidenceRoot, 'fixture-'));
@@ -80,7 +81,7 @@ export async function startScrollFixture({ count = 107, mode = 'main', paired = 
   })();
   const url = `http://127.0.0.1:${port}/`;
   try {
-    const deadline = Date.now() + 45000;
+    const deadline = Date.now() + readinessTimeoutMs;
     while (Date.now() < deadline) {
       if (launchError) throw launchError;
       if (serverHasExited(child)) throw new Error(`Synthetic server exited: ${child.exitCode ?? child.signalCode}. Output tail: ${output.text()}`);

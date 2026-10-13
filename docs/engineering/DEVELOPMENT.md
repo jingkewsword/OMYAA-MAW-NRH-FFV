@@ -93,7 +93,8 @@ node --test tests/test_editor_script_syntax.mjs tests/test_editor_script_order.m
 node --test tests/test_editor_utils.mjs tests/test_waveform_js.mjs
 node --test tests/test_editor_state.mjs tests/test_editor_commands.mjs
 pnpm run typecheck
-uv run --no-sync python scripts/run_tests.py
+uv run --no-sync python scripts/test_workflow.py --stage dev
+uv run --no-sync python scripts/test_workflow.py --stage merge --base-ref origin/main
 git diff --check
 ```
 
@@ -101,7 +102,7 @@ git diff --check
 
 ### 浏览器回归
 
-`tests/e2e/helpers.mjs` 默认以 `uv run --frozen python` 启动服务并清理继承的 PYTHONPATH；明确设置 `MAW_E2E_PYTHON` 时用指定解释器。Agent 已有环境时可设置该变量避免测试 helper 再同步依赖。
+`tests/e2e/helpers.mjs` 默认以 `uv run --no-sync python` 启动服务并清理继承的 PYTHONPATH；明确设置 `MAW_E2E_PYTHON` 时用指定解释器。测试前由开发者安装环境；[测试分层](../INDEX.md#engineering-test-workflow)定义开发、按影响合并与发布入口。
 
 Windows 使用 `scripts/run-e2e.ps1`，脚本检查 quapeaks，并在需要时按 lockfile 准备临时隔离环境。浏览器受限时可设置 `MAW_E2E_CHROMIUM_PATH` 指向已安装的 Chromium 系浏览器。
 

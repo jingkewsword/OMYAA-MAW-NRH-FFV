@@ -96,7 +96,8 @@ class PackagingContractTests(CompactContainerAssertions, unittest.TestCase):
         portable_step = workflow.index("- name: Add portable editor page")
         self.assertLess(build_step, portable_step)
         root_build = workflow[build_step:workflow.index("- name: Install website dependencies")]
-        self.assertIn("pnpm install --frozen-lockfile && pnpm run build", root_build)
+        self.assertIn("pnpm install --frozen-lockfile --ignore-scripts", root_build)
+        self.assertIn("pnpm run build", root_build)
         self.assertNotIn("working-directory: website", root_build)
 
     def test_launcher_version_matches_project_metadata(self) -> None:
@@ -574,7 +575,7 @@ class PackagingContractTests(CompactContainerAssertions, unittest.TestCase):
         script = read_text("scripts/build-windows.ps1")
 
         self.assertIn("uv sync --group build --frozen", script)
-        self.assertIn("uv run --group build pyinstaller", script)
+        self.assertIn("uv run --no-sync --group build pyinstaller", script)
         self.assertIn("MAW.spec", script)
         self.assertIn("dist\\MAW\\MAW.exe", script)
         self.assertIn("$FaqSource", script)
@@ -626,8 +627,9 @@ class PackagingContractTests(CompactContainerAssertions, unittest.TestCase):
         self.assertIn("windows-2022", workflow)
         self.assertNotIn("actions/setup-node@v4", workflow)
         self.assertNotIn("dtolnay/rust-toolchain@stable", workflow)
-        self.assertIn("uv sync --group build --frozen", workflow)
-        self.assertIn("tests/test_packaging_contract.py", workflow)
+        self.assertIn("uv sync --group build --group test --frozen", workflow)
+        self.assertIn("scripts/test_workflow.py --stage merge --pack common --pack media --pack long-media --pack tools", workflow)
+        self.assertIn("needs: [test-quality, build-windows, build-aux]", workflow)
         self.assertIn("pyproject.toml", workflow)
         self.assertIn("github.ref_name", workflow)
         self.assertIn(r's/^version = "\(.*\)"$/\1/p', workflow)
@@ -666,7 +668,7 @@ class PackagingContractTests(CompactContainerAssertions, unittest.TestCase):
         self.assertNotIn("actions/setup-node@v4", workflow)
         self.assertNotIn("dtolnay/rust-toolchain@stable", workflow)
         self.assertIn("ref: ${{ github.event.pull_request.head.sha || github.sha }}", workflow)
-        self.assertIn("uv sync --group build --frozen", workflow)
+        self.assertIn("uv sync --group build --group test --frozen", workflow)
         self.assertIn("scripts\\build-windows.ps1 -SkipTests", workflow)
         self.assertIn("dist\\MAW\\MAW.exe", workflow)
         self.assertNotIn("MOSE", workflow)

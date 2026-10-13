@@ -58,13 +58,14 @@ uv run python edit.py --blank
 以下是维护者准备环境和手动验证的命令；Agent 执行遵循本节后面的命令与日志纪律。
 
 ```powershell
-uv sync
+uv sync --group test
 pnpm install --frozen-lockfile
 pnpm run check:editor
 pnpm run typecheck
 node --test tests\test_editor_script_syntax.mjs tests\test_editor_script_order.mjs
 node --test tests\test_editor_utils.mjs tests\test_waveform_js.mjs
-uv run python scripts/run_tests.py
+uv run --no-sync python scripts/test_workflow.py --stage dev
+uv run --no-sync python scripts/test_workflow.py --stage merge --base-ref origin/main
 git diff --check
 ```
 
@@ -74,6 +75,8 @@ git diff --check
 新增业务逻辑写入所属领域模块，避免再扩大入口。目录位置不决定执行顺序。
 
 ### Agent 命令执行：避免 uv 超时卡住
+
+开发核心、修改影响、合并与发布 required 规则见[测试分层](docs/INDEX.md#engineering-test-workflow)。`scripts/test_workflow.py` 内部复用有界 `run_check.run`，可直接作为统一入口；其他测试命令仍用下面的外层包装。`--plan-only` 先确认范围，未知改动扩大，依赖 skip 不能算通过。新增重测试必须说明独有故障边界、成本与触发条件，优先复用已有夹具和行为表。
 
 - `uv run` 每次执行都会重新解析并可能同步环境，冷启动时远超命令工具的默认超时（约 2 分钟），表现为命令"卡住"且长时间无输出。
 - Agent 自动化执行的命令一律使用 `uv run --no-sync`（环境由开发者手动 `uv sync` 维护）。
@@ -89,7 +92,7 @@ git diff --check
 - 对页面 / 内联脚本做成员断言的测试类，继承 `tests/compact_assertions.py` 的 `CompactContainerAssertions` 混入：失败信息压缩为「needle + 容器规模」，比截断更好读。`tests/test_compact_assertions_usage.py` 会扫出漏掉混入的类（漏了直接红灯），压缩行为本身由 `tests/test_run_tests_runner.py` 守门。
 - 后台长驻进程（serve.py、http.server 等）不要用会等待进程树的方式启动：优先用独立终端，或把输出重定向到文件后再以端口探活（如 `Invoke-WebRequest` 轮询），用完必须终止进程。曾发生后台 server 挂住会话 2 小时以上的事故。
 - 禁止用 bash 后台 `&`（含 `nohup ... &`）启动任何长驻进程：stdin 仍挂在会话管道上永不 EOF，即使重定向 stdout/stderr，命令工具也会等待进程树而永久阻塞（2026-10-09 `python -m http.server ... &` 事故，探活成功后仍卡死）。需要本地服务一律 paseo 独立终端启动、用完 kill；一次性验证（如本地打开生成的 HTML）优先静态校验，不起服务。
-- 已知时长：全量 Python 套件约 110s、单条 e2e spec 约 2 分钟，命令默认超时 120s 处于临界；这些命令显式设置更大的超时，或按文件拆分执行。
+- 不依赖固定全量耗时估算：各组按 `test_workflow.py` 的期限执行并留存实测。合成失活测试的短期限只用于 harness；真实应用服务保持原默认期限。
 - 新 worktree 先检查现有环境：锁文件一致时可只读复用主仓库 Python venv，显式设置 `MAW_TEST_PYTHON`（Node 跨语言测试）和 `MAW_E2E_PYTHON`（e2e）；不在共享 venv 上同步不同依赖。Node 在当前 worktree 按锁文件安装一次，e2e 还需浏览器。依赖缺失只记录一次并修复对应层，禁止为同一失败循环重建环境；e2e / Node 的 uv 默认路径使用 `--no-sync`。
 - PowerShell 内联脚本（`node -e "..."`、多层嵌套引号）极易解析失败；复杂逻辑写成临时脚本文件再执行。命令输出为空时，先怀疑参数与引号，而不是重跑同一命令。
 

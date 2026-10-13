@@ -13,7 +13,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  selection:
+    runs-on: ubuntu-latest
+    outputs:
+      preview: ${{ steps.plan.outputs.preview }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - id: plan
+        env:
+          TEST_BASE_REF: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [[ -z "$TEST_BASE_REF" ]]; then
+            python scripts/test_workflow.py --stage release --plan-only --github-output "$GITHUB_OUTPUT"
+          else
+            python scripts/test_workflow.py --stage merge --base-ref "$TEST_BASE_REF" --plan-only --github-output "$GITHUB_OUTPUT"
+          fi
   build-windows:
+    needs: selection
+    if: needs.selection.outputs.preview == 'true'
     name: Build Windows x64 MAW-lite preview
     runs-on: windows-2022
     env:
@@ -41,7 +63,7 @@ jobs:
         run: python scripts/sync_launcher_version.py --check
 
       - name: Install locked dependencies
-        run: uv sync --group build --frozen
+        run: uv sync --group build --group test --frozen
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v6
@@ -55,15 +77,11 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
       - name: Build web bundles
-        # bundle 是构建产物（不入库）：Python 全量测试与打包都会读取，在测试前
-        # 显式构建（pnpm install 的 postinstall 也会构建，这里保持显式不依赖钩子）。
-        run: pnpm install --frozen-lockfile && pnpm run build
+        # Preview checks packaging once; application tests belong to the test gate.
+        run: pnpm install --frozen-lockfile --ignore-scripts && pnpm run build
 
       - name: Run packaging contract tests
-        run: uv run python scripts/run_tests.py tests/test_packaging_contract.py
-
-      - name: Run Python tests
-        run: uv run python scripts/run_tests.py
+        run: uv run --no-sync python scripts/run_check.py --timeout 60 -- uv run --no-sync python scripts/run_tests.py --required tests/test_packaging_contract.py
 
       - name: Download embedded Python bootstrap assets
         run: |
@@ -73,7 +91,7 @@ jobs:
 
       - name: Build MAW bundle
         shell: pwsh
-        run: .\scripts\build-windows.ps1 -SkipTests
+        run: .\scripts\build-windows.ps1 -SkipTests -PreparedEnvironment
 
       - name: Verify bundled FAQ
         shell: pwsh

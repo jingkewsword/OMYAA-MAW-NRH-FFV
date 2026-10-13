@@ -66,7 +66,7 @@ jobs:
             website/pnpm-lock.yaml
 
       - name: Build web bundles
-        run: pnpm install --frozen-lockfile && pnpm run build
+        run: pnpm install --frozen-lockfile --ignore-scripts && pnpm run build
 
       - name: Install website dependencies
         working-directory: website

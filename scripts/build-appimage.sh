@@ -18,16 +18,27 @@ command -v pnpm >/dev/null 2>&1 || {
     echo "错误：构建 web bundle 需要 pnpm（先安装 Node.js >=22.13 与 pnpm）。" >&2
     exit 1
 }
-pnpm install --frozen-lockfile
-pnpm run build
+if [[ $# -eq 1 && "${1:-}" == "--prepared-environment" ]]; then
+    node scripts/build-editor.mjs --check
+    node scripts/build-launcher.mjs --check
+    UV_RUN=(uv run --no-sync)
+elif [[ $# -eq 0 ]]; then
+    pnpm install --frozen-lockfile --ignore-scripts
+    pnpm run build
+    uv sync --group build --frozen
+    UV_RUN=(uv run --no-sync)
+else
+    echo "Usage: $0 [--prepared-environment]" >&2
+    exit 2
+fi
 
 echo "==> 1/6 PyInstaller 构建 dist/MAW"
 # 生成托管 Runtime 的 frozen requirements txt（MAW.spec datas 条件追加打包）；
 # 主清单与 CPU 变体统一由 freezer 模块执行（与 build-windows.ps1 /
 # release.yml / 源码模式自动补齐完全同源）。
 mkdir -p build
-uv run python -m maw.runtimes.freezer freeze --force
-uv run --group build pyinstaller --noconfirm --clean MAW.spec
+"${UV_RUN[@]}" python -m maw.runtimes.freezer freeze --force
+"${UV_RUN[@]}" --group build pyinstaller --noconfirm --clean MAW.spec
 # PyInstaller 6 places datas under _internal in an onedir bundle. Keep the
 # user-facing FAQ at the AppImage root as well, where users can find it easily.
 cp "FAQ-常见问题.txt" "dist/MAW/FAQ-常见问题.txt"
