@@ -545,11 +545,12 @@ class PackagingContractTests(CompactContainerAssertions, unittest.TestCase):
 
         self.assertIn('cp "FAQ-常见问题.txt" "dist/MAW/FAQ-常见问题.txt"', script)
         self.assertIn('dist/MAW/ffmpeg/GPLv3.txt', script)
-        self.assertIn('dist/MAW/ffmpeg/SOURCE.txt', script)
+        helper = read_text("scripts/appimage_support.py")
+        self.assertIn('"SOURCE.txt"', helper)
         self.assertIn('https://www.gnu.org/licenses/gpl-3.0.txt', script)
         self.assertIn('raw.githubusercontent.com/spdx/license-list-data', script)
-        self.assertIn('Build provider: https://github.com/BtbN/FFmpeg-Builds', script)
-        self.assertIn('Archive SHA-256: $FFMPEG_TARBALL_SHA256', script)
+        self.assertIn('Build provider: https://github.com/BtbN/FFmpeg-Builds', helper)
+        self.assertIn('Archive SHA-256: {digest}', helper)
 
     def test_appimage_build_pins_btbn_rolling_latest_not_dated_autobuild(self) -> None:
         """Given the AppImage build script, When it downloads BtbN ffmpeg, Then it uses the permanent latest-release asset with upstream checksum verification instead of a dated pin that upstream prunes."""
@@ -557,17 +558,22 @@ class PackagingContractTests(CompactContainerAssertions, unittest.TestCase):
 
         self.assertIn("releases/latest/download/$FFMPEG_ASSET", script)
         self.assertIn("releases/latest/download/checksums.sha256", script)
-        self.assertIn(
-            'bash "$REPO_ROOT/scripts/verify_sha256.sh" "$FFMPEG_CHECKSUMS" "$FFMPEG_ASSET" "$FFMPEG_TARBALL"',
-            script,
-        )
+        helper = read_text("scripts/appimage_support.py")
+        self.assertIn('"verify_sha256.sh"', helper)
+        self.assertIn('prepare-ffmpeg', script)
         # 上游清单只写裸文件名，sha256sum -c 按当前目录解析，而归档落在 build-appimage/
         # 子目录，必然报 No such file or directory（2026-09-10 Linux 打包即因此失败）。
         self.assertNotIn("sha256sum -c", script)
-        self.assertIn("curl --fail --location --silent --show-error", script)
-        self.assertIn('| grep -q "$FFMPEG_BRANCH"', script)
+        self.assertIn('"curl", "--fail", "--location", "--silent", "--show-error"', helper)
         self.assertNotIn("/releases/download/autobuild-", script)
         self.assertNotIn("FFMPEG_SHA256=", script)
+
+    def test_appimage_build_explicitly_uses_the_fixed_official_runtime(self) -> None:
+        script = read_text("scripts/build-appimage.sh")
+        self.assertIn('--runtime-file "$APPIMAGE_RUNTIME"', script)
+        self.assertIn('appimage_support.py verify', script)
+        self.assertIn('"$BUILD_DIR/build-manifest.json"', script)
+        self.assertNotIn('AppImageKit/releases/download/continuous', script)
 
     def test_local_build_script_invokes_uv_and_pyinstaller_for_maw_onedir(self) -> None:
         """Given a Windows developer build, When the script is read, Then it builds dist/MAW/MAW.exe."""

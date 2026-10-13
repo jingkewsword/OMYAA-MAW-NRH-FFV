@@ -1,0 +1,103 @@
+name: Verify Linux AppImage
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'scripts/appimage*'
+      - 'scripts/build-appimage.sh'
+      - 'scripts/verify_sha256.sh'
+      - 'scripts/licenses/appimage-runtime.txt'
+      - 'tests/test_appimage_support.py'
+      - 'tests/test_packaging_contract.py'
+      - 'tests/test_verify_sha256_script.py'
+      - 'MAW.spec'
+      - '.github/workflows/appimage-check.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  appimage:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.28.4
+          run_install: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: pnpm
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - name: Prepare Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg squashfs-tools xvfb \
+            libnss3 libasound2 libxcomposite1 libxdamage1 libxrandr2 \
+            libxtst6 libxkbcommon0 libxkbcommon-x11-0 libpci3 libgl1 libegl1 \
+            libopengl0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-xkb1
+          uv sync --group build --frozen
+          pnpm install --frozen-lockfile
+      - name: Verify dependency behavior and packaging contract
+        run: |
+          uv run --no-sync python scripts/run_check.py --timeout 180 -- \
+            uv run --no-sync python scripts/run_tests.py \
+            tests/test_appimage_support.py tests/test_verify_sha256_script.py tests/test_packaging_contract.py
+      - name: Build and verify AppImage provenance
+        run: |
+          uv run --no-sync python scripts/run_check.py --timeout 1200 -- bash scripts/build-appimage.sh
+      - name: Verify conflict libraries and bundled FFmpeg
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d)
+          cd "$work"
+          "$GITHUB_WORKSPACE/build-appimage/MAW-Linux-x86_64.AppImage" --appimage-extract > extract.log
+          if find squashfs-root/_internal -maxdepth 1 \( -name 'libstdc++.so*' -o -name 'libgcc_s.so*' -o -name 'libgbm.so*' -o -name 'libreadline.so*' \) | grep -q .; then
+            echo 'Conflicting host libraries were bundled'; exit 1
+          fi
+          LD_LIBRARY_PATH="$PWD/squashfs-root/_internal" squashfs-root/ffmpeg/bin/ffmpeg -version
+          LD_LIBRARY_PATH="$PWD/squashfs-root/_internal" squashfs-root/ffmpeg/bin/ffprobe -version
+      - name: Verify extract-and-run import and GUI startup
+        run: |
+          set -euo pipefail
+          image="$PWD/build-appimage/MAW-Linux-x86_64.AppImage"
+          "$image" --appimage-extract-and-run --smoke-import
+          set +e
+          timeout 20 xvfb-run -a "$image" --appimage-extract-and-run > build-appimage/gui-smoke.log 2>&1
+          status=$?
+          set -e
+          if [ "$status" -ne 124 ]; then
+            cat build-appimage/gui-smoke.log; exit 1
+          fi
+          echo 'Extract-and-run remained alive; desktop interaction remains a separate check.'
+      - name: Check native FUSE separately when available
+        run: |
+          if [ -r /dev/fuse ] && [ -w /dev/fuse ]; then
+            env -u APPIMAGE_EXTRACT_AND_RUN build-appimage/MAW-Linux-x86_64.AppImage --smoke-import
+            echo 'Native FUSE import passed.' > build-appimage/native-fuse-status.txt
+          else
+            echo 'NOT VERIFIED: runner has no usable /dev/fuse; WSL or desktop verification is required.' | tee build-appimage/native-fuse-status.txt
+          fi
+      - name: Save verification evidence without publishing a release
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: appimage-verification-${{ github.sha }}
+          path: |
+            build-appimage/MAW-Linux-x86_64.AppImage
+            build-appimage/*build.json
+            build-appimage/build-manifest.json
+            build-appimage/*smoke.log
+            build-appimage/native-fuse-status.txt
+            .artifacts/checks/
+          if-no-files-found: warn
