@@ -93,6 +93,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: appimage-verification-${{ github.sha }}
+          include-hidden-files: true
           path: |
             build-appimage/MAW-Linux-x86_64.AppImage
             build-appimage/*build.json
