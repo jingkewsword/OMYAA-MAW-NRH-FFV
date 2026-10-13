@@ -133,6 +133,11 @@
 
 ## 共享计划
 
+<a name="plan-test-suite-governance"></a>
+### 测试成本与长期治理
+
+[打开方案](plans/TEST_SUITE_GOVERNANCE.md)
+
 这些阶段方案保留原始基线与状态；是否继续实施以本分支代码、后续记录和维护者确认为准。编辑器设置方案已有实施记录，旧前端方案不代表当前代码布局。
 
 <a name="plan-ai-processing-review"></a>
