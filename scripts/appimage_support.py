@@ -263,6 +263,12 @@ def verify_appimage(appimage: Path, manifest: Path) -> None:
         raise ValueError("Unsupported build manifest schema")
     require_static_x86_64(appimage)
     runtime = expected["toolchain"]["runtime"]
+    # Authenticate the external runtime bytes before executing any image flags.
+    # The independent build manifest supplies the boundary; the runtime's
+    # reported payload offset is checked below only after its identity is known.
+    digest = runtime_digest(appimage, runtime["size"])
+    if digest != runtime["sha256"]:
+        raise ValueError("Embedded runtime bytes differ from fixed official runtime")
     version = run([str(appimage.resolve()), "--appimage-version"])
     if version != runtime["version"]:
         raise ValueError("Embedded runtime version differs from fixed build runtime")
@@ -271,9 +277,6 @@ def verify_appimage(appimage: Path, manifest: Path) -> None:
     offset = int(run([str(appimage.resolve()), "--appimage-offset"]))
     if offset != runtime["size"]:
         raise ValueError("Embedded runtime length differs from fixed build runtime")
-    digest = runtime_digest(appimage, offset)
-    if digest != runtime["sha256"]:
-        raise ValueError("Embedded runtime bytes differ from fixed official runtime")
     with tempfile.TemporaryDirectory(prefix="appimage-verification-") as temporary:
         run([str(appimage.resolve()), "--appimage-extract"], cwd=Path(temporary))
         extracted = Path(temporary) / "squashfs-root"

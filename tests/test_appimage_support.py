@@ -9,6 +9,7 @@ import struct
 import tarfile
 import tempfile
 import unittest
+from unittest import mock
 from unittest.mock import patch
 
 from scripts import appimage_support as support
@@ -225,6 +226,21 @@ class StaticRuntimeTests(unittest.TestCase):
             changed[80] ^= 1
             path.write_bytes(changed)
             self.assertNotEqual(support.runtime_digest(path, len(original)), expected)
+
+    def test_untrusted_runtime_is_rejected_before_any_execution(self) -> None:
+        contents = self.runtime_with_digest_slot()
+        with tempfile.TemporaryDirectory() as temporary:
+            image = Path(temporary) / "image.AppImage"
+            image.write_bytes(contents)
+            manifest = Path(temporary) / "expected.json"
+            support.write_json(manifest, {
+                "schema": "maw.appimage-build.v1",
+                "toolchain": {"runtime": {"size": len(contents), "sha256": "0" * 64}},
+            })
+            with mock.patch.object(support, "run") as execute:
+                with self.assertRaisesRegex(ValueError, "runtime bytes differ"):
+                    support.verify_appimage(image, manifest)
+                execute.assert_not_called()
 
 
 if __name__ == "__main__":
