@@ -274,3 +274,18 @@ docs 检查结果：0 新断链、14 个登记历史断链，但还有 1 个结�
 `8f9b75b` 干净分片复验 199 通过、1 失败、0 skip，真实执行 293.88s；`.artifacts/test-workflow/47a94b91c961/` 和 `.artifacts/checks/20261014T111655Z-d660fe4b/result.json` 保留失败。随后原比例加全 run 行高校正的完整 ASS 试验仍 35/36，记录 `20261014T112416Z-6757a538`，该方案也未采用。真实斜体 `actualBoundingBoxRight` 超出 advance 约 6px，而旧行位图只留 2px，符合被裁切的 4px 差异；按 inkPadding 扩大位图后，原/新两场景通过（`20261014T112818Z-dc028ad8`），完整 ASS 36/36、无 skip（`20261014T112915Z-d2e7506b`，137.97s）。最终 raster 3/3 和 typecheck 为 `20261014T112913Z-409a0cc3` / `20261014T112914Z-6fecbd27`。
 
 最终固定、干净提交 `79833e2` 的完整 Windows 第 1/4 片 **200/200 通过、0 skip、0 unexpected、0 flaky**。构建、类型、完整/分片发现均成功；实际 Playwright 执行 279.81s，外层整个分片流程 287.8s。`browser-run.json` 明示 clean=true、完整范围 editor-e2e、planned_ids=passed_ids=200。证据 `.artifacts/test-workflow/22b18bd16c5b/`、`.artifacts/checks/20261014T113242Z-921fafa3/result.json` 和 `20261014T113250Z-b3ee902f/result.json`。下一提交仅记录该结果，未改变受检源码；远端四片按推送提交独立执行，不把单片当全套通过。
+
+### 远端首轮与定向修复
+
+正常推送 `fee114c`，在用户 fork 建立 [Draft PR #2](https://github.com/jingkewsword/OMYAA-MAW-NRH-FFV/pull/2)。[Editor run 38558144389](https://github.com/jingkewsword/OMYAA-MAW-NRH-FFV/actions/runs/38558144389) 四片分别196/200、190/198、214/217、176/179，共776/794、18失败，0 skip/flaky；缺少通过的片被汇总和 Required test gate 正确拒绝。文档、Ruff及Linux业务组全部通过；Windows lifecycle 20/30。Windows preview run 38558144361 构建、包装契约、EXE自动烟测成功，仅上传Actions artifact；未合并、创建tag或Release。原始失败报告下载到本轮忽略证据区。
+
+| 风险族 | 发现与修复 | 实际定向证据 |
+| --- | --- | --- |
+| 入口迁移与前置条件 | 双语设置从旧wrapper转到现行双语页；AI整理从匹配checkbox迁到AI任务；普通匹配保留真实计算取消/重启；批量fixture补合成key，保存自定义提示原文而请求时trim；toolbar tooltip读取data-title；帮助与原窗并存后显式关闭原窗 | Windows首轮11/14后剩余3/3；Linux同14项全部通过，原用户操作、保存/undo/取消断言保留 |
+| 文本查找焦点 | 打开后的50ms自动focus覆盖紧接着的Ctrl+F；改为显示窗口时同步聚焦，不增加sleep掩盖竞态 | 原快捷键/regex/替换旅程在Windows和Linux通过 |
+| Windows监督环境 | scroll夹具把私有LOCALAPPDATA等同时给PowerShell控制器和应用， hosted环境下10个scroll场景未启动；控制器使用正常OS环境，C#显式把原隔离环境交给应用，Job所有权/默认期限不变 | 本机28项生命周期通过；新增父环境标记不得进入应用、LOCALAPPDATA必须私有的检查，scroll ready通过；远端仍需第二轮确认 |
+| 非UTF控制台 | Windows job未设置UTF，失败输出的✖导致cp1252异常，summary未保存；入口像run_check一样显式UTF，Windows job与夹具也设置UTF | 模拟cp1252控制台的失败仍返回1、保存原诊断和summary；汇总/入口15项通过，无skip |
+| 字体依赖 | Linux无本机Arial，@font-face只写local Arial时请求失败 | 增加已安装Liberation Sans的真实local候选；同一字体度量回归实际通过，未skip |
+| 像素参考与遮挡 | libass跨画布大小或位置会改变少量抗锯齿，不能以原生/guard byte完全一致判断几何丢失。原生渲染保留，guard与同画布独立viewport clip做精确byte比较；zero outside/3px原阈值保留，新增真实offscreen故障检出。时钟参考只校准pos/an，保留原始时间/fs/t/fade，并检出重启时钟故障。11行M在合成图被副轨遮挡而扫描成14段，独立原ASS层实际为11/3/3，按独立层验证行数，合成位置/越界仍验证 | 隔离Linux容器38项完整ASS/相关字体预览全部通过，另14项交互全部通过；原794场景保留，未引入新场景计数或放宽容差 |
+
+Linux38：`.artifacts/checks/20261014T123957Z-dc207183/result.json`，105.28s；Linux14：`20261014T124532Z-15b34a31`，25.95s。Windows生命周期28：`20261014T120855Z-3198bdfa`，62.55s；3项交互修正后：`20261014T120958Z-5704990f`。汇总/入口15：`20261014T124543Z-3c9f53c0`。Ruff、typecheck、bundle新鲜度均通过。测试容器独立、源码只读挂载，不改变主机/Ubuntu全局依赖；安装中代理不可达和Node20不支持pnpm的环境错误仅修复对应层。完整最终Windows分片和第二轮远端四片仍待执行；上述定向结果不能替代它们。

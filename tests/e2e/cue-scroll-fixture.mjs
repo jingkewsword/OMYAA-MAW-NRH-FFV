@@ -53,6 +53,7 @@ export async function startScrollFixture({ count = 107, mode = 'main', paired = 
   const log = createWriteStream(join(directory, 'server.log'));
   const child = spawnServerProcess(command, args, { env: {
     PATH: process.env.PATH, LANG: 'zh_CN.UTF-8', PYTHONUNBUFFERED: '1', PYTHONDONTWRITEBYTECODE: '1',
+    PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8',
     ...(process.platform === 'win32' ? {
       SystemRoot: process.env.SystemRoot, WINDIR: process.env.WINDIR,
       TEMP: directory, TMP: directory,
@@ -60,7 +61,11 @@ export async function startScrollFixture({ count = 107, mode = 'main', paired = 
     MAW_ENV_FILE: emptyEnv, MAW_APP_DATA_ROOT: settings,
     LOCALAPPDATA: settings, XDG_CONFIG_HOME: settings, XDG_DATA_HOME: settings,
     PYINSTALLER_RESET_ENVIRONMENT: '1',
-  }, stdio: ['ignore', 'pipe', 'pipe'] });
+  },
+  // PowerShell's OS/module cache uses the normal Windows environment. The
+  // actual application still receives only the isolated environment above.
+  ...(process.platform === 'win32' ? { supervisorEnv: process.env } : {}),
+  stdio: ['ignore', 'pipe', 'pipe'] });
   const output = createOutputTail();
   child.stdout.on('data', chunk => output.append(chunk));
   child.stderr.on('data', chunk => output.append(chunk, 'stderr'));

@@ -134,6 +134,9 @@ def prepare_browser(name, command, directory, shard, specs, selection, results):
 
 
 def main(argv=None) -> int:
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--stage", choices=("dev", "merge", "release"), default="dev")
     parser.add_argument("--component", choices=("all", "python", "editor", "launcher"), default="all")

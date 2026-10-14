@@ -14,10 +14,33 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests"))
 from scripts import run_tests
 from scripts import test_policy
+from scripts import test_workflow
 from scripts.test_policy import ALL_MERGE, PYTHON_PACKS, select_packs
 
 
 class TestWorkflowTests(unittest.TestCase):
+    def test_failed_gate_on_legacy_console_still_saves_summary(self):
+        import json
+        area = ROOT / '.artifacts/console-fixtures'
+        area.mkdir(parents=True, exist_ok=True)
+        buffer = io.BytesIO()
+        console = io.TextIOWrapper(buffer, encoding='cp1252')
+        failure = {'gate': 'synthetic', 'exit_code': 1, 'diagnostics': ['✖ synthetic failure'], 'tail': []}
+        with tempfile.TemporaryDirectory(dir=area) as directory:
+            with patch.object(test_workflow, 'ROOT', Path(directory)), \
+                    patch.object(test_workflow, 'commands', return_value=[('synthetic', [], 1)]), \
+                    patch.object(test_workflow, 'execute', return_value=failure), \
+                    patch.object(test_workflow.os, 'chdir'), \
+                    patch.object(sys, 'stdout', console), patch.dict('os.environ'):
+                self.assertEqual(test_workflow.main(['--stage', 'merge', '--pack', 'lifecycle',
+                                                    '--changed', 'tests/test_e2e_process_lifecycle.mjs']), 1)
+            summary_path = next(Path(directory).rglob('summary.json'))
+            summary = json.loads(summary_path.read_text(encoding='utf-8'))
+            self.assertEqual(summary['exit_code'], 1)
+            self.assertEqual(summary['results'][0]['diagnostics'], ['✖ synthetic failure'])
+        console.flush()
+        self.assertIn('✖ synthetic failure', buffer.getvalue().decode('utf-8'))
+
     def test_docs_and_website_do_not_select_application(self):
         self.assertEqual(select_packs(["docs/user/WORKFLOW.md"])["packs"], ["docs"])
         self.assertEqual(select_packs(["website/src/pages/index.astro"])["packs"], ["docs", "website"])

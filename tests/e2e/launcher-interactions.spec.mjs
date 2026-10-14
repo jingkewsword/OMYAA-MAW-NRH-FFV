@@ -1653,6 +1653,7 @@ test('batch start delegates output allocation and batchDone reconciles every ter
   // Given: three queued files and a bridge spy that leaves allocation to the batch backend.
   await page.goto(`file://${launcherPath}`);
   await page.waitForFunction(() => window.MAWLauncher?.config?.postprocessProviders?.length > 0);
+  await page.locator('#apiKey').fill('synthetic-batch-key');
   await page.locator('#batchMode').click();
   await page.evaluate(() => {
     window.__batchCalls = [];
@@ -1706,6 +1707,7 @@ test('batchDone fails rows that never reported when the batch was not cancelled'
   // Given: two queued files started in batch mode.
   await page.goto(`file://${launcherPath}`);
   await page.waitForFunction(() => window.MAWLauncher?.config?.postprocessProviders?.length > 0);
+  await page.locator('#apiKey').fill('synthetic-batch-key');
   await page.locator('#batchMode').click();
   await page.evaluate(() => {
     window.MAWLauncher.callBackend = async () => ({ ok: true });
@@ -1845,21 +1847,21 @@ test('AI cleanup notes persist in the automatic plan and reach the manual reques
       return original(method, payload);
     };
   });
-  await page.locator('#toolboxMatchTab').click();
-  await expect(page.locator('#postprocessAiCleanupNotesField')).toBeHidden();
-  await page.locator('#postprocessAiCleanup').check();
-  await expect(page.locator('#postprocessAiCleanupNotesField')).toBeVisible();
-  await page.locator('#postprocessAiCleanupNotes').fill('  保留所有数字\n去除试麦  ');
+  await page.locator('#toolboxLlmTab').click();
+  await expect(page.locator('#postprocessCleanupOptions')).toBeHidden();
+  await page.locator('#postprocessOperation').selectOption('ai_cleanup');
+  await expect(page.locator('#postprocessCleanupOptions')).toBeVisible();
+  await page.locator('#postprocessPrompt').fill('  保留所有数字\n去除试麦  ');
   await expect.poll(() => page.evaluate(() => window.__notesPlans.at(-1)?.steps
-    .find(s => s.id === 'match')?.aiCleanupNotes)).toBe('保留所有数字\n去除试麦');
+    .find(s => s.id === 'cleanup')?.customPrompt)).toBe('  保留所有数字\n去除试麦  ');
   await page.locator('#toolboxInputPath').fill('source.mosp');
-  await page.locator('#postprocessScriptPath').fill('script.txt');
-  await page.locator('#runScriptMatch').click();
+  await page.locator('#postprocessCleanupScriptPath').fill('script.txt');
+  await page.locator('#runLlmPostprocess').click();
   await expect.poll(() => page.evaluate(() => window.__cleanupPayload?.notes)).toBe('保留所有数字\n去除试麦');
-  await page.locator('#postprocessAiCleanup').uncheck();
-  await expect(page.locator('#postprocessAiCleanupNotesField')).toBeHidden();
-  await page.locator('#postprocessAiCleanup').check();
-  await expect(page.locator('#postprocessAiCleanupNotes')).toHaveValue('  保留所有数字\n去除试麦  ');
+  await page.locator('#postprocessOperation').selectOption('proofread');
+  await expect(page.locator('#postprocessCleanupOptions')).toBeHidden();
+  await page.locator('#postprocessOperation').selectOption('ai_cleanup');
+  await expect(page.locator('#postprocessPrompt')).toHaveValue('  保留所有数字\n去除试麦  ');
 });
 
 async function prepareDeferredAiLauncher(page, entry) {
@@ -1885,13 +1887,13 @@ async function prepareDeferredAiLauncher(page, entry) {
       return original(method, payload);
     };
   });
-  await page.locator(entry === 'cleanup' ? '#toolboxMatchTab' : '#toolboxLlmTab').click();
+  await page.locator('#toolboxLlmTab').click();
   await page.locator('#toolboxInputPath').fill('D:\\Demo\\source.mosp');
   if (entry === 'cleanup') {
-    await page.locator('#postprocessAiCleanup').check();
-    await page.locator('#postprocessScriptPath').fill('D:\\Demo\\script.txt');
+    await page.locator('#postprocessOperation').selectOption('ai_cleanup');
+    await page.locator('#postprocessCleanupScriptPath').fill('D:\\Demo\\script.txt');
   }
-  return page.locator(entry === 'cleanup' ? '#runScriptMatch' : '#runLlmPostprocess');
+  return page.locator('#runLlmPostprocess');
 }
 
 async function sendAiLifecycleEvents(page, index, events) {

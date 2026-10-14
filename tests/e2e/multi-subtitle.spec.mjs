@@ -171,11 +171,12 @@ test('creates an empty secondary track on enable and imports subtitles optionall
   await dropFiles(page, [srtSpec('main.srt', mainSrt)]);
   const dialogs = [];
   page.on('dialog', async (dialog) => { dialogs.push(dialog.message()); await dialog.dismiss(); });
-  await expect(page.locator('#project-multi-subtitle-settings')).toBeHidden();
+  await expect(page.locator('#editor-settings-page-multi-subtitle')).toBeHidden();
   await expect(page.locator('#multi-subtitle-toggle-label'))
     .toHaveAttribute('data-title', '开启后显示副字幕轨，可手动添加或导入第二条字幕。');
   await setProjectTrackEnabled(page, 'multi-subtitle-toggle', true);
-  await expect(page.locator('#project-multi-subtitle-settings')).not.toHaveAttribute('hidden');
+  await openMultiSubtitleSettings(page);
+  await expect(page.locator('#editor-settings-page-multi-subtitle')).toBeVisible();
   await openSettingsPage(page, 'project-tracks');
   await expect(page.locator('#multi-subtitle-empty-hint')).toBeVisible();
   await closeSettingsPanels(page);
@@ -205,7 +206,7 @@ test('creates an empty secondary track on enable and imports subtitles optionall
   });
   expect(importGap.above).toBeGreaterThanOrEqual(8);
   expect(importGap.horizontalGap).toBeGreaterThanOrEqual(8);
-  await page.locator('#project-multi-subtitle-settings').screenshot({ path: test.info().outputPath('empty-track-settings.png') });
+  await page.locator('#editor-settings-page-multi-subtitle').screenshot({ path: test.info().outputPath('empty-track-settings.png') });
   const chooserPromise = page.waitForEvent('filechooser');
   await page.locator('#multi-subtitle-import').click();
   const chooser = await chooserPromise;

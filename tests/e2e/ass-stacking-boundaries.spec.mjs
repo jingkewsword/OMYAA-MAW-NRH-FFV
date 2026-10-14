@@ -23,7 +23,7 @@ test.afterAll(async () => { await server?.stop(); cleanupTempDir(tempDir); });
 
 const cue = (id, text, start = 0, end = 4000) => ({ id, text, start, end });
 const cases = [
-  { name: 'static single-line control', times: [1000] },
+  { name: 'static single-line control', times: [1000], faultControl: true },
   { name: '1440p preview and burn share the native frame coordinate system',
     width: 2560, height: 1440, times: [1000] },
   { name: 'main explicit multiline', main: 'Main one\nMain two\nMain three', times: [1000] },
@@ -304,7 +304,13 @@ for (const fixture of cases) test(fixture.name, async ({ page }, testInfo) => {
       expect.soft(track.outside, `Canvas track ${index} loses no painted pixels`).toBe(0);
     }
     expect.soft(pixels.outside, 'libass loses no painted pixels').toBe(0);
-    expect.soft(pixels.sha256, 'guard-band translation preserves native libass pixels').toBe(pixels.guardCropSha256);
+    expect.soft(pixels.guardViewportSha256, 'independent viewport clipping preserves all in-frame libass pixels').toBe(pixels.guardCropSha256);
+    if (fixture.faultControl) {
+      const clippedSource = frame.ass.replace(/\\pos\([^,]+,([^)]+)\)/u, '\\pos(0,$1)');
+      expect(clippedSource).not.toBe(frame.ass);
+      const clipped = libass(clippedSource, time, testInfo, `fault-offscreen-${time}`);
+      expect(clipped.outside, 'the independent guard detects actual offscreen paint').toBeGreaterThan(0);
+    }
     expect.soft(pixels.fontSelections.length, 'libass records an actual selected font').toBeGreaterThan(0);
     const guard = pixels.guardBox;
     if (guard) {
@@ -322,7 +328,7 @@ for (const fixture of cases) test(fixture.name, async ({ page }, testInfo) => {
         frame.tracks[index].box[coordinate] - pixels.tracks[key].box[coordinate]),
       `${key} Canvas/libass edge ${coordinate} agrees within 3 native pixels`).toBeLessThanOrEqual(3);
     }
-    frames.push({ canvas: metrics, libass: pixels });
+    frames.push({ canvas: metrics, libass: pixels, ass: frame.ass });
   }
   if (fixture.verifyGrowth) for (const engine of ['canvas', 'libass']) {
     const box = frame => engine === 'canvas' ? frame.canvas.tracks[0].box : frame.libass.tracks.main.box;
@@ -338,11 +344,19 @@ for (const fixture of cases) test(fixture.name, async ({ page }, testInfo) => {
     await configure(page, { main: 'M', extension: 'W', overlaySegments: [cue('overlay-control', 'O')] });
     const small = await capture(page, 1000);
     const reference = libass(small.ass, 1000, testInfo, 'fit-single-line-control');
+    // A secondary cue may follow its own preset over the main cue. Measure
+    // each independent layer to distinguish occlusion from dropped glyphs.
+    const isolated = ['main', 'extension', 'overlay'].map((role, layer) => {
+      const source = tall.ass.split('\n').filter(line => !line.startsWith('Dialogue: ')
+        || line.startsWith(`Dialogue: ${layer},`)).join('\n');
+      return libass(source, 1000, testInfo, `fit-isolated-${role}`).tracks[role];
+    });
     for (const engine of ['canvas', 'libass']) {
       const full = engine === 'canvas' ? tall.canvas.tracks : ['main', 'extension', 'overlay'].map(k => tall.libass.tracks[k]);
       const base = engine === 'canvas' ? small.tracks : ['main', 'extension', 'overlay'].map(k => reference.tracks[k]);
       const ratios = full.map((track, i) => (track.bands[0][1] - track.bands[0][0]) / (base[i].bands[0][1] - base[i].bands[0][0]));
-      expect.soft(full.map(t => t.bands.length), `${engine} preserves every multiline glyph band`).toEqual([11, 3, 3]);
+      expect.soft((engine === 'canvas' ? full : isolated).map(t => t.bands.length),
+        `${engine} preserves every multiline glyph band`).toEqual([11, 3, 3]);
       // 组缩放只作用于主/叠加；副字幕跟随其样式预设，字号不被整组缩小。
       expect.soft(ratios[0], `${engine} actually shrinks oversized group`).toBeLessThan(0.95);
       expect.soft(ratios[1], `${engine} secondary keeps its preset size`).toBeGreaterThan(0.95);
@@ -731,13 +745,33 @@ test('exported layout slices preserve the original main cue nonlinear and fade c
   });
   const rows = [];
   for (const time of [750, 1750]) {
+    // Position may change with layout. Put the independent original-clock
+    // reference at that position so font raster phase is held constant; never
+    // copy the candidate's timestamps, font-size, transform or fade tags.
+    const timestamp = text => text.split(':').reduce((value, part) => value * 60 + Number(part), 0) * 1000;
+    const active = sources.grouped.split('\n').filter(line => line.startsWith('Dialogue: 0,'))
+      .map(line => line.slice(10).split(','))
+      .find(fields => timestamp(fields[1]) <= time && time < timestamp(fields[2]));
+    const position = active.slice(9).join(',').match(/\\(?:an[1-9]|pos\([^)]+\))/gu);
+    expect(position?.some(tag => tag.startsWith('\\pos('))).toBe(true);
+    const alignedReference = sources.standalone.replace(/^Dialogue: 0,.*$/gmu, line => {
+      const fields = line.slice(10).split(',');
+      const text = fields.slice(9).join(',').replace(/\\(?:an[1-9]|pos\([^)]+\))/gu, '');
+      return 'Dialogue: ' + fields.slice(0, 9).join(',') + ',{' + position.join('') + '}' + text;
+    });
     const grouped = libass(sources.grouped, time, testInfo, `candidate-clock-grouped-${time}`);
-    const original = libass(sources.standalone, time, testInfo, `candidate-clock-standalone-${time}`);
+    const original = libass(alignedReference, time, testInfo, `candidate-clock-standalone-${time}`);
     rows.push({ time, grouped: grouped.tracks.main, original: original.tracks.main });
     expect(grouped.tracks.main.painted, `main remains visible at ${time}ms`).toBeGreaterThan(30);
     expect(grouped.tracks.main.glyphSha256,
       `layout may move main, but must not restart its nonlinear transform/fade at ${time}ms`)
       .toBe(original.tracks.main.glyphSha256);
+    if (time === 750) {
+      const restartedSource = alignedReference.replace(/\\t\(0,1000,2,/gu, '\\t(500,1500,2,');
+      expect(restartedSource).not.toBe(alignedReference);
+      const restarted = libass(restartedSource, time, testInfo, 'candidate-clock-restarted');
+      expect(grouped.tracks.main.glyphSha256, 'a restarted transform remains observably different').not.toBe(restarted.tracks.main.glyphSha256);
+    }
   }
   writeFileSync(testInfo.outputPath('candidate-clock-comparison.json'), JSON.stringify(rows, null, 2));
   // This fixture changes the visible top-edge group at 500/1500ms. Merely

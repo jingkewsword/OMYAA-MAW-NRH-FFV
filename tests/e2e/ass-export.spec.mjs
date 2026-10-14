@@ -759,7 +759,7 @@ test('keeps ASS style actions and preview-mode hints attached to the active form
 
 test('refreshes inline font metrics and interpolates fs tags in native resolution', async ({ page }) => {
   await page.goto(server.url);
-  await page.addStyleTag({ content: '@font-face { font-family: "ASS Metric Test"; src: local("Arial"); size-adjust: 150%; }' });
+  await page.addStyleTag({ content: '@font-face { font-family: "ASS Metric Test"; src: local("Arial"), local("Liberation Sans"); size-adjust: 150%; }' });
   await page.evaluate(async () => { await document.fonts.load('20px "ASS Metric Test"'); });
   const ratios = await page.evaluate(() => {
     MaweBoot.DATA.media_metadata = { video_width: 640, video_height: 360 };

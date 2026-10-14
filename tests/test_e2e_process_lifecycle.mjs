@@ -71,6 +71,7 @@ async function runScenario(kind, scenario, action = 'stop') {
   const child = spawn(process.execPath, [driver, kind, action, String(readinessTimeoutMs)], { cwd: root, env: {
     ...process.env, MAW_E2E_PYTHON: scenario === 'missing-command' ? join(root, 'missing-python')
       : process.env.MAW_E2E_PYTHON || 'python', MAW_SCROLL_EVIDENCE: evidence,
+    MAW_LIFECYCLE_PARENT_ONLY: 'synthetic-supervisor-marker',
   }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'], windowsHide: true });
   let output = '';
   let message;
@@ -97,7 +98,7 @@ async function runScenario(kind, scenario, action = 'stop') {
     const result = await exited;
     assert.equal(timedOut, false, `driver exceeded deadline: ${output}`);
     if (scenario === 'ready' && action === 'stop') {
-      assert.equal(result.code, 0, output);
+      assert.equal(result.code, 0, message?.failure || output);
       assert.equal(message?.stopped, true);
     } else if (scenario !== 'ready') {
       assert.equal(result.code, 1, output);
@@ -111,6 +112,11 @@ async function runScenario(kind, scenario, action = 'stop') {
     const dir = join(evidence, readdirSync(evidence)[0]);
     const { port } = JSON.parse(readFileSync(join(dir, 'runtime.json')));
     if (scenario !== 'missing-command') {
+      if (kind === 'scroll') {
+        const environment = JSON.parse(readFileSync(join(dir, 'runtime-environment.json')));
+        assert.equal(environment.localAppData, join(dir, 'settings'));
+        assert.equal(environment.parentOnlyMarker, false, 'supervisor-only environment cannot reach the application');
+      }
       const pids = JSON.parse(readFileSync(join(dir, 'owned-pids.json')));
       const deadline = Date.now() + 2000;
       while (pids.some(alive) && Date.now() < deadline) await delay(25);

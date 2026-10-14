@@ -1008,8 +1008,8 @@
     setTimedTextEditReplaceExpanded(false);
     loadTimedTextEditTrack(currentTimedTextEditKind());
     MaweDom.timedTextEditModal.classList.add('show');
-    setTimeout(() => (MaweDom.timedTextEditDraft?.view === 'single'
-      ? MaweDom.timedTextEditSingleTextarea : MaweDom.timedTextEditRows.querySelector('textarea'))?.focus(), 50);
+    (MaweDom.timedTextEditDraft?.view === 'single'
+      ? MaweDom.timedTextEditSingleTextarea : MaweDom.timedTextEditRows.querySelector('textarea'))?.focus();
   }
 
 

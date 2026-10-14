@@ -137,6 +137,9 @@ jobs:
     if: needs.selection.outputs.lifecycle == 'true'
     runs-on: windows-latest
     timeout-minutes: 8
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
