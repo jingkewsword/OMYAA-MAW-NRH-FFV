@@ -87,14 +87,11 @@
     let ratio = 0;
     try {
       const mctx = ensureMeasureCtx();
-      // Chromium rounds the font box to CSS pixels. Measure at a larger
-      // reference size so that rounding does not shrink wide animated text.
-      const referenceSize = 4096;
-      mctx.font = fontSpec(style, referenceSize);
+      mctx.font = fontSpec(style, 100);
       const metrics = mctx.measureText('Mg');
       const box = (Number(metrics.fontBoundingBoxAscent) || 0)
         + (Number(metrics.fontBoundingBoxDescent) || 0);
-      if (box > 0) ratio = referenceSize / box;
+      if (box > 0) ratio = 100 / box;
     } catch {
       ratio = 0;
     }
@@ -267,7 +264,11 @@
     const outline = Math.max(0, Number(style.outline) || 0);
     const shadow = Math.max(0, Number(style.shadow) || 0);
     const borderBox = Math.round(Number(style.borderStyle) || 1) === 3;
-    const pad = Math.ceil(outline + shadow + 2);
+    // Italic glyphs can paint beyond the advance width. Keep that ink in the
+    // bitmap instead of clipping it at the generic two-pixel guard.
+    const measure = measurerFor(track, ratio);
+    const inkPadding = Math.max(2, ...line.items.map(item => measure(item.run, item.text).inkPadding));
+    const pad = Math.ceil(outline + shadow + inkPadding);
     const bodyWidth = Math.ceil(line.width);
     const bodyHeight = Math.ceil(line.ascent + line.descent);
     const bitmap = document.createElement('canvas');
