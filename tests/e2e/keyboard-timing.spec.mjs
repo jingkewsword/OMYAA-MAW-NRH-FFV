@@ -1226,6 +1226,17 @@ test('Shift+arrow keys snap selected subtitle boundaries to neighbors', async ({
 
 test('A/D adjusts a held subtitle block and a held shared boundary', async ({ page }) => {
   await loadAttachedCues(page, true);
+  await page.evaluate(() => {
+    MaweBoot.DATA.multi_subtitle = {
+      schema: 'moy.asr.multi_subtitle.v1', enabled: true, display_mode: 'both', bindings: [],
+      tracks: [{ id: 'held-extension', role: 'extension', name: 'Extension', language: 'English',
+        split_mode: 'word', segments: [
+          { id: 'held-extension-1', start: 5000, end: 10000, text: 'First extension' },
+          { id: 'held-extension-2', start: 10000, end: 18000, text: 'Second extension' },
+        ] }],
+    };
+    MaweCuePanel.renderAll({ waveform: 'full' });
+  });
   await toggleGlobalSettings(page);
   await openSettingsPage(page, 'special-edit');
   const step = page.locator('#cue-move-step');
@@ -1248,19 +1259,25 @@ test('A/D adjusts a held subtitle block and a held shared boundary', async ({ pa
   ]);
 
   // 新模式（中缝联动）下，按住中缝拖动区再按 D：共享边界联动移动。
-  const boundary = page.locator('.waveform-cue-boundary').first();
+  // Earlier frame cases save an extension track on this shared server. Its
+  // seam may appear first while the moved main seam crosses a waveform row.
+  const boundary = page.locator('.waveform-cue-boundary[data-track="main"][data-left-idx="0"]').first();
   await expect(boundary).toBeVisible();
   const boundaryBox = await boundary.boundingBox();
   expect(boundaryBox).not.toBeNull();
   await page.mouse.move(boundaryBox.x + boundaryBox.width / 2, boundaryBox.y + boundaryBox.height / 2);
   await page.mouse.down();
-  await expect(page.locator('#waveform-pane')).toHaveClass(/cue-drag-active/);
+  await expect(page.locator('#waveform-pane')).toHaveClass(/shared-boundary-drag-active/);
   await page.keyboard.press('d');
   await page.mouse.up();
   await expect.poll(() => readTimings(page)).toEqual([
     { start: 5100, end: 10200 },
     { start: 10200, end: 18000 },
     { start: 25000, end: 30000 },
+  ]);
+  await expect.poll(() => page.evaluate(() => MaweBoot.DATA.multi_subtitle.tracks[0].segments
+    .map(({ start, end }) => ({ start, end })))).toEqual([
+    { start: 5000, end: 10000 }, { start: 10000, end: 18000 },
   ]);
 });
 
