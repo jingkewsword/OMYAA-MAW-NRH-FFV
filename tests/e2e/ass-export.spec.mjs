@@ -919,6 +919,15 @@ test('offsets the opaque shadow and keeps the border box shadow unclipped', asyn
       red: bbox((r, g, b) => r > 200 && g < 40 && b < 40),
     };
   });
+  const renderedColourBBoxes = async (colours) => {
+    // Font/media readiness can defer the first Canvas paint on a fresh page.
+    // Require real pixels before comparing geometry; Infinity is not a box.
+    await expect.poll(async () => {
+      const boxes = await colourBBoxes();
+      return colours.every((colour) => Object.values(boxes[colour]).every(Number.isFinite));
+    }).toBe(true);
+    return colourBBoxes();
+  };
 
   // BorderStyle 1：影子剪影相对文字整体偏移 (shad, shad)，右下露边。
   await page.evaluate(() => {
@@ -932,7 +941,7 @@ test('offsets the opaque shadow and keeps the border box shadow unclipped', asyn
     MaweDom.overlayToggle.checked = true;
     MawePlaybackLoop.refreshSubtitlePreview(1000, 0);
   });
-  const opaque = await colourBBoxes();
+  const opaque = await renderedColourBBoxes(['text', 'shadowBox']);
   expect(opaque.shadowBox.minX).toBeGreaterThanOrEqual(opaque.text.minX + 14);
   expect(opaque.shadowBox.minY).toBeGreaterThanOrEqual(opaque.text.minY + 14);
   expect(opaque.shadowBox.maxY).toBeGreaterThan(opaque.text.maxY);
@@ -944,7 +953,7 @@ test('offsets the opaque shadow and keeps the border box shadow unclipped', asyn
     Object.assign(style, { borderStyle: 3, outline: 6, outlineColor: '#ff0000', shadow: 30 });
     MawePlaybackLoop.refreshSubtitlePreview(1000, 0);
   });
-  const boxed = await colourBBoxes();
+  const boxed = await renderedColourBBoxes(['red', 'shadowBox']);
   expect(boxed.red.maxY).toBeGreaterThan(0);
   expect(boxed.shadowBox.maxY).toBeGreaterThanOrEqual(boxed.red.maxY + 20);
   expect(boxed.shadowBox.maxX).toBeGreaterThanOrEqual(boxed.red.maxX + 20);
