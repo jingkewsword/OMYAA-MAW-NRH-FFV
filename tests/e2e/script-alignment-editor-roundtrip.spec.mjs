@@ -35,16 +35,15 @@ run_script_alignment(ScriptAlignmentRequest(Path(sys.argv[1]), Path(sys.argv[2])
     const snapshot = () => page.evaluate(() => ({
       text: MaweBoot.DATA.segments.map((cue) => cue.text),
       items: MaweBoot.DATA.segments.map((cue) => cue.items.map((item) => item.text).join('')),
-      preserve: MaweBoot.DATA.preserve_punctuation,
     }));
-    const expected = { text: ['你好，世界。', 'cafe\u0301!'], items: ['你好，世界。', 'cafe\u0301!'], preserve: true };
+    const expected = { text: ['你好，世界。', 'cafe\u0301!'], items: ['你好，世界。', 'cafe\u0301!'] };
     expect(await snapshot()).toEqual(expected);
-    expect(await page.evaluate(() => JSON.parse(MaweJsonRepair.buildJson()).preserve_punctuation)).toBe(true);
+    expect(await page.evaluate(() => Object.hasOwn(JSON.parse(MaweJsonRepair.buildJson()), 'preserve_punctuation'))).toBe(false);
     const saved = page.waitForResponse((response) => response.url().endsWith('/api/project') && response.request().method() === 'POST');
     await page.locator('#save-project').click();
     expect((await saved).ok()).toBe(true);
     await expect(page.locator('#save-project')).toBeEnabled();
-    await expect.poll(() => JSON.parse(readFileSync(project, 'utf8')).preserve_punctuation).toBe(true);
+    await expect.poll(() => Object.hasOwn(JSON.parse(readFileSync(project, 'utf8')), 'preserve_punctuation')).toBe(false);
     await page.reload();
     await page.waitForFunction(() => window.MAWE_EDITOR_BRIDGE?.data?.segments.length === 2);
     expect(await snapshot()).toEqual(expected);
@@ -57,7 +56,7 @@ run_script_alignment(ScriptAlignmentRequest(Path(sys.argv[1]), Path(sys.argv[2])
     server = await startServer(legacyPath, media, await findFreePort());
     await page.goto(server.url);
     await page.waitForFunction(() => window.MAWE_EDITOR_BRIDGE?.data?.segments.length === 2);
-    expect((await snapshot()).text[0]).toBe('你好  世界');
+    expect(await snapshot()).toEqual(expected);
   } finally {
     await server?.stop();
     cleanupTempDir(directory);

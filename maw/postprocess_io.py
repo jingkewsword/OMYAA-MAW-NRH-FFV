@@ -129,6 +129,7 @@ def write_artifacts(
     comparison_rows: list[Mapping[str, object]] | None = None,
 ) -> SubtitleArtifact:
     normalized = normalize_project(project)
+    normalized.pop("preserve_punctuation", None)
     raw_media = normalized.get("media")
     if media_path is not None and str(media_path).strip() and (
         not isinstance(raw_media, str) or not raw_media.strip()

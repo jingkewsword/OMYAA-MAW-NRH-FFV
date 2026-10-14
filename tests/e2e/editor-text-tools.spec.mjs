@@ -167,7 +167,7 @@ test('text process preview expands all rows and syncs the action label', async (
 
   await page.locator('#batch-operations-btn').click();
   await page.locator('#text-process-btn').click();
-  await expect(page.locator('#text-process-scope-info')).toHaveText('当前范围：全部 2 条字幕');
+  await expect(page.locator('#text-process-scope-info')).toHaveText('当前范围：全部 2 条主字幕');
   await page.locator('#text-process-trim').check();
   const preview = page.locator('#text-process-preview');
   const rows = preview.locator('details.replace-preview-row');

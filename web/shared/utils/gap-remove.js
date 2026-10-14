@@ -74,11 +74,12 @@ export function createUtilsModule(dependencies) {
     return source.flatMap((segment) => {
       if (!segment || segment.disabled || !Array.isArray(segment.items)) return [segment];
       const text = String(segment.text || '');
+      const hasEmptyAnchor = segment.items.some((item) => item?.text === '');
       let cursor = 0;
       const spans = [];
       for (const item of segment.items) {
         const value = String(item?.text || '');
-        const start = value ? text.indexOf(value, cursor) : -1;
+        const start = value ? text.indexOf(value, cursor) : (item?.text === '' ? cursor : -1);
         if (start < 0 || /[\p{L}\p{N}]/u.test(text.slice(cursor, start))) return [segment];
         cursor = start + value.length;
         spans.push({ start, end: cursor });
@@ -89,6 +90,10 @@ export function createUtilsModule(dependencies) {
           if (!Number.isInteger(range.start) || !Number.isInteger(range.end)) return false;
           const scope = range.cleanup_scope;
           if (!scope || typeof scope !== 'object') return false;
+          // Empty timed anchors are produced by explicit punctuation cleanup.
+          // Permit them only with the core's exact whole-cue mapping, timing and
+          // nonempty-scope checks; retain the legacy nonempty-item mapping below.
+          if (hasEmptyAnchor && !GAP_REMOVE_CORE.getCleanupScopeItems(segment, range).length) return false;
           {
             if (scope.segment_id !== segment.id || !Number.isInteger(scope.item_start) || !Number.isInteger(scope.item_end)
                 || scope.item_start < 0 || scope.item_end > segment.items.length || scope.item_start >= scope.item_end) return false;

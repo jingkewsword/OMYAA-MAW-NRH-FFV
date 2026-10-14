@@ -42,7 +42,6 @@
     }),
   };
   if (typeof MaweBoot.DATA.language_source === 'string') out.language_source = MaweBoot.DATA.language_source;
-  if (typeof MaweBoot.DATA.preserve_punctuation === 'boolean') out.preserve_punctuation = MaweBoot.DATA.preserve_punctuation;
   if (typeof MaweBoot.DATA.split_mode === 'string') out.split_mode = MaweBoot.DATA.split_mode;
   if (typeof MaweBoot.DATA.timestamp_granularity === 'string') {
     out.timestamp_granularity = MaweBoot.DATA.timestamp_granularity;
@@ -280,21 +279,21 @@
   // 保存/导出前的最后一道时间码兜底。波形拖动会把词时间码按像素取整，
   // 极短词可能因此出现 1ms 的前后重叠；打开工程时的修复不足以覆盖这种
   // “打开后编辑、随后保存”的路径。主轨和所有副字幕轨统一使用同一规则。
-  function normalizeProjectTimings(project, { repairSegmentRanges = true } = {}) {
+  function normalizeProjectTimings(project, { repairSegmentRanges = true, preserveTextItems = false } = {}) {
   if (!project || typeof project !== 'object') return 0;
   const normalize = repairSegmentRanges
     ? window.AsrEditorUtils.normalizeSegmentTimings
     : window.AsrEditorUtils.normalizeItemTimingRanges;
   const cleanup = captureCleanupNormalization(project.segments, project);
-  let fixed = normalize(project.segments);
+  let fixed = normalize(project.segments, 100, { preserveTextItems });
   fixed = Math.max(0, fixed - migrateCleanupNormalization(cleanup));
   const tracks = project.multi_subtitle?.tracks;
   if (Array.isArray(tracks)) {
     tracks.forEach((track) => {
-      fixed += normalize(track?.segments);
+      fixed += normalize(track?.segments, 100, { preserveTextItems });
     });
   }
-  fixed += normalize(project.overlay_track?.segments);
+  fixed += normalize(project.overlay_track?.segments, 100, { preserveTextItems });
   return fixed;
 }
 
@@ -316,7 +315,7 @@
     const source = Array.isArray(segments) ? segments : [];
     const before = source.map((segment) => timingRepairSignature(segment));
     const cleanup = captureCleanupNormalization(source, source === MaweBoot.DATA.segments ? MaweBoot.DATA : null);
-    const fixed = Math.max(0, window.AsrEditorUtils.normalizeItemTimingRanges(source)
+    const fixed = Math.max(0, window.AsrEditorUtils.normalizeItemTimingRanges(source, 100, { preserveTextItems: true })
       - migrateCleanupNormalization(cleanup));
     const changed = source.filter((segment, index) => (
       timingRepairSignature(segment) !== before[index]

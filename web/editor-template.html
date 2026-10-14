@@ -2315,13 +2315,18 @@ __WAVEFORM_CSS__
     <p class="modal-desc" id="text-process-description">
       选择要对字幕批量执行的文本操作（若处理结尾为空，会保留空字幕行）。
     </p>
-    <div id="text-process-scope-info" class="text-process-scope-info">当前范围：全部字幕</div>
+    <div id="text-process-scope-info" class="text-process-scope-info">当前范围：全部主字幕</div>
     <label class="modal-check-row" for="text-process-selected-only">
       <input type="checkbox" id="text-process-selected-only" disabled>
       <span>仅处理选中的字幕</span>
       <span id="text-process-selected-only-hint" class="modal-hint batch-selected-only-hint" hidden>需要先选中至少1条字幕才可启用</span>
     </label>
-    <div class="text-process-operations" aria-label="文本处理操作">
+    <div class="text-process-operations" aria-label="文本处理操作" style="row-gap: 8px; margin-top: 8px;">
+      <label class="text-process-operation" for="text-process-clean-punctuation">
+        <input type="checkbox" id="text-process-clean-punctuation">
+        <span>清理中文逗号、句号</span>
+        <span class="modal-hint" title="仅处理中文逗号、句号：句中替换为两个空格，句尾移除；同时清除尾部空格和制表符。其他标点保留。">句中换为两个空格，句尾移除</span>
+      </label>
       <label class="text-process-operation" for="text-process-trim">
         <input type="checkbox" id="text-process-trim">
         <span>修剪前后空白</span>

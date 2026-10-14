@@ -71,7 +71,7 @@
         }
         return copy;
       });
-      window.AsrEditorUtils.normalizeSegmentTimings(sourceSegments);
+      window.AsrEditorUtils.normalizeSegmentTimings(sourceSegments, 100, { preserveTextItems: true });
       const validSegments = sourceSegments.filter((segment) => segment.text.trim());
       if (!validSegments.length) {
         throw new Error('副字幕没有可导入的有效文本或时间码');

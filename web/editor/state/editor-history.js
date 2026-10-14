@@ -64,7 +64,7 @@
 }
 
 
-  function captureSegmentsRecord(label, { captureView = false } = {}) {
+  function captureSegmentsRecord(label, { captureView = false, captureGapRemove = false } = {}) {
     // snapshotSegments() 已是深克隆；让 buildHistoryRecord 跳过二次克隆，
     // 长工程下省掉一遍 O(工程体积) 的 JSON 序列化。
     const record = window.AsrEditorUtils.buildHistoryRecord(
@@ -72,6 +72,12 @@
       { clone: false },
     );
     record.projectChanges = { projectImportDirty: MaweState.changes.projectImportDirty };
+    if (captureGapRemove) {
+      record.captureGapRemove = true;
+      record.gapRemove = MaweBoot.DATA.gap_remove == null ? MaweBoot.DATA.gap_remove
+        : JSON.parse(JSON.stringify(MaweBoot.DATA.gap_remove));
+      record.projectChanges.gapRemoveDirty = MaweState.changes.gapRemoveDirty;
+    }
     return record;
   }
 
@@ -165,7 +171,9 @@
     if (kind === 'preview') {
       return window.AsrEditorUtils.buildHistoryRecord('preview', label, snapshotPreviewState());
     }
-    return captureSegmentsRecord(label, { captureView: Boolean(sourceRecord?.view) });
+    return captureSegmentsRecord(label, {
+      captureView: Boolean(sourceRecord?.view), captureGapRemove: sourceRecord?.captureGapRemove === true,
+    });
   }
 
 
@@ -277,6 +285,10 @@
     schema: 'moy.asr.multi_subtitle.v1', enabled: false, display_mode: 'both', tracks: [], bindings: [],
   };
   MaweBoot.DATA.overlay_track = MULTI_SUBTITLE_UTILS.normalizeOverlayTrack(snapshot.overlay_track);
+  if (record.captureGapRemove) {
+    MaweBoot.DATA.gap_remove = record.gapRemove;
+    MaweGapRemoveUi.updateGapRemoveUi();
+  }
   if (record.projectChanges) Object.assign(MaweState.changes, record.projectChanges);
   MaweMultiSubtitleCore.normalizeMultiSubtitleState();
   MaweState.reconcileSegmentsDirty();

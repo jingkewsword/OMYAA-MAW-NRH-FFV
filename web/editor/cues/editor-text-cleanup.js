@@ -7,39 +7,49 @@
 
 
 
-  // === cleanPunctuation ===
-  function cleanPunctuation() {
-    if (MaweBoot.DATA.preserve_punctuation === true) return;
-    const PUNCT_REPL = '  ';
-    const REPLACE_INSIDE = /[，。]/g;
-    for (const seg of MaweBoot.DATA.segments) {
-      if (!seg.text) continue;
-      // This built-in normalization changes source text/items together. Migrate
-      // only previously exact local scopes; ordinary user edits remain invalid.
-      const aiRanges = MaweBoot.DATA.gap_remove?.provenance?.sources?.ai_cleanup;
-      const validScopes = (Array.isArray(aiRanges) ? aiRanges : [])
-        .filter((range) => window.AsrGapRemoveCore.getCleanupScopeItems(seg, range).length);
-      let t = seg.text;
-      while (t.length && (t.endsWith('，') || t.endsWith('。'))) t = t.slice(0, -1);
-      seg.text = t.replace(REPLACE_INSIDE, PUNCT_REPL).replace(/[ \t]+$/, '');
-      if (seg.items) {
-        const total = seg.items.length;
-        for (let i = 0; i < total; i++) {
-          let it = seg.items[i].text;
-          if (i === total - 1) {
-            while (it.length && (it.endsWith('，') || it.endsWith('。'))) it = it.slice(0, -1);
-          }
-          it = it.replace(REPLACE_INSIDE, PUNCT_REPL);
-          seg.items[i].text = it;
-        }
+  // Scope migration is allowed only for an already valid main-track scope.
+  // Call before changing DATA so stale scopes cannot be authorized by cleanup.
+  function planPunctuationCleanupScopeUpdates(before, after) {
+    const ranges = MaweBoot.DATA.gap_remove?.provenance?.sources?.ai_cleanup;
+    let cleaned = null;
+    return (Array.isArray(ranges) ? ranges : []).flatMap((range) => {
+      if (!window.AsrGapRemoveCore.getCleanupScopeItems(before, range).length) {
+        // A previously stale scope may coincidentally match normalized text.
+        // Remove its authorization rather than reviving an old AI decision.
+        return window.AsrGapRemoveCore.getCleanupScopeItems(after, range).length
+          ? [{ range, invalidate: true }] : [];
       }
-      for (const range of validScopes) {
-        const scope = range.cleanup_scope;
-        scope.text = seg.items.slice(scope.item_start, scope.item_end).map((item) => item.text).join('');
-      }
-    }
+      const scope = range.cleanup_scope;
+      if (!Array.isArray(after.items) || after.items.length !== before.items.length) return [];
+      const items = after.items.slice(scope.item_start, scope.item_end);
+      const text = items.map((item) => item.text).join('');
+      cleaned ||= window.AsrEditorUtils.planChinesePunctuationCleanup(before);
+      const expected = cleaned.items.slice(scope.item_start, scope.item_end).map((item) => item.text).join('');
+      if (text !== expected) return [];
+      const updatedRange = { ...range, cleanup_scope: { ...scope, text } };
+      if (!window.AsrGapRemoveCore.getCleanupScopeItems(after, updatedRange).length) return [];
+      return text === scope.text ? [] : [{ range, scope, text }];
+    });
   }
 
+  // Compatibility entry point for explicit callers only; project loading never
+  // invokes this operation. The shared planner owns the normalization rule.
+  function cleanPunctuation() {
+    let scopeChanged = false;
+    for (const segment of MaweBoot.DATA.segments) {
+      const next = window.AsrEditorUtils.planChinesePunctuationCleanup(segment);
+      const updates = planPunctuationCleanupScopeUpdates(segment, next);
+      Object.assign(segment, next);
+      updates.forEach(applyPunctuationCleanupScopeUpdate);
+      scopeChanged ||= updates.length > 0;
+    }
+    if (scopeChanged) MaweBoot.DATA.gap_remove = { ...MaweBoot.DATA.gap_remove };
+  }
+
+  function applyPunctuationCleanupScopeUpdate(update) {
+    if (update.invalidate) delete update.range.cleanup_scope;
+    else update.scope.text = update.text;
+  }
 
 
   function syncTimelineGroupRanges() {
@@ -111,6 +121,8 @@
 
   global.MaweTextCleanup = Object.freeze({
     cleanPunctuation,
+    planPunctuationCleanupScopeUpdates,
+    applyPunctuationCleanupScopeUpdate,
     syncTimelineGroupRanges,
     seekFromWaveform,
     notifyAutoLoadedMediaReady,

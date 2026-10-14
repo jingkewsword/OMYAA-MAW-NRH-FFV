@@ -63,9 +63,11 @@ window.MAWE.register('editor-commands', function createEditorCommands(dependenci
     capture(label, options) {
       MaweCueListAnchor.rememberCueListMutation();
       const record = MaweHistory.captureSegmentsRecord(label, options);
-      return { record, fingerprint: fingerprint(record.segs), selection: MaweHistory.snapshotEditorSelection() };
+      return { record, fingerprint: fingerprint(record.segs), selection: MaweHistory.snapshotEditorSelection(),
+        gapFingerprint: record.captureGapRemove ? fingerprint(MaweState.project.gap_remove) : null };
     },
-    hasChanges: snapshot => fingerprint(projectSegments()) !== snapshot.fingerprint,
+    hasChanges: snapshot => fingerprint(projectSegments()) !== snapshot.fingerprint
+      || (snapshot.record.captureGapRemove && fingerprint(MaweState.project.gap_remove) !== snapshot.gapFingerprint),
     publish(snapshot) {
       MaweHistory.commitRecord(snapshot.record);
       MaweState.changes.projectImportDirty = true;

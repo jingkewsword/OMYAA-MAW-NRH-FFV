@@ -4,7 +4,7 @@
 // 加载时统一拉齐到至少 100ms，避免拆分后看不见字幕块、工程无法保存。
 MaweTimeline.syncProjectTimebaseAndBindingOffsets(MaweBoot.DATA, { preferFrames: MaweBoot.DATA.timebase?.unit === 'frames' });
 const repairedGroupReferenceCount = window.AsrEditorUtils.repairGroupReferenceIndices(MaweBoot.DATA.segments);
-const repairedTimingCount = MaweJsonRepair.normalizeProjectTimings(MaweBoot.DATA);
+const repairedTimingCount = MaweJsonRepair.normalizeProjectTimings(MaweBoot.DATA, { preserveTextItems: true });
 // 服务器注入的工程里 markers 是 MOSP 包装对象（{schema, items}）；编辑器内部
 // 统一用数组，写出文件时再经 markersToProjectField 包回。不在这里换掉的话，
 // 轨道不渲染，且首次 markerList() 会把包装对象整个清掉。
@@ -18,7 +18,7 @@ MaweBoot.maweDebug('boot:begin', {
   media: MaweBoot.DATA.media || '',
   recentProjects: MaweBoot.SERVER_CONFIG?.recentProjects?.length || 0,
 });
-MaweTextCleanup.cleanPunctuation();
+// Opening a project preserves its stored text; punctuation cleanup is an explicit command.
 MaweServerSave.configureServerSaveControls();
 MaweServerSave.configureServerAutoSave();
 MaweServerSave.configureRecentProjects();

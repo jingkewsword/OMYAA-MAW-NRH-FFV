@@ -956,6 +956,11 @@
     '右键': 'Right-click', '通用': 'General', '基础操作': 'Basic operations', '快捷操作': 'Shortcuts', '字幕操作': 'Subtitle actions', '波形区': 'Waveform area', '波形区字幕操作': 'Waveform subtitle actions',
     '进阶': 'Advanced', '帮助分区': 'Help sections',
     '鼠标操作': 'Mouse actions', '选择操作': 'Selection', '编辑操作': 'Editing actions', '快捷功能': 'Quick actions', '切换工具': 'Switch tools',
+    '清理中文逗号、句号': 'Clean Chinese commas and full stops',
+    '句中换为两个空格，句尾移除': 'Replace with two spaces within a cue; remove at the end',
+    '仅处理中文逗号、句号：句中替换为两个空格，句尾移除；同时清除尾部空格和制表符。其他标点保留。': 'Only Chinese commas and full stops: replace with two spaces within a cue; remove at the end, along with trailing spaces and tabs. Keep all other punctuation.',
+    '当前范围：全部主字幕': 'Current scope: all main subtitles',
+    '部分字词时间码文字未随组合操作更新，请按需检查': 'Some word-timing text was not updated by the combined operations; review it as needed',
     '处理范围': 'Scope', '查找并批量替换字幕文本': 'Find and batch-replace subtitle text',
     '集中编辑字幕文本，可预览拆分、合并和字词时间码映射': 'Edit subtitle text in one place and preview split, merge, and word-timing mappings',
     '批量修剪空白、首字母大写、添加前缀/后缀或去除 Markdown 符号': 'Batch-trim whitespace, capitalize initials, add prefixes/suffixes, or remove Markdown markers',
@@ -1485,6 +1490,8 @@
     if (lang !== EN) return text;
     if (EN_TEXT[text]) return EN_TEXT[text];
     if (EN_ATTR[text]) return EN_ATTR[text];
+    const mainScope = /^当前范围：全部 (\d+) 条主字幕$/.exec(text);
+    if (mainScope) return `Current scope: all ${mainScope[1]} main subtitles`;
     let scope = /^当前范围：全部 (\d+) 条字幕$/.exec(text);
     if (scope) return `Current scope: all ${scope[1]} subtitles`;
     scope = /^当前范围：仅选中的 (\d+) 条字幕$/.exec(text);

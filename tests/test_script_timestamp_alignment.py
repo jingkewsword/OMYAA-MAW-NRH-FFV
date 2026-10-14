@@ -144,7 +144,12 @@ class ScriptTimestampTests(unittest.TestCase):
             self.assertEqual(project["segments"][1]["items"][0]["start"], 1000)
             self.assertEqual(project["media"], str(media.resolve()))
             self.assertEqual(project["media_metadata"]["selected_audio_track"], 0)
-            self.assertTrue(project["preserve_punctuation"])
+            self.assertNotIn("preserve_punctuation", project)
+            self.assertEqual([cue["text"] for cue in project["segments"]], ["你好！", "世界。"])
+            self.assertEqual(
+                ["".join(item["text"] for item in cue["items"]) for cue in project["segments"]],
+                ["你好！", "世界。"],
+            )
             self.assertTrue(report.warnings)
             self.assertIsNone(artifact.source_srt_path)
 

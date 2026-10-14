@@ -105,7 +105,7 @@ test('legacy AI/manual gaps and stale scope never hide enabled subtitle words', 
   assert.equal(core.projectCleanupRetainedSegments(edited, localGap())[0].text, edited[0].text);
 });
 
-test('default built-in punctuation cleanup migrates only already-exact local scopes', () => {
+test('explicit punctuation cleanup migrates only already-exact local scopes', () => {
   const { context, core, main } = runtime();
   const stale = { start: 0, end: 770, cleanup_scope: { segment_id: 'main-001', item_start: 0, item_end: 2, text: 'stale' } };
   context.MaweBoot.DATA.gap_remove.provenance.sources.ai_cleanup.push(stale);
@@ -150,7 +150,8 @@ test('timing repair migrates exact scopes collectively through neutral roots and
   context.MaweBoot.DATA.gap_remove.provenance.sources.ai_cleanup = [{ start: 1100, end: 2000,
     cleanup_scope: { segment_id: 'main-001', item_start: 1, item_end: 3, text: '呃。' } }];
   context.window.MaweJsonRepair.repairTimingGroup(main);
-  assert.equal(main[0].items[1].end, 2000, 'only the exact originally selected endpoint is restored');
+  assert.deepEqual(plain(main[0].items), tail, 'saving preserves every original punctuation item and timing');
+  assert.equal(main[0].items.at(-1).end, 2000, 'the exact originally selected endpoint is preserved');
   assert.equal(context.MaweBoot.DATA.gap_remove.provenance.sources.ai_cleanup[0].end, 2000);
   assert.equal(core.projectCleanupRetainedSegments(main, context.MaweBoot.DATA.gap_remove)[0].text, '正文');
 });

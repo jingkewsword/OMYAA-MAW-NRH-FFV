@@ -131,6 +131,9 @@ def serialize_mosp(
         enriched["media_metadata"] = merged_metadata
     enriched.pop("schema", None)
     canonical = {"schema": PROJECT_SCHEMA, **enriched}
+    # Old projects used this opt-in switch to avoid implicit text cleanup.
+    # Text is always preserved now; do not perpetuate a redundant policy flag.
+    canonical.pop("preserve_punctuation", None)
     # canonical 是本函数新建的顶层 dict，在这里剥离不影响调用方的运行态。
     for key in INLINE_CACHE_KEYS:
         canonical.pop(key, None)

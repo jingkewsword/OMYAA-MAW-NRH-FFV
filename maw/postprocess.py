@@ -40,6 +40,7 @@ class FixedProcessRequest:
     output_directory: Path | None = None
     media_path: Path | None = None
     conversion: TextConversion = TextConversion.OFF
+    clean_chinese_punctuation: bool = False
 
 
 # Kept as a source-compatible alias for integrations and saved callers using the
@@ -169,13 +170,19 @@ FIXED_CONVERSION_OPERATIONS: Final[dict[TextConversion, str]] = {
 }
 
 
-def fixed_process_operation(replacements: tuple[Replacement, ...], conversion: TextConversion) -> str:
+def fixed_process_operation(
+    replacements: tuple[Replacement, ...], conversion: TextConversion,
+    clean_chinese_punctuation: bool = False,
+) -> str:
     """按固定替换实际启用的部分计算产物 operation。
 
-    批量替换规则非空计 "replace"，转换方向非 off 计对应方向；两者以点连接。
+    显式标点清理计 "clean-punctuation"，批量替换规则非空计 "replace"，
+    转换方向非 off 计对应方向；多个操作以点连接。
     都未启用时返回空串，调用方应跳过该步骤，不写出文件也不加后缀。
     """
     parts: list[str] = []
+    if clean_chinese_punctuation:
+        parts.append("clean-punctuation")
     if any(entry.source for entry in replacements):
         parts.append("replace")
     direction = FIXED_CONVERSION_OPERATIONS.get(conversion)
@@ -186,16 +193,18 @@ def fixed_process_operation(replacements: tuple[Replacement, ...], conversion: T
 
 def run_fixed_process(request: FixedProcessRequest) -> SubtitleArtifact:
     project, source_project, source_srt = _load_input(request.project_path, request.srt_path)
-    operation = fixed_process_operation(request.replacements, request.conversion)
+    operation = fixed_process_operation(request.replacements, request.conversion, request.clean_chinese_punctuation)
     if not operation:
         return SubtitleArtifact(
             source_project_path=source_project,
             source_srt_path=source_srt,
             project_path=None,
             srt_path=None,
-            warnings=("固定替换未启用批量替换或简繁转换，已跳过该步骤。",),
+            warnings=("固定处理未启用清理中文逗号句号、批量替换或简繁转换，已跳过该步骤。",),
         )
     segments = _segments(project)
+    if request.clean_chinese_punctuation:
+        _clean_chinese_punctuation(project, segments)
     for segment in segments:
         original = segment.get("text")
         if not isinstance(original, str):
@@ -209,6 +218,7 @@ def run_fixed_process(request: FixedProcessRequest) -> SubtitleArtifact:
                 original,
                 segment.get("items"),
                 request.replacements,
+                allow_empty=request.clean_chinese_punctuation,
             )
             if reconciled_items is None:
                 _ = segment.pop("items", None)
@@ -238,6 +248,48 @@ def run_fixed_process(request: FixedProcessRequest) -> SubtitleArtifact:
         output_directory=request.output_directory,
         media_path=request.media_path,
     )
+
+
+def _clean_chinese_punctuation(project: JsonDict, segments: list[JsonDict]) -> None:
+    """Explicit text edit; retain item identity/timing and exact AI cut mappings."""
+    from maw.postprocess_ai_cleanup_items import verified_scope_indices
+    from maw.script_alignment import reliable_cleanup_items
+
+    gap_remove = project.get("gap_remove")
+    provenance = gap_remove.get("provenance") if isinstance(gap_remove, dict) else None
+    sources = provenance.get("sources") if isinstance(provenance, dict) else None
+    ai_ranges = sources.get("ai_cleanup") if isinstance(sources, dict) else None
+    ranges = [entry for entry in ai_ranges if isinstance(entry, dict)] if isinstance(ai_ranges, list) else []
+    for segment in segments:
+        original = segment.get("text")
+        if not isinstance(original, str):
+            continue
+        scope_states = [(entry, bool(reliable_cleanup_items(segment) and verified_scope_indices(entry, segment)))
+                        for entry in ranges if isinstance(entry.get("cleanup_scope"), dict)
+                        and entry["cleanup_scope"].get("segment_id") == segment.get("id")]
+        stop = len(original.rstrip("，。 \t"))
+        segment["text"] = re.sub("[，。]", "  ", original[:stop])
+        items = segment.get("items")
+        if isinstance(items, list):
+            # Clean the actual item text independently when its source mapping
+            # is incomplete; never rebuild missing words from the segment.
+            item_text = "".join(item["text"] for item in items if isinstance(item, dict) and isinstance(item.get("text"), str))
+            item_stop = len(item_text.rstrip("，。 \t"))
+            cursor = 0
+            for item in items:
+                if not isinstance(item, dict) or not isinstance(item.get("text"), str):
+                    continue
+                text = item["text"]
+                item["text"] = re.sub("[，。]", "  ", text[:max(0, item_stop - cursor)])
+                cursor += len(text)
+        for entry, was_valid in scope_states:
+            scope = entry["cleanup_scope"]
+            if was_valid and isinstance(items, list):
+                scope["text"] = "".join(item["text"] for item in items[scope["item_start"]:scope["item_end"]])
+            elif reliable_cleanup_items(segment) and verified_scope_indices(entry, segment):
+                # An originally stale mapping must never acquire authority
+                # merely because punctuation now happens to match again.
+                entry.pop("cleanup_scope", None)
 
 
 def run_fixed_replacement(request: ReplacementRequest) -> SubtitleArtifact:
@@ -1420,7 +1472,9 @@ def _unique_derived_segment_id(
     return candidate
 
 
-def _validated_item_chunks(raw_items: JsonValue, expected_text: str) -> list[JsonDict] | None:
+def _validated_item_chunks(
+    raw_items: JsonValue, expected_text: str, *, allow_empty: bool = False,
+) -> list[JsonDict] | None:
     """Copy item timing data only when it still maps exactly to the text."""
     if not isinstance(raw_items, list) or not raw_items:
         return None
@@ -1436,7 +1490,7 @@ def _validated_item_chunks(raw_items: JsonValue, expected_text: str) -> list[Jso
         item_end = raw_item.get("end")
         if (
             not isinstance(item_text, str)
-            or not item_text
+            or (not item_text and not allow_empty)
             or type(item_start) is not int
             or type(item_end) is not int
             or item_end < item_start
@@ -1537,9 +1591,10 @@ def _reconcile_fixed_replacements(
     original_text: str,
     raw_items: JsonValue,
     replacements: Sequence[Replacement],
+    *, allow_empty: bool = False,
 ) -> list[JsonDict] | None:
     """Apply known replacements while retaining the narrowest safe item range."""
-    items = _validated_item_chunks(raw_items, original_text)
+    items = _validated_item_chunks(raw_items, original_text, allow_empty=allow_empty)
     if items is None:
         return None
     current_text = original_text

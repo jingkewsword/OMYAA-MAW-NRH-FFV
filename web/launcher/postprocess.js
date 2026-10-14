@@ -455,7 +455,7 @@
       steps: [
         { id: "match", enabled: false, scriptPath: "", matchMode: "script", extraSplitPunctuation: ["，", "。", "？", "！", "；", ",", "."], preservePunctuation: ["？", "！"], cleanMarkdownSymbols: true },
         { id: "cleanup", enabled: false, scriptPath: "", providerId: "deepseek", customPrompt: "", generateComparison: false },
-        { id: "replace", enabled: false, replacements: [], conversion: "off" },
+        { id: "replace", enabled: false, replacements: [], conversion: "off", cleanChinesePunctuation: false },
         { id: "proofread", enabled: false, providerId: "deepseek", customPrompt: "" },
         { id: "resegment", enabled: false, providerId: "deepseek", customPrompt: "" },
         { id: "ocr", enabled: false, videoPath: "", videoPathMode: "", regionMode: "full", regionX1: 0, regionY1: 0, regionX2: 100, regionY2: 100, threshold: 0.5, report: false },
@@ -1225,6 +1225,7 @@
 
   function setBusy(nextBusy, statusKey = "toolbox_running") {
     busy = nextBusy;
+    $("postprocessCleanPunctuation").disabled = busy;
     if (nextBusy) {
       if (!runningToolId) runningToolId = activeToolId;
       if (!activePostprocessOperationId) {
@@ -1728,7 +1729,10 @@
       const count = parseReplacements().length;
       const rules = count ? t("auto_step_hint_rules").replace("{count}", String(count)) : t("auto_step_hint_no_rules");
       const conversion = $("postprocessConversion").value;
-      return conversion === "off" ? rules : `${rules} · ${t(`toolbox_conversion_${conversion}`)}`;
+      const parts = count ? [rules] : [];
+      if (conversion !== "off") parts.push(t(`toolbox_conversion_${conversion}`));
+      if ($("postprocessCleanPunctuation").checked) parts.push(t("toolbox_clean_punctuation"));
+      return parts.length ? parts.join(" · ") : rules;
     }
     if (["cleanup", "proofread", "resegment", "translate"].includes(stepId)) {
       const operation = autoLlmOperation(stepId);
@@ -1758,7 +1762,7 @@
         // 始终上报用户的单文件勾选；批量运行由后端统一跳过文稿匹配，前端不改写、不持久化批量态。
         { id: "match", enabled: Boolean($("autoStepMatch")?.checked), scriptPath: $("postprocessScriptPath").value.trim(), matchMode: $("postprocessMatchMode").value, extraSplitPunctuation: punctuationLines("postprocessExtraSplitPunctuation"), preservePunctuation: punctuationLines("postprocessPreservePunctuation"), cleanMarkdownSymbols: Boolean($("postprocessCleanMarkdownSymbols")?.checked) },
         { id: "cleanup", enabled: Boolean($("autoStepCleanup")?.checked), scriptPath: $("postprocessCleanupScriptPath").value.trim(), providerId: stepProviderId("cleanup"), customPrompt: getLlmPrompt("ai_cleanup"), generateComparison: Boolean($("postprocessGenerateComparison")?.checked) },
-        { id: "replace", enabled: Boolean($("autoStepReplace")?.checked), replacements: parseReplacements(), replacementSeparator: $("postprocessReplacementSeparator").value, replacementTrim: $("postprocessReplacementTrim").checked, replacementCustomSeparator: $("postprocessReplacementCustomSeparator").value, conversion: $("postprocessConversion").value },
+        { id: "replace", enabled: Boolean($("autoStepReplace")?.checked), replacements: parseReplacements(), replacementSeparator: $("postprocessReplacementSeparator").value, replacementTrim: $("postprocessReplacementTrim").checked, replacementCustomSeparator: $("postprocessReplacementCustomSeparator").value, conversion: $("postprocessConversion").value, cleanChinesePunctuation: $("postprocessCleanPunctuation").checked },
         { id: "proofread", enabled: Boolean($("autoStepProofread")?.checked), providerId: stepProviderId("proofread"), customPrompt: getLlmPrompt("proofread"), generateComparison: Boolean($("postprocessGenerateComparison")?.checked) },
         { id: "resegment", maxChars: $("postprocessResegmentMaxChars").value.trim(), enabled: Boolean($("autoStepResegment")?.checked), providerId: stepProviderId("resegment"), customPrompt: getLlmPrompt("resegment"), generateComparison: Boolean($("postprocessGenerateComparison")?.checked) },
         { id: "ocr", enabled: Boolean($("autoStepOcr")?.checked), videoPath: ocrVideoManual ? $("ocrVideoPath").value.trim() : "", videoPathMode: ocrVideoManual ? "manual" : "auto", ...ocr, threshold: Number($("ocrThreshold").value), report: Boolean($("ocrReport").checked) },
@@ -1784,7 +1788,8 @@
       const path = $("postprocessCleanupScriptPath").value.trim();
       return (!path || SCRIPT_EXTS.has(extension(path))) && autoLlmReady(stepProviderId(stepId));
     }
-    if (stepId === "replace") return parseReplacements().length > 0 || $("postprocessConversion").value !== "off";
+    if (stepId === "replace") return parseReplacements().length > 0 || $("postprocessConversion").value !== "off"
+      || $("postprocessCleanPunctuation").checked;
     if (["cleanup", "proofread", "resegment", "translate"].includes(stepId)) return autoLlmReady(stepProviderId(stepId));
     if (stepId === "ocr") {
       const config = window.MAWLauncher.config || {};
@@ -1994,6 +1999,7 @@
     syncReplacementSeparator();
     renderReplacementPreview();
     $("postprocessConversion").value = ["to_simplified", "to_traditional", "to_traditional_tw", "to_traditional_twp", "to_traditional_hk"].includes(replace.conversion) ? replace.conversion : "off";
+    $("postprocessCleanPunctuation").checked = replace.cleanChinesePunctuation === true;
     ["proofread", "resegment"].forEach((stepId) => {
       const prompt = byId.get(stepId)?.customPrompt;
       if (typeof prompt === "string") llmPrompts[autoLlmOperation(stepId)] = prompt;
@@ -2455,7 +2461,8 @@
     if (!paths) return;
     const replacements = parseReplacements();
     const conversion = $("postprocessConversion").value;
-    if (!replacements.length && conversion === "off") {
+    const cleanChinesePunctuation = $("postprocessCleanPunctuation").checked;
+    if (!replacements.length && conversion === "off" && !cleanChinesePunctuation) {
       setFieldError("postprocessReplacements", t("toolbox_need_rules"));
       setResult(t("toolbox_need_rules"), "error");
       return;
@@ -2463,7 +2470,7 @@
     setFieldError("postprocessReplacements", "");
     setBusy(true, "toolbox_status_starting");
     try {
-      const result = await bridge("run_fixed_process", { ...paths, replacements, conversion });
+      const result = await bridge("run_fixed_process", { ...paths, replacements, conversion, cleanChinesePunctuation });
       if (result.ok) applySubtitleResult(result, { kind: "fixed" });
       else setResult(result.error || result.detail || t("failed"), "error");
     } finally {
@@ -2925,6 +2932,7 @@
   $("postprocessReplacementCustomSeparator").addEventListener("input", () => { syncReplacementSeparator(); renderReplacementPreview(); renderAutoPostprocessState(); persistAutoPlanSoon(); });
   $("postprocessReplacementTrim").addEventListener("change", () => { renderReplacementPreview(); renderAutoPostprocessState(); persistAutoPlanSoon(); });
   $("postprocessConversion").addEventListener("change", () => { setFieldError("postprocessReplacements", ""); renderAutoPostprocessState(); maybeEnablePendingAutoStep(); persistAutoPlanSoon(); });
+  $("postprocessCleanPunctuation").addEventListener("change", () => { setFieldError("postprocessReplacements", ""); renderAutoPostprocessState(); maybeEnablePendingAutoStep(); persistAutoPlanSoon(); });
   $("ocrVideoPath").addEventListener("input", () => { ocrVideoManual = Boolean($("ocrVideoPath").value.trim()); setFieldError("ocrVideoPath", ""); renderAutoPostprocessState(); maybeEnablePendingAutoStep(); persistAutoPlanSoon(); });
   ["ocrRegionMode", "ocrRegionX1", "ocrRegionY1", "ocrRegionX2", "ocrRegionY2", "ocrThreshold", "ocrReport", "autoTranslateTarget"].forEach((id) => {
     $(id).addEventListener("input", () => { renderAutoPostprocessState(); maybeEnablePendingAutoStep(); persistAutoPlanSoon(); });

@@ -48,6 +48,7 @@ OPERATION_NAMES: Final[dict[str, dict[str, str]]] = {
     "match": {"zh": "文稿匹配", "en": "match"},
     "ai_cleanup": {"zh": "AI整理", "en": "ai-cleanup"},
     "replace": {"zh": "批量替换", "en": "replace"},
+    "clean-punctuation": {"zh": "清理中文逗号句号", "en": "clean-punctuation"},
     "simplified": {"zh": "转简体", "en": "simplified"},
     "traditional": {"zh": "转繁体", "en": "traditional"},
     "proofread": {"zh": "校对文本", "en": "proofread"},

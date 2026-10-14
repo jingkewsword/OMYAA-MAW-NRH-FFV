@@ -19,7 +19,6 @@
   "split_mode": "word",
   "timestamp_granularity": "word",
   "model": "...",
-  "preserve_punctuation": true,
   "media_metadata": {
     "video_fps": 29.97002997002997,
     "video_fps_ratio": "30000/1001",
@@ -59,7 +58,7 @@
 | `media` | `string` | 否 | 媒体文件路径（绝对/相对均可）。便携 HTML 会在“打开工程”时用它的文件名匹配同一次选择的媒体；只选工程文件时会提示用户继续选择媒体。浏览器安全限制下不能自行读取该路径或跳转其目录。服务器编辑器可按该路径自动加载 |
 | `language` | `string` | 否 | 统一后的语言代码，如 `zh`、`en`、`ja`；无法确定时为空字符串。仅用于显示与选择切句计量方式 |
 | `language_source` | `string` | 否 | 语言来源：`detected`（模型返回）、`hint`（用户提示）、`inferred`（从文字脚本推断）或 `unknown`（未知） |
-| `preserve_punctuation` | `boolean` | 否 | 为 `true` 时，MAWE 启动不执行历史中文逗号 / 句号清理，保留字幕与 items 的原文；保存和重新加载保留此策略。文稿驱动对齐写入 `true`。省略或为 `false` 时保持历史行为；不限制用户后续主动编辑 / 文本处理。此字段是 v1 的可选扩展，不改变整数毫秒契约 |
+| `preserve_punctuation` | `boolean` | 否 | 旧工程的兼容字段，仍校验布尔类型，但不再控制文字处理。为 `true`、`false` 或省略时，打开与保存都保留字幕及 items 原文；新生成和保存的工程不再写出此字段。清理标点须由用户显式执行，不升级 v1 schema |
 | `split_mode` | `string` | 否 | 切句计量方式：`continuous`（字符型，如中文）或 `word`（单词型，如英文） |
 | `timestamp_granularity` | `string` | 否 | 时间码粒度：`char`、`word`、`segment` 或 `unknown`。只有整段 start/end 的模型使用 `segment`；这类工程的字幕段可以没有 `items`，超长段可能已按标点（连续语言）或单词数（单词型）二次拆分，段内时间是插值近似值（不携带 `items` 冒充词级精度） |
 | `model` | `string` | 否 | ASR 模型名，如 `qwen3-asr`。仅用于显示 |
@@ -333,7 +332,7 @@
 - `ai_cleanup_review` 范围可带可选的 `review_marker_id`，指向对应的 `markers[*].id`，使区间与触发该静音操作的待复核标记保持关联。`id` 标识来源范围；范围被裁剪或拆分时，拆出的范围可以有各自的 `id`，但保留同一个 `review_marker_id`。取消该标记的静音会按此关联移除对应来源范围。
 - `ai_cleanup` 的可靠局部移除范围可带 `cleanup_scope`：`{ "segment_id": "main-001", "item_start": 0, "item_end": 2, "text": "啊，我这……" }`。索引是源主字幕 `items` 的零基连续区间，`item_end` 不含末项，`text` 是所选项的精确拼接；起止时间直接复制首末项边界。它仅由 cleanup 局部安全校验通过后写入；旧整段 AI 范围不带此字段。Python 与浏览器的来源规范化均保留合法字段。
 - 局部移除保留源字幕的稳定 ID、原文、全部 `items` 和 enabled 状态。SRT、ASS、TXT、动态字幕、OTIO 字幕标记和 FCP/XML 导出使用保留内容投影：只认仍存在的 `ai_cleanup.cleanup_scope`，核对主轨 ID、连续索引、精确拼接文字和真实端点，并仅隐藏完全被当前生效 gap 覆盖的所选 item。普通静音、旧整段 AI、`ai_cleanup_review` 或副/叠加轨不能单独授权剪字。普通导出保留源时轴，去空隙导出在投影后统一压缩时间；副轨译文与叠加轨仍保留其独立内容。人工恢复范围或清除自动 AI 来源后，投影恢复相应源字词；后续编辑使映射失配时，保守保留原文，不猜位置。
-- 编辑器源列表保留完整原文，CSS/ASS Canvas 实际播放与导出共享保留内容投影；缓存比较保留字词边界，范围恢复后立即重建。内建标点规整仅迁移规整前已精确核验的 scope 拼接文字；原失配 scope 及普通用户编辑不自动修复。
+- 编辑器源列表保留完整原文，CSS/ASS Canvas 实际播放与导出共享保留内容投影；缓存比较保留字词边界，范围恢复后立即重建。显式「清理中文逗号句号」仅迁移处理前已精确核验的 scope 拼接文字；原失配 scope 及普通用户编辑不自动修复，原失配 scope 也不能因处理后的文字恰好匹配而重新取得剪字权限。打开与保存工程不执行标点处理。
 - cleanup 专属临时 LLM 协议保留 `keep/review/discard` 整段响应兼容。请求可带 `items` JSON 字符串，解码后仅有临时 `{id,text}`，不发送时间码、路径或工程稳定 ID；保持传输层 `dict[str,str]` 约定。`discard` 可选 `removeItemIds: ["c001:i001", "c001:i002"]`，或多局部 `removeItemRanges: [["c001:i001"], ["c001:i004"]]`，两字段不得同时出现。每组非空、有序、连续、无重复，组间递增且不重叠；`evidence` 必须精确等于所有所选组按原序拼接的原文，不用 `altTakeId`。不存在、乱序、缺可靠时间/文字、数字/限定条件、不能覆盖文稿信息或没有有效剩余，整项降为待复核。每组独立写范围和同范围标记，第二道通读以 `proposed: partial`、`retainedText`、`removedText` 检查真实正文；复核该片段恢复本次所有局部组。
 - `minimum_ms` 的允许范围是 100–60000，单位为毫秒；默认 500。判定基于应用前/后端预留后的最终移除区间，预留吃完整段时不纳入移除。
 - `threshold_db` 的范围是 -96–0，默认 -24；`hysteresis_db` 的范围是 0–30，默认 2。比如阈值 -24、滞回 2 时，声音达到 -24 才算有声，低于 -26 才重新算静音。建议使用 1–3dB；过高会延迟回到静音。滞回位于「空隙检测与调整」折叠区内。

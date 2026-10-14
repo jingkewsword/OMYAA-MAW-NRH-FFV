@@ -13,7 +13,7 @@ from maw.project import (
 
 
 class ProjectContractTests(unittest.TestCase):
-    def test_punctuation_policy_is_optional_boolean_and_round_trips(self) -> None:
+    def test_legacy_punctuation_flag_remains_an_optional_boolean(self) -> None:
         project = {"preserve_punctuation": True, "segments": [{"start": 0, "end": 1000, "text": "你好，世界。"}]}
         self.assertTrue(normalize_project(project)["preserve_punctuation"])
         self.assertEqual(project["segments"][0]["text"], "你好，世界。")
@@ -22,6 +22,33 @@ class ProjectContractTests(unittest.TestCase):
                 result = validate_project({**project, "preserve_punctuation": bad})
                 self.assertFalse(result.ok)
                 self.assertIn("$.preserve_punctuation", {error.path for error in result.errors})
+
+    def test_normalization_preserves_all_track_text_with_any_legacy_punctuation_flag(self) -> None:
+        texts = ["你好，世界。 Hello, world.？！", "cafe\u0301，か\u3099。👩‍💻\u00a0", "\t前后空白，\n换行。 "]
+        for flag in (None, True, False):
+            with self.subTest(flag=flag):
+                def segment(text):
+                    return {"start": 0, "end": 1000, "text": text,
+                            "items": [{"start": 0, "end": 1000, "text": text}]}
+
+                project = {
+                    "segments": [segment(texts[0])],
+                    "overlay_track": {"enabled": True, "segments": [segment(texts[1])]},
+                    "multi_subtitle": {
+                        "enabled": True, "display_mode": "both",
+                        "tracks": [{"id": "translation", "language": "en", "segments": [segment(texts[2])]}],
+                        "bindings": [],
+                    },
+                }
+                if flag is not None:
+                    project["preserve_punctuation"] = flag
+                normalized = normalize_project(project)
+                cues = [normalized["segments"][0], normalized["overlay_track"]["segments"][0],
+                        normalized["multi_subtitle"]["tracks"][0]["segments"][0]]
+                self.assertEqual([cue["text"] for cue in cues], texts)
+                self.assertEqual([cue["items"][0]["text"] for cue in cues], texts)
+                self.assertEqual([cue["items"][0]["start"] for cue in cues], [0, 0, 0])
+                self.assertEqual([cue["items"][0]["end"] for cue in cues], [1000, 1000, 1000])
 
     def test_project_ass_mode_and_speaker_export_flags_round_trip_and_validate(self) -> None:
         project = {

@@ -270,9 +270,9 @@
         data.timebase = MaweTimeline.normalizeTimelineTimebase(data.timebase);
         window.AsrEditorUtils.normalizeMultiSubtitleProject(data);
         MaweTimeline.syncProjectTimebaseAndBindingOffsets(data, { preferFrames: data.timebase.unit === 'frames' });
-        window.AsrEditorUtils.normalizeSegmentTimings(data.segments);
+        window.AsrEditorUtils.normalizeSegmentTimings(data.segments, 100, { preserveTextItems: true });
         window.AsrEditorUtils.repairGroupReferenceIndices(data.segments);
-        MaweJsonRepair.normalizeProjectTimings(data);
+        MaweJsonRepair.normalizeProjectTimings(data, { preserveTextItems: true });
         MaweTimeline.syncProjectTimebaseAndBindingOffsets(data, { preferFrames: false });
       }
       if (!MaweProjectLoad.isMawProject(data)) {

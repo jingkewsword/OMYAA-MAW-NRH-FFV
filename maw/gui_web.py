@@ -1067,6 +1067,7 @@ class LauncherApi:
                     replacements=replacements,
                     media_path=_optional_path(payload.get("mediaPath")),
                     conversion=normalize_text_conversion_mode(payload.get("conversion")),
+                    clean_chinese_punctuation=payload.get("cleanChinesePunctuation") is True,
                 )
             )
             self._emit_postprocess_status("toolbox_status_writing")

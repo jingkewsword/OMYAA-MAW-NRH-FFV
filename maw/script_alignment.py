@@ -1098,7 +1098,10 @@ def reliable_cleanup_items(segment: Mapping[str, object]) -> list[Mapping[str, o
         return []
     previous_end = start
     for item in items:
-        if not isinstance(item, Mapping) or not isinstance(item.get("text"), str) or not item["text"]:
+        # Explicit punctuation cleanup can empty a timed punctuation-only item.
+        # Keep its position; scope authorization still requires nonempty text,
+        # exact concatenation, and the original positive timing boundaries.
+        if not isinstance(item, Mapping) or not isinstance(item.get("text"), str):
             return []
         left, right = item.get("start"), item.get("end")
         if type(left) is not int or type(right) is not int or left < previous_end or right <= left or right > end:

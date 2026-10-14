@@ -1420,7 +1420,9 @@
         || !Array.isArray(items) || !items.length) return [];
     let previousEnd = segment.start;
     for (const item of items) {
-      if (typeof item?.text !== 'string' || !item.text
+      // Explicit punctuation cleanup preserves timed anchors even when their
+      // text becomes empty. The full mapping and nonempty scope stay strict.
+      if (typeof item?.text !== 'string'
           || !Number.isInteger(item.start) || !Number.isInteger(item.end)
           || item.start < previousEnd || item.end <= item.start || item.end > segment.end) return [];
       previousEnd = item.end;

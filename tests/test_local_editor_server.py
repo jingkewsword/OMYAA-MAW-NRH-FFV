@@ -52,6 +52,22 @@ def _write_reapeaks_for(media_path: Path) -> Path:
 
 
 class LocalEditorServerTests(CompactContainerAssertions, unittest.TestCase):
+    def test_save_legacy_punctuation_flag_preserves_unicode_and_backup_without_mutating_input(self) -> None:
+        text = "你好，世界。 cafe\u0301, 👩‍💻!\n "
+        for flag in (True, False):
+            with self.subTest(flag=flag):
+                target = self.root / f"punctuation-{flag}.mosp"
+                original = {"preserve_punctuation": flag, "segments": [{"start": 0, "end": 1000,
+                    "text": text, "items": [{"start": 0, "end": 1000, "text": text}]}]}
+                before = json.dumps(original, ensure_ascii=False).encode("utf-8")
+                target.write_bytes(before)
+                backup = server_editor.write_project_json(target, original)
+                saved = json.loads(target.read_text(encoding="utf-8"))
+                self.assertNotIn("preserve_punctuation", saved)
+                self.assertEqual(saved["segments"], original["segments"])
+                self.assertEqual(original["preserve_punctuation"], flag)
+                self.assertEqual(backup.read_bytes(), before)
+
     def test_about_release_url_targets_the_build_tag_and_dev_release_list(self) -> None:
         version = edit.get_app_version()
         self.assertEqual(
@@ -626,12 +642,17 @@ class LocalEditorServerTests(CompactContainerAssertions, unittest.TestCase):
         )
         original = self.project_path.read_bytes()
         with server_editor.EditorServer(('127.0.0.1', 0), project) as server:
-            data = {'segments': [], 'language': 'en'}
+            data = {'segments': [{"start": 0, "end": 1000, "text": "你好，cafe\u0301。"}],
+                    'language': 'en', 'preserve_punctuation': False}
             target, backup = server.save_project(data, backup_limit=2, backup_only=True)
             self.assertEqual(target, self.project_path)
             self.assertEqual(self.project_path.read_bytes(), original)
             self.assertEqual(server.settings.recent_projects, ())
             self.assertEqual(json.loads(backup.read_text(encoding='utf-8'))['language'], 'en')
+            snapshot = json.loads(backup.read_text(encoding='utf-8'))
+            self.assertNotIn('preserve_punctuation', snapshot)
+            self.assertEqual(snapshot['segments'][0]['text'], data['segments'][0]['text'])
+            self.assertIs(data['preserve_punctuation'], False)
             server.save_project(data, backup_limit=2)
             self.assertEqual(len(list(backup.parent.glob('*.mosp-bak'))), 2)
             self.assertEqual([p.path for p in server.settings.recent_projects], [target])

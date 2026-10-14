@@ -358,11 +358,38 @@ export function createUtilsModule(dependencies) {
   }
 
 
-  // Preview and apply share this order: Markdown -> trim -> capitalization ->
+  // Only the two Chinese comma/full-stop characters are normalized. Keep all
+  // other punctuation (including ASCII punctuation) and leading whitespace.
+  function cleanChinesePunctuation(text) {
+    // JavaScript `$` also matches before a final line terminator. Require the
+    // true string end so LF/CRLF/Unicode line separators remain source text.
+    return String(text == null ? '' : text).replace(/[，。 \t]+$(?![\s\S])/u, '')
+      .replace(/[，。]/g, '  ');
+  }
+
+  function planChinesePunctuationCleanup(segment) {
+    const result = { ...segment, text: cleanChinesePunctuation(segment?.text) };
+    if (Array.isArray(segment?.items)) {
+      result.items = segment.items.map((item) => ({
+        ...item, text: String(item?.text ?? '').replace(/[，。]/g, '  '),
+      }));
+      // Trim the concatenated suffix across item boundaries, keeping every item
+      // and its original timing, including punctuation-only/empty final items.
+      for (let index = result.items.length - 1; index >= 0; index -= 1) {
+        const item = result.items[index];
+        item.text = item.text.replace(/[ \t]+$(?![\s\S])/u, '');
+        if (item.text) break;
+      }
+    }
+    return result;
+  }
+
+  // Preview and apply share this order: punctuation -> Markdown -> trim -> capitalization ->
   // number conversion -> character wrapping. Legacy prefix/suffix options stay
   // supported for existing integrations, but the editor now uses wrapLeft/right.
   function applyTextProcessing(text, options = {}) {
     let result = String(text == null ? '' : text);
+    if (options.cleanChinesePunctuation) result = cleanChinesePunctuation(result);
     if (options.stripMarkdown) result = stripMarkdownFormatting(result);
     if (options.trim) result = result.trim();
     if (options.capitalize) result = capitalizeFirstLetter(result);
@@ -470,6 +497,8 @@ export function createUtilsModule(dependencies) {
 
 
   return Object.freeze({
+    cleanChinesePunctuation,
+    planChinesePunctuationCleanup,
     applyTextProcessing,
     buildReplacementPreview,
     compileTextSearchPattern,

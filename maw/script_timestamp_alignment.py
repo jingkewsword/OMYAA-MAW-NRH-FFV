@@ -407,7 +407,6 @@ def run_script_alignment(
         "language": language, "language_source": "hint", "split_mode": mode,
         "timestamp_granularity": "char" if mode == "continuous" else "word",
         "model": QWEN_FORCED_ALIGNER_MODEL_ID, "segments": segments,
-        "preserve_punctuation": True,
         "media_metadata": {"selected_audio_track": audio_track},
     }, media)
     artifact = write_artifacts(

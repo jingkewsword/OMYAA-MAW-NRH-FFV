@@ -1663,6 +1663,9 @@ class EditorServer(ThreadingHTTPServer):
             # 避免把用户有意或误操作造成的段落重叠静默改写。
             repair_project_timing_ranges(repaired_project, repair_segment_ranges=False)
             normalized_project = normalize_project(repaired_project)
+            # Legacy clients may still submit this redundant flag. Remove it
+            # from the copied payload before normal saves and version backups.
+            normalized_project.pop("preserve_punctuation", None)
         except ProjectValidationFailed as error:
             raise SaveProjectError(str(error)) from error
 
@@ -2157,7 +2160,9 @@ def write_project_json(target: Path, project_data: dict) -> Path | None:
     fd, temp_name = tempfile.mkstemp(prefix=f".{target.stem}.", suffix=".tmp", dir=target.parent)
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as output:
-            json.dump(strip_inline_caches(project_data), output, ensure_ascii=False, indent=2)
+            saved_project = strip_inline_caches(project_data)
+            saved_project.pop("preserve_punctuation", None)
+            json.dump(saved_project, output, ensure_ascii=False, indent=2)
             output.write("\n")
         os.replace(temp_name, target)
     except Exception:

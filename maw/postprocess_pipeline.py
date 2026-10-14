@@ -97,7 +97,7 @@ def default_postprocess_plan() -> dict[str, object]:
                 "cleanMarkdownSymbols": True,
             },
             {"id": "cleanup", "enabled": False, "scriptPath": "", "providerId": "deepseek", "customPrompt": "", "generateComparison": False, "cleanMarkdownSymbols": True},
-            {"id": "replace", "enabled": False, "replacements": [], "replacementSeparator": "arrow", "replacementTrim": True, "replacementCustomSeparator": "", "conversion": TextConversion.OFF.value},
+            {"id": "replace", "enabled": False, "replacements": [], "replacementSeparator": "arrow", "replacementTrim": True, "replacementCustomSeparator": "", "conversion": TextConversion.OFF.value, "cleanChinesePunctuation": False},
             {"id": "proofread", "enabled": False, "providerId": "deepseek", "customPrompt": "", "generateComparison": False},
             {"id": "resegment", "enabled": False, "providerId": "deepseek", "customPrompt": "", "generateComparison": False, "maxChars": 0},
             {"id": "ocr", "enabled": False, "videoPath": "", "videoPathMode": "", "regionMode": "full", "regionX1": 0, "regionY1": 0, "regionX2": 100, "regionY2": 100, "threshold": 0.5, "report": False},
@@ -151,6 +151,8 @@ def normalize_plan(raw: object) -> dict[str, object]:
                 step[key] = _normalize_replacements(value, trim=replacement_trim)
             elif key == "replacementTrim":
                 step[key] = bool(value)
+            elif key == "cleanChinesePunctuation":
+                step[key] = value is True
             elif key == "conversion":
                 step[key] = normalize_text_conversion_mode(value).value
             elif key == "maxChars":
@@ -539,7 +541,7 @@ def _pipeline_step_operation(step: Mapping[str, object]) -> str:
             for item in _normalize_replacements(step.get("replacements"))
             if isinstance(item, Mapping) and str(item.get("source") or "")
         )
-        return fixed_process_operation(replacements, normalize_text_conversion_mode(step.get("conversion")))
+        return fixed_process_operation(replacements, normalize_text_conversion_mode(step.get("conversion")), step.get("cleanChinesePunctuation") is True)
     if step_id == "ocr":
         return "ocr-dedup"
     return step_id
@@ -1033,6 +1035,7 @@ def _run_step(
             output_mode=output_mode,
             replacements=replacements,
             conversion=normalize_text_conversion_mode(step.get("conversion")),
+            clean_chinese_punctuation=step.get("cleanChinesePunctuation") is True,
             output_directory=output_directory,
             media_path=media_path,
         ))

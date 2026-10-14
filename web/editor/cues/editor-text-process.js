@@ -26,6 +26,8 @@
   const textProcessConfirm = document.getElementById('text-process-confirm');
 
 
+  const textProcessCleanPunctuation = document.getElementById('text-process-clean-punctuation');
+
   const textProcessTrim = document.getElementById('text-process-trim');
 
 
@@ -120,9 +122,84 @@
       const segment = segments[target.index];
       if (!segment) return [];
       const before = String(segment.text == null ? '' : segment.text);
-      const after = window.AsrEditorUtils.applyTextProcessing(before, options);
-      return [{ ...target, before, after, changed: before !== after }];
+      const next = planTextProcessSegment(segment, options);
+      const after = next.segment.text;
+      const itemsChanged = options.cleanChinesePunctuation
+        && JSON.stringify(segment.items) !== JSON.stringify(next.segment.items);
+      return [{ ...target, before, after, changed: before !== after || itemsChanged }];
     });
+  }
+
+  function planTextProcessSegment(segment, options) {
+    if (!options.cleanChinesePunctuation) {
+      return { segment: { ...segment, text: window.AsrEditorUtils.applyTextProcessing(segment.text, options) } };
+    }
+    const next = window.AsrEditorUtils.planChinesePunctuationCleanup(segment);
+    const cleanedText = next.text;
+    next.text = window.AsrEditorUtils.applyTextProcessing(cleanedText, { ...options, cleanChinesePunctuation: false });
+    let timingWarning = false;
+    if (next.text !== cleanedText && Array.isArray(next.items) && next.items.length) {
+      const exact = next.items.map((item) => item.text).join('') === cleanedText;
+      const beforeChars = Array.from(cleanedText), afterChars = Array.from(next.text);
+      if (exact && beforeChars.length === afterChars.length) {
+        // Keep neutral-only and empty item ownership. The generic word mapper
+        // attaches neutral text to audible items, which could duplicate it here.
+        let offset = 0;
+        next.items = next.items.map((item) => {
+          const end = offset + Array.from(item.text).length;
+          const mapped = { ...item, text: afterChars.slice(offset, end).join('') };
+          offset = end;
+          return mapped;
+        });
+      } else {
+        const timingSync = exact ? window.AsrEditorUtils.planWordTimingTextSync(next, cleanedText) : null;
+        if (timingSync?.items?.length === next.items.length
+            && timingSync.items.map((item) => item.text).join('') === next.text) next.items = timingSync.items;
+        else timingWarning = true;
+      }
+    }
+    return { segment: next, timingWarning };
+  }
+
+  function applyPunctuationTextProcessing(rows, options) {
+    const drafts = rows.filter((row) => row.changed).flatMap((row) => {
+      const segments = textProcessTargetSegments(row);
+      const before = segments[row.index];
+      if (!before || String(before.text ?? '') !== row.before) return [];
+      const plan = planTextProcessSegment(before, options);
+      const scopeUpdates = row.kind === 'main'
+        ? MaweTextCleanup.planPunctuationCleanupScopeUpdates(before, plan.segment) : [];
+      return [{ row, segments, ...plan, scopeUpdates }];
+    });
+    return MaweCommands.run('文本处理', (command) => {
+      let scopeChanged = false;
+      drafts.forEach(({ row, segments, segment, scopeUpdates }) => {
+        segment._dirty = true;
+        segments[row.index] = segment;
+        scopeUpdates.forEach((update) => {
+          MaweTextCleanup.applyPunctuationCleanupScopeUpdate(update);
+          scopeChanged = true;
+        });
+      });
+      if (scopeChanged) {
+        // Gap data caches normalize by object identity; publish the updated
+        // authorization as a fresh object before refreshing playback/export UI.
+        MaweBoot.DATA.gap_remove = { ...MaweBoot.DATA.gap_remove };
+        MaweState.changes.gapRemoveDirty = true;
+        MaweGapRemoveUi.updateGapRemoveUi();
+      }
+      if (drafts.some(({ row }) => row.kind === 'main')) {
+        MaweMultiSubtitleCore.markMainSegmentsDirty(MaweBoot.DATA.segments);
+      }
+      if (drafts.some(({ row }) => row.kind === 'extension')) MaweMultiSubtitleCore.markMultiSubtitleDirty();
+      MaweMultiSubtitleCore.syncBindingOffsets();
+      closeTextProcessModal();
+      command.commit({ cueList: true, waveform: 'overlay', preview: 'update' });
+      MaweHint.flashHint(`已应用文本处理：${drafts.length} 条字幕`, 'success');
+      if (drafts.some((draft) => draft.timingWarning)) {
+        MaweHint.flashHint('部分字词时间码文字未随组合操作更新，请按需检查', 'warning');
+      }
+    }, { captureGapRemove: true });
   }
 
 
@@ -130,6 +207,7 @@
   function getTextProcessOptions() {
     const customWrap = textProcessWrapPreset?.id === 'custom';
     return {
+      cleanChinesePunctuation: textProcessCleanPunctuation.checked,
       trim: textProcessTrim.checked,
       capitalize: textProcessCapitalize.checked,
       convertChineseNumbers: textProcessConvertNumbers.checked,
@@ -147,7 +225,7 @@
     const selected = textProcessScope && textProcessScope.length;
     textProcessScopeInfo.textContent = selected
       ? `当前范围：仅选中的 ${textProcessScope.length} 条字幕`
-      : `当前范围：全部 ${MaweBoot.DATA.segments.length} 条字幕`;
+      : `当前范围：全部 ${MaweBoot.DATA.segments.length} 条主字幕`;
     textProcessScopeInfo.classList.toggle('selected', Boolean(selected));
   }
 
@@ -168,7 +246,7 @@
   function renderTextProcessPreview() {
     const options = getTextProcessOptions();
     const wrapHasCharacters = options.addWrapChars && (options.wrapLeft || options.wrapRight);
-    const hasOperation = textProcessTrim.checked || textProcessCapitalize.checked
+    const hasOperation = textProcessCleanPunctuation.checked || textProcessTrim.checked || textProcessCapitalize.checked
       || textProcessConvertNumbers.checked || textProcessStripMarkdown.checked || wrapHasCharacters;
     const targets = textProcessTargets();
     textProcessPreview.replaceChildren();
@@ -327,7 +405,7 @@
     textProcessSelectionSnapshot = textProcessSelectionTargets();
     textProcessSelectedOnlyCb.checked = textProcessSelectionSnapshot.length > 0;
     refreshTextProcessSelectionControl();
-    [textProcessTrim, textProcessCapitalize, textProcessConvertNumbers,
+    [textProcessCleanPunctuation, textProcessTrim, textProcessCapitalize, textProcessConvertNumbers,
       textProcessStripMarkdown].forEach((input) => { input.checked = false; });
     textProcessWrapPreset = null;
     textProcessPrefixInput.value = '';
@@ -345,6 +423,7 @@
     textProcessScopeInfo,
     textProcessPreview,
     textProcessConfirm,
+    textProcessCleanPunctuation,
     textProcessTrim,
     textProcessCapitalize,
     textProcessConvertNumbers,
@@ -362,6 +441,7 @@
     textProcessTargetLabel,
     textProcessTargets,
     buildTextProcessPreview,
+    applyPunctuationTextProcessing,
     getTextProcessOptions,
     refreshTextProcessScopeInfo,
     refreshTextProcessSelectionControl,

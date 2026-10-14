@@ -40,7 +40,7 @@ const cases = [
 ];
 
 for (const fixture of cases) {
-  test(`real AI artifact keeps local projection through default cleanup, save and restoration: ${fixture.name}`, async ({ page }) => {
+  test(`real AI artifact keeps local projection through explicit cleanup, save and restoration: ${fixture.name}`, async ({ page }) => {
     const directory = makeTempDir('ai-local-punctuation');
     let server;
     try {
@@ -87,6 +87,11 @@ print(json.dumps({'path': str(artifact.project_path), 'srt': render_srt(read_pro
       await page.addInitScript(() => localStorage.setItem('moy.asr.editor.settings.v1', JSON.stringify({ autoSaveProject: false })));
       await page.goto(server.url);
       await expect(page.locator('.cue[data-idx="0"] .text')).toBeVisible();
+      expect(await page.evaluate(() => MaweBoot.DATA.segments[0].text)).toBe(produced.segments[0].text);
+      await page.evaluate(() => { MaweSelection.clearSelection({ silent: true }); MaweTextProcess.openTextProcessModal(); });
+      await expect(page.locator('#text-process-clean-punctuation')).not.toBeChecked();
+      await page.locator('#text-process-clean-punctuation').check();
+      await page.locator('#text-process-confirm').click();
       const snapshot = await page.evaluate((previewTime) => {
         MaweDom.overlayToggle.checked = true;
         MaweSettings.EDITOR_SETTINGS.assMode = false;
@@ -181,10 +186,14 @@ print(json.dumps({'path': str(artifact.project_path), 'srt': render_srt(read_pro
         await expect(page.locator('.cue[data-idx="0"] .text')).toBeVisible();
         const reopened = await page.evaluate(() => ({ text: MaweExportSrt.cleanupMainSegments()[2].text,
           array: Array.isArray(MaweBoot.DATA.markers), sources: MaweBoot.DATA.gap_remove.provenance.sources }));
-        expect(reopened.text).toBe(fixture.expected);
+        expect(reopened.text).toBe(fixture.artifactText);
         expect(reopened.array).toBe(true);
         expect(reopened.sources.ai_cleanup).toHaveLength(2);
         expect(reopened.sources.audio_gate).toHaveLength(1);
+        await page.evaluate(() => { MaweSelection.clearSelection({ silent: true }); MaweTextProcess.openTextProcessModal(); });
+        await page.locator('#text-process-clean-punctuation').check();
+        await page.locator('#text-process-confirm').click();
+        expect(await page.evaluate(() => MaweExportSrt.cleanupMainSegments()[2].text)).toBe(fixture.expected);
       }
     } finally {
       await server?.stop();

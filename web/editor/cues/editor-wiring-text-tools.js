@@ -131,7 +131,8 @@ MaweTextProcess.textProcessSelectedOnlyCb?.addEventListener('change', () => {
   MaweTextProcess.renderTextProcessPreview();
 });
 [MaweTextProcess.textProcessTrim, MaweTextProcess.textProcessCapitalize,
-  MaweTextProcess.textProcessConvertNumbers, MaweTextProcess.textProcessStripMarkdown].forEach((input) => {
+  MaweTextProcess.textProcessConvertNumbers, MaweTextProcess.textProcessStripMarkdown,
+  MaweTextProcess.textProcessCleanPunctuation].forEach((input) => {
   input?.addEventListener('change', () => {
     MaweTextProcess.refreshTextProcessInputState();
     MaweTextProcess.renderTextProcessPreview();
@@ -153,6 +154,9 @@ MaweTextProcess.textProcessConfirm?.addEventListener('click', () => {
   if (!result.changedCount) {
     MaweHint.flashHint('当前文本处理对于选中的字幕没有任何影响，未作改动', 'invalid');
     return;
+  }
+  if (options.cleanChinesePunctuation) {
+    return MaweTextProcess.applyPunctuationTextProcessing(result.rows, options);
   }
   let mainDraftTexts = null;
   const extensionDrafts = new Map();
