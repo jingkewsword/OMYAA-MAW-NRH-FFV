@@ -87,11 +87,14 @@
     let ratio = 0;
     try {
       const mctx = ensureMeasureCtx();
-      mctx.font = fontSpec(style, 100);
+      // Chromium rounds the font box to CSS pixels. Measure at a larger
+      // reference size so that rounding does not shrink wide animated text.
+      const referenceSize = 4096;
+      mctx.font = fontSpec(style, referenceSize);
       const metrics = mctx.measureText('Mg');
       const box = (Number(metrics.fontBoundingBoxAscent) || 0)
         + (Number(metrics.fontBoundingBoxDescent) || 0);
-      if (box > 0) ratio = 100 / box;
+      if (box > 0) ratio = referenceSize / box;
     } catch {
       ratio = 0;
     }

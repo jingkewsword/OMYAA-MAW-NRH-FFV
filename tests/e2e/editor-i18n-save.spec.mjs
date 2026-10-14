@@ -61,10 +61,10 @@ test('English waveform and sticker names preserve project text', async ({ page }
   await expect(page.locator('.waveform-cue-block[data-idx="0"] .waveform-cue-label').first()).toHaveText('删除');
   const row = page.locator('.cue[data-idx="0"]');
   await expect(row.locator('.sname')).toHaveText('保存');
-  await expect(row.locator('.sticker-slot img')).toHaveAttribute('title', '保存');
+  await expect(row.locator('.sticker-slot img')).toHaveAttribute('data-title', '保存');
   const reference = page.locator('.cue[data-idx="1"] .sref');
   await expect(reference).toHaveText('↑ 保存');
-  await expect(reference).toHaveAttribute('title', 'Inherits the sticker of subtitle 1');
+  await expect(reference).toHaveAttribute('data-title', 'Inherits the sticker of subtitle 1');
   await row.locator('.sticker-slot img').click();
   await expect(page.locator('#sticker-preview-name')).toHaveText('保存');
   await page.evaluate(() => {
@@ -180,9 +180,9 @@ test('English locale covers the editor shell and recent-project setting stays fi
       const value = node.nodeValue.trim();
       if (/[\u3400-\u9fff]/u.test(value)) found.add(value);
     }
-    document.querySelectorAll('[title], [placeholder], [aria-label]').forEach((element) => {
+    document.querySelectorAll('[title], [placeholder], [aria-label], [data-title]').forEach((element) => {
       if (element.closest(skip)) return;
-      ['title', 'placeholder', 'aria-label'].forEach((name) => {
+      ['title', 'placeholder', 'aria-label', 'data-title'].forEach((name) => {
         const value = element.getAttribute(name) || '';
         if (/[\u3400-\u9fff]/u.test(value)) found.add(value);
       });

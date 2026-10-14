@@ -1196,6 +1196,9 @@
     '选择播放器画面内主字幕预览的颜色': 'Choose the color of the main subtitle preview in the player',
     '调整播放器画面内副字幕预览的背景色': 'Adjust the secondary subtitle preview background color in the player',
     '选择播放器画面内副字幕预览的颜色': 'Choose the color of the secondary subtitle preview in the player',
+    '打开全局设置的播放预览页': 'Open Playback & preview in global settings',
+    '打开工程设置的时间与语言页': 'Open Time & language in project settings',
+    '导入媒体 / 字幕 / 歌词': 'Import media / subtitles / lyrics',
     '打开导出设置并定位到说话人名称选项': 'Open Export settings and locate the speaker-name option',
     '开启字幕预览中的说话人名称后默认勾选；导出 SRT 时在字幕前附加对应名称及分隔符，可手动关闭': 'Checked by default when speaker names are enabled in the subtitle preview; add the matching name and separator before each subtitle in exported SRT, and turn it off manually when needed',
     '在播放器预览的字幕前显示颜色对应的说话人名称；只影响预览，不改变字幕文本': 'Show the speaker name for each color before the subtitle in the player preview; preview only, subtitle text is unchanged',
@@ -1862,7 +1865,7 @@
     });
     observer.observe(document.body, {
       childList: true, subtree: true, attributes: true,
-      attributeFilter: ['title', 'placeholder', 'aria-label'],
+      attributeFilter: ['title', 'placeholder', 'aria-label', 'data-title'],
     });
   }
 
