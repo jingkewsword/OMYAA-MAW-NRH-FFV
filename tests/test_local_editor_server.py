@@ -18,6 +18,7 @@ import urllib.error
 import urllib.request
 import zipfile
 from dataclasses import replace
+from functools import cache
 from pathlib import Path
 from unittest import mock
 
@@ -52,6 +53,16 @@ def _write_reapeaks_for(media_path: Path) -> Path:
 
 
 class LocalEditorServerTests(CompactContainerAssertions, unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        super().setUpClass()
+        # Only the verified, immutable script payload is shared within this
+        # class. Each page still runs server_editor.ensure_bundle and renders
+        # its own project/config/template; HTTP servers and tokens stay local.
+        # The first read uses the real builder; class cleanup restores it even
+        # after a failure. Bundle mutation/build regressions use test_web_build.
+        cls.enterClassContext(mock.patch.object(edit, "build_editor_scripts", new=cache(edit.build_editor_scripts)))
+
     def test_about_release_url_targets_the_build_tag_and_dev_release_list(self) -> None:
         version = edit.get_app_version()
         self.assertEqual(
