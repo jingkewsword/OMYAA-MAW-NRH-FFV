@@ -269,8 +269,16 @@ export async function openSettingsPage(page, key) {
 
 export async function dragFloatingPanelAwayFrom(page, panelSelector, dragHandleSelector, targetSelector) {
   const panel = page.locator(panelSelector);
+  const handleLocator = page.locator(dragHandleSelector);
+  const openingHandle = await handleLocator.boundingBox();
+  if (!openingHandle) throw new Error('Floating panel drag handle is not visible');
+  const offsetX = Math.min(40, Math.max(12, openingHandle.width / 2));
+  const offsetY = Math.max(8, Math.min(15, openingHandle.height / 2));
+  // Actionability waits for opening animation and transient overlays. Measure
+  // after it settles; polling a point captured before animation can never hit.
+  await handleLocator.hover({ position: { x: offsetX, y: offsetY }, timeout: 10_000 });
   const panelBefore = await panel.boundingBox();
-  const handle = await page.locator(dragHandleSelector).boundingBox();
+  const handle = await handleLocator.boundingBox();
   const target = await page.locator(targetSelector).boundingBox();
   const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
   if (!panelBefore || !handle || !target) throw new Error('Floating panel drag fixture is not visible');
@@ -278,8 +286,6 @@ export async function dragFloatingPanelAwayFrom(page, panelSelector, dragHandleS
   const targetOnLeft = target.x + target.width / 2 < viewport.width / 2;
   const left = targetOnLeft ? viewport.width - panelBefore.width - 8 : 8;
   const top = Math.max(8, Math.min(24, viewport.height - panelBefore.height - 8));
-  const offsetX = Math.min(40, Math.max(12, handle.width / 2));
-  const offsetY = Math.max(8, Math.min(15, handle.height / 2));
   const start = { x: handle.x + offsetX, y: handle.y + offsetY };
   // Import/other actions may leave a transient hint card above the settings
   // header. Wait until the real drag handle owns this screen point so the
