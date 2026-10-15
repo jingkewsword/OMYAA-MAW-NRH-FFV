@@ -32,6 +32,7 @@ class EditorAssetContractTests(CompactContainerAssertions, unittest.TestCase):
         return "\n\n".join(edit.read_web_asset(name) for name in edit.read_editor_script_manifest())
 
 
+
     # bundle 是构建产物（不入库）：本地未跑 pnpm install 时跳过，CI / 开发机在
     # postinstall 或显式 build 之后一定存在。
     @unittest.skipUnless(
