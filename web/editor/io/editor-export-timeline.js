@@ -251,9 +251,17 @@
 
 
   function mediaTargetUrl() {
-    const media = String(MaweBoot.DATA.media || '').trim();
-    if (/^file:\/\//i.test(media) || /^[A-Za-z]:[\\/]/.test(media) || media.startsWith('/')) {
-      return stickerTargetUrl(media);
+    const candidates = [MaweBoot.DATA.media];
+    // Stored project references can be relative. The server retains their
+    // resolved native source, until a browser-local file replaces that binding.
+    if (!window.MaweProjectMediaInputs?.currentMediaBlobUrl) {
+      candidates.push(MaweBoot.SERVER_CONFIG?.autoLoadedMediaPath);
+    }
+    for (const candidate of candidates) {
+      const media = String(candidate || '').trim();
+      if (/^file:\/\//i.test(media) || /^[A-Za-z]:[\\/]/.test(media) || media.startsWith('/')) {
+        return stickerTargetUrl(media);
+      }
     }
     const current = String(MaweCoreState.player?.currentSrc || '').trim();
     if (/^file:\/\//i.test(current)) return current;

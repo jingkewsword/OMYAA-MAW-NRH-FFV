@@ -60,6 +60,28 @@ function runtime() {
   return { context, core, utils, main, extension, overlay, srt: context.window.MaweExportSrt, timeline: context.window.MaweExportTimeline };
 }
 
+test('timeline export resolves native server media without reusing a replaced binding', () => {
+  const { context, timeline } = runtime();
+  context.MaweBoot.DATA.media = '../synthetic.wav';
+  context.MaweBoot.SERVER_CONFIG = { autoLoadedMediaPath: '/recordings/synthetic.wav' };
+  assert.equal(timeline.mediaTargetUrl(), 'file:///recordings/synthetic.wav');
+  assert.equal(context.MaweBoot.DATA.media, '../synthetic.wav', 'portable project reference stays relative');
+
+  context.window.MaweProjectMediaInputs = { currentMediaBlobUrl: 'blob:replacement' };
+  assert.equal(timeline.mediaTargetUrl(), '', 'a browser-local replacement cannot export the old server source');
+  context.window.MaweProjectMediaInputs.currentMediaBlobUrl = null;
+  context.MaweBoot.SERVER_CONFIG.autoLoadedMediaPath = null;
+  assert.equal(timeline.mediaTargetUrl(), '', 'importing a project clears the native binding');
+  context.MaweBoot.SERVER_CONFIG.autoLoadedMediaPath = 'relative.wav';
+  assert.equal(timeline.mediaTargetUrl(), '', 'an unresolvable relative path cannot become a file URL');
+
+  context.MaweBoot.DATA.media = 'C:\\recordings\\synthetic.wav';
+  assert.equal(timeline.mediaTargetUrl(), 'file:///C:/recordings/synthetic.wav');
+  context.MaweBoot.DATA.media = '';
+  context.MaweCoreState.player.currentSrc = 'file:///recordings/portable.wav';
+  assert.equal(timeline.mediaTargetUrl(), 'file:///recordings/portable.wav');
+});
+
 test('trusted scope projects exact words/items, saves/reopens and safely restores with gap history', () => {
   const { core, main, context } = runtime();
   const gap = core.normalizeGapRemoveData(context.MaweBoot.DATA.gap_remove);

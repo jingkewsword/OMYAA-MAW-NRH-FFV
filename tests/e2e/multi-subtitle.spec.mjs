@@ -506,7 +506,7 @@ test('light theme keeps the main waveform subtitle white and secondary subtitle 
   });
   expect(colors.main.background).toBe('rgba(255, 255, 255, 0.82)');
   // 初始播放位置命中主字幕活动态，使用亮色主题的活动字幕深色令牌。
-  expect(colors.main.color).toBe('rgb(31, 37, 48)');
+  expect(colors.main.color).toBe('rgb(29, 29, 32)');
   expect(colors.extension.background).toBe('rgba(238, 240, 244, 0.68)');
   expect(colors.extension.background).not.toBe(colors.main.background);
 });

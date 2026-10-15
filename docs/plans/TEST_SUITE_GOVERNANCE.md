@@ -9,7 +9,7 @@
 | 同步前完整验收 | [run 38715647100](https://github.com/jingkewsword/OMYAA-MAW-NRH-FFV/actions/runs/38715647100)，head=`4a5d4754`、实际 CI merge=`de99f232`；四片与完整汇总通过，816 项无重无漏。此前 813/816 的失败属于旧提交，不再作为当前结果 |
 | main 集成 | 普通 merge 合入 fork 与上游共同 main `f01c6e6f`；保留分层选择、四片 Chromium、严格结果汇总和发布门禁，保留上游 beta.2 功能与发布归档 |
 | 冲突处理 | CHANGELOG 保留 main 的 beta.2 原文，本分支未发布的字形/英文提示/查找与画面刷新修复留在未发布区；Launcher 保留实际输入和任务切换断言，不以跳过 Key 校验替代测试准备 |
-| 本轮验证 | 构建、类型、测试治理规则与受影响行为定向验证；完整 CI 由新 head 重新发现和执行，结果以 [PR Checks](https://github.com/jingkewsword/OMYAA-MAW-NRH-FFV/pull/2/checks) 为准 |
+| 本轮验证 | 合入 main 后重新发现 830 项，首轮 823 通过/7 失败，门禁正确阻断。修复相对路径工程的 OTIO 原媒体解析，并同步两处品牌配色期望；新增低层用例检出旧实现，26 项低层与 9 项浏览器定向通过。完整 CI 由修复后的新 head 独立执行，结果以 [PR Checks](https://github.com/jingkewsword/OMYAA-MAW-NRH-FFV/pull/2/checks) 为准 |
 
 本轮范围、实际验证与未完成边界见[同步记录](../logs/release1.9.0-beta.2/261015_测试治理同步/同步验收.md)。以下第四阶段表保留当时收束快照，不能覆盖上方较新的固定提交证据。
 

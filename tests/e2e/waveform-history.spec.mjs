@@ -2290,10 +2290,12 @@ test('server media loads from the resolved project path and OTIO keeps its absol
   await gotoWaveform(page, server.url);
   const state = await page.evaluate(() => ({
     media: MaweBoot.DATA.media,
+    nativeMedia: MaweBoot.SERVER_CONFIG.autoLoadedMediaPath,
     currentSrc: document.getElementById('player').currentSrc,
   }));
   expect(state.media).toMatch(/synthetic\.wav$/);
-  expect(state.media).toMatch(/^(?:[A-Za-z]:[\\/]|\/)/);
+  expect(state.nativeMedia).toMatch(/^(?:[A-Za-z]:[\\/]|\/)/);
+  expect(state.nativeMedia).toMatch(/synthetic\.wav$/);
   expect(state.currentSrc).toBe(`${server.url}media`);
 
   await page.evaluate(() => {
