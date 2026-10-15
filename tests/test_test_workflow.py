@@ -66,6 +66,16 @@ class TestWorkflowTests(unittest.TestCase):
                                  ["docs-navigation", "release-docs", "docs-regressions"])
                 self.assertIn("tests.test_docs_check", commands[-1][1])
                 self.assertIn("tests.test_release_notes", commands[-1][1])
+        tool_ids = {case.id() for case in run_tests.cases(run_tests.pack_suite("tools"))}
+        for module in ("test_verification_checklist", "test_verification_checklist_build"):
+            with self.subTest(checklist_module=module):
+                expected = {case.id() for case in run_tests.cases(
+                    run_tests.build_suite([f"tests.{module}"], str(ROOT / "tests"), "test_*.py"))}
+                self.assertTrue(expected)
+                self.assertTrue(expected.issubset(tool_ids), "tool-only changes must run Markdown/HTML regressions")
+                plan = select_packs([f"tests/{module}.py"])
+                self.assertEqual(plan["packs"], ["docs", "tools"])
+                self.assertFalse(plan["preview"])
         for path in ("scripts/check_docs_extra.py", "tools/filmstrip-lab/backend.py", "tools/unknown/check.py"):
             with self.subTest(unknown_tool=path):
                 self.assertTrue(ALL_MERGE.issubset(select_packs([path])["packs"]))

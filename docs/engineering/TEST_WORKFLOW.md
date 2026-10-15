@@ -75,6 +75,8 @@ uv run --no-sync python scripts/test_workflow.py --stage merge --changed maw/qua
 
 文档检查的模式组合通过 `check_docs.main(argv)` 复用真实 parser 与完整命令体，保留 Git 读树/忽略检查；CLI 的 Unicode/JSON、默认/严格模式文本和进程退出码另有五次真实调用。这样减少解释器重复启动，不减少用例或替换业务检查。对模式增加断言时复用该入口；只有需要检验进程、编码或 CLI 边界时才追加真实子进程，避免每种组合都重新启动环境。
 
+清单工具的 HTML 与 Markdown 构建回归均属于 tools，包括 `test_verification_checklist_build` 的 16 项用例；工具源码或对应 Python 测试单独改动选择 docs/tools，不准备应用预览。归属回归同时核对模块全部 ID，防止新增模块落入 common 后被工具选择漏过。
+
 每次运行的计划、聚合结果、Python IDs/skip 原因、Node JUnit 与 Playwright JSON 写入 `.artifacts/test-workflow/<id>/`，子命令的 bounded 日志与 PID/时限证据仍走 `scripts/run_check.py`。失败后停止当前批次，后续门禁尚未运行，不能宣称通过。NumPy/soundfile/Pillow/FFmpeg/内核缺失、编码器不支持、必需 fixture 缺失、Node/Playwright skip、超时均不能得到 required 成功。Windows 的特定 symlink 权限与 OS opener、不适用的 Unix checksum，以及非 Windows 的 LOCALAPPDATA/startfile 测试单独登记为 platform_not_applicable；Linux CI 必须运行符号链接边界。
 
 CI 有独立选择、文档、业务、Windows 生命周期、完整浏览器分片与网站任务，最后由 `Required test gate` 汇总实际必需 job 的成功。选择器必须输出全部 11 个准入 flag，缺失、非法值或互相矛盾的输出直接失败，不能当作未选择。选中的 job 失败、取消或跳过也不能通过。

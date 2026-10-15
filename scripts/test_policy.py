@@ -13,7 +13,7 @@ MEDIA_MODULES = {"test_gap_removed_audio_export", "test_gap_removed_video_compat
 DOC_TOOL_PATHS = {"scripts/check_docs.py", "scripts/prepare_release_notes.py",
                   "tests/test_docs_check.py", "tests/test_release_notes.py"}
 TOOL_MODULES = {"test_docs_check", "test_release_notes", "test_run_check", "test_run_tests_runner",
-                "test_verification_checklist", "test_verify_sha256_script", "test_macos_icon",
+                "test_verification_checklist", "test_verification_checklist_build", "test_verify_sha256_script", "test_macos_icon",
                 "test_packaging_contract", "test_test_workflow", "test_browser_results"}
 MEDIA_METHODS = {
     "test_streaming_extraction_and_cache_match", "test_low_rate_multichannel_keeps_opposite_and_one_sided_audio",
