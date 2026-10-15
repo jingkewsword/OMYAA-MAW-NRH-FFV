@@ -367,14 +367,19 @@ test('blank LLM form fields use the effective connection and save response', asy
   await page.locator('#autoPostprocessEnabled').check();
   await page.locator('#autoStepProofread').click();
   await expect(page.locator('#settingsModal')).toBeVisible();
+  await expect(page.locator('#llmModel')).toBeFocused();
   await page.locator('#llmBaseUrl').fill('');
   await page.locator('#llmModel').fill('');
+  await expect(page.locator('#llmBaseUrl')).toHaveValue('');
+  await expect(page.locator('#llmModel')).toHaveValue('');
   await page.locator('#testLlmConnection').click();
   await expect(page.locator('#autoStepProofread')).toBeChecked();
   await expect(page.locator('#llmBaseUrl')).toHaveValue('https://api.deepseek.com');
   await expect(page.locator('#llmModel')).toHaveValue('deepseek-flash');
   await page.locator('#llmBaseUrl').fill('');
   await page.locator('#llmModel').fill('');
+  await expect(page.locator('#llmBaseUrl')).toHaveValue('');
+  await expect(page.locator('#llmModel')).toHaveValue('');
   await page.locator('#saveLlmSettings').click();
   await expect(page.locator('#llmBaseUrl')).toHaveValue('https://api.deepseek.com');
   await expect(page.locator('#llmModel')).toHaveValue('deepseek-flash');
@@ -382,7 +387,9 @@ test('blank LLM form fields use the effective connection and save response', asy
     const item = window.MAWLauncher.config.postprocessProviders.find(item => item.id === 'deepseek');
     return [item.hasBaseUrl, item.hasModel, item.verified];
   })).toEqual([true, true, true]);
-  for (const { payload } of await page.evaluate(() => window.llmFallbackCalls)) {
+  const calls = await page.evaluate(() => window.llmFallbackCalls);
+  expect(calls.map(call => call.method)).toEqual(['test_postprocess_connection', 'save_postprocess_settings']);
+  for (const { payload } of calls) {
     expect(payload.baseUrl).toBe('');
     expect(payload.model).toBe('');
   }

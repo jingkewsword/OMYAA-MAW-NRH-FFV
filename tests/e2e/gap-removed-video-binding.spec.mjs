@@ -32,6 +32,8 @@ async function withFixture(page, run) {
       window.writes = 0;
       window.outputClosed = false;
       window.MaweInlineEdit = {};
+      window.thumbnailBindingChanges = [];
+      window.MaweCoreState = { waveformEditor: { setThumbnailBinding: value => window.thumbnailBindingChanges.push(value) } };
       window.MaweBoot = { FILENAME_BASE: 'test', SERVER_CONFIG: {
         canGapRemovedVideoExport: true, gapRemovedVideoSourceName: 'source.mp4',
         gapRemovedVideoExportUrl: '/export', requestToken: 'fixture',
@@ -77,6 +79,7 @@ for (const mutation of ['detach', 'replace-config', 'generation', 'source-id', '
       }, mutation);
       await expect.poll(() => page.evaluate(() => window.hints.at(-1))).toContain('绑定已变更');
       expect(requests).toEqual([]);
+      if (mutation === 'detach') expect(await page.evaluate(() => window.thumbnailBindingChanges)).toEqual(['']);
       expect(await page.evaluate(() => window.writes)).toBe(0);
     });
   });

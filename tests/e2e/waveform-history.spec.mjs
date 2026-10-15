@@ -1,3 +1,4 @@
+import { gotoWaveform } from './helpers.mjs';
 import { expect, test } from '@playwright/test';
 import { join } from 'node:path';
 import {
@@ -45,7 +46,7 @@ async function enableSubtitleOverlayPreview(page) {
 }
 
 test('removes adjacent corner radii from cue fragments split across waveform rows', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await page.evaluate(() => {
     MaweCoreState.waveformEditor.settings.mode = 'multi';
     MaweCoreState.waveformEditor.settings.secondsPerRow = 5;
@@ -81,7 +82,7 @@ test('removes adjacent corner radii from cue fragments split across waveform row
 });
 
 test('undoing a waveform-created subtitle keeps redo available', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   const row = page.locator('.waveform-row').filter({ has: page.locator('[data-idx="0"]') }).first();
   await expect(row).toBeVisible();
 
@@ -100,7 +101,7 @@ test('undoing a waveform-created subtitle keeps redo available', async ({ page }
 });
 
 test('blank waveform context menu disables subtitle creation over an existing cue', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   const row = page.locator('.waveform-row').first();
   await expect(row).toBeVisible();
   const box = await row.boundingBox();
@@ -113,7 +114,7 @@ test('blank waveform context menu disables subtitle creation over an existing cu
 });
 
 test('gap click does not show drag styling until the pointer moves', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await page.evaluate(() => {
     MaweBoot.DATA.gap_remove = {
       schema: 'moy.asr.gap_remove.v1',
@@ -156,7 +157,7 @@ test('gap click does not show drag styling until the pointer moves', async ({ pa
 });
 
 test('gap context menu and modifier drags update the gap timeline', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   const setGaps = async (gaps, operationMode = 'boundary_drag') => {
     await page.evaluate(({ nextGaps, nextMode }) => {
       MaweBoot.DATA.gap_remove = {
@@ -350,7 +351,7 @@ test('gap context menu and modifier drags update the gap timeline', async ({ pag
 });
 
 test('gap settings expose compact actions and screenshot defaults', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await page.locator('#gap-remove-manage').click();
 
   await expect(page.locator('#gap-remove-threshold')).toHaveValue('400');
@@ -374,7 +375,7 @@ test('gap settings expose compact actions and screenshot defaults', async ({ pag
 });
 
 test('disables subtitles by removed-gap coverage and remaining duration thresholds', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await page.evaluate(() => {
     MaweBoot.DATA.segments.length = 0;
     [
@@ -438,7 +439,7 @@ test('disables subtitles by removed-gap coverage and remaining duration threshol
 });
 
 test('shrinks existing gaps from the gap settings padding', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await page.evaluate(() => {
     MaweBoot.DATA.gap_remove = {
       schema: 'moy.asr.gap_remove.v1',
@@ -489,7 +490,7 @@ test('shrinks existing gaps from the gap settings padding', async ({ page }) => 
 });
 
 test('N creates a subtitle at the waveform pointer and focuses the new cue', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await page.locator('.player-stage').hover();
   await page.keyboard.press('n');
   await expect.poll(() => page.evaluate(() => MaweBoot.DATA.segments.length)).toBe(6);
@@ -514,7 +515,7 @@ test('N creates a subtitle at the waveform pointer and focuses the new cue', asy
 });
 
 test('Ctrl+dragging blank waveform creates the dragged duration and focuses the new cue', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   const row = page.locator('.waveform-row').first();
   await expect(row).toBeVisible();
   const box = await row.boundingBox();
@@ -557,7 +558,7 @@ test('Ctrl+dragging blank waveform creates the dragged duration and focuses the 
 });
 
 test('Ctrl+dragging a too-short range shows a warning toast', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   const row = page.locator('.waveform-row').first();
   await expect(row).toBeVisible();
   const box = await row.boundingBox();
@@ -583,7 +584,7 @@ test('Ctrl+dragging a too-short range shows a warning toast', async ({ page }) =
 });
 
 test('Ctrl+dragging an existing cue is rejected without a preview', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   const cue = page.locator('.waveform-cue-block[data-idx="0"]').first();
   await expect(cue).toBeVisible();
   const box = await cue.boundingBox();
@@ -604,7 +605,7 @@ test('Ctrl+dragging an existing cue is rejected without a preview', async ({ pag
 });
 
 test('Ctrl+dragging from blank space stops at an existing cue boundary', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   const row = page.locator('.waveform-row').first();
   await expect(row).toBeVisible();
   const box = await row.boundingBox();
@@ -636,7 +637,7 @@ test('Ctrl+dragging from blank space stops at an existing cue boundary', async (
 });
 
 test('waveform background split supports undo and redo', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await makeFirstCueWordSplittable(page);
   const row = page.locator('.waveform-row').filter({ has: page.locator('[data-idx="0"]') }).first();
   await expect(row).toBeVisible();
@@ -667,7 +668,7 @@ test('waveform background split supports undo and redo', async ({ page }) => {
 });
 
 test('manual text split keeps malformed item timing inside both cues and restores it with undo', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   const original = {
     id: 'manual-item-split',
     start: 25160,
@@ -766,7 +767,7 @@ test('manual text split keeps malformed item timing inside both cues and restore
 });
 
 test('current-cue text keeps the list and waveform labels in sync through undo and redo', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
 
   const waveformCue = page.locator('.waveform-cue-block[data-idx="0"]').first();
   const waveformLabel = waveformCue.locator('.waveform-cue-label');
@@ -806,7 +807,7 @@ test('current-cue text keeps the list and waveform labels in sync through undo a
 });
 
 test('current-cue Escape behavior follows the operation setting', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   const panelText = page.locator('#cue-panel-text');
   const listText = page.locator('.cue[data-idx="0"] .text');
   await page.locator('.waveform-cue-block[data-idx="0"]').first().click();
@@ -830,7 +831,7 @@ test('current-cue Escape behavior follows the operation setting', async ({ page 
 });
 
 test('C merge refreshes the paused main subtitle preview', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await enableSubtitleOverlayPreview(page);
   await page.evaluate(() => {
     const player = document.getElementById('player');
@@ -849,7 +850,7 @@ test('C merge refreshes the paused main subtitle preview', async ({ page }) => {
 });
 
 test('C merge keeps the subtitle list at its current position', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await page.evaluate(() => {
     const segments = Array.from({ length: 40 }, (_, index) => ({
       start: index * 5000,
@@ -891,7 +892,7 @@ test('C merge keeps the subtitle list at its current position', async ({ page })
 });
 
 test('B splits the selected subtitle under the cue-list pointer and supports undo and redo', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await makeFirstCueWordSplittable(page);
   const text = page.locator('.cue[data-idx="0"] .text');
   await enableSubtitleOverlayPreview(page);
@@ -929,7 +930,7 @@ test('B splits the selected subtitle under the cue-list pointer and supports und
 });
 
 test('retries an inline split with B or Enter and clamps both halves to 100ms', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await page.evaluate(() => {
     const segment = MaweBoot.DATA.segments[0];
     segment.text = 'Alpha Bravo';
@@ -989,7 +990,7 @@ test('retries an inline split with B or Enter and clamps both halves to 100ms', 
 });
 
 test('long-only filtering temporarily keeps split results visible until focus leaves', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await makeFirstCueWordSplittable(page);
 
   await page.locator('#cue-list-settings-toggle').click();
@@ -1023,7 +1024,7 @@ test('long-only filtering temporarily keeps split results visible until focus le
 });
 
 test('B split makes the selected latter half the Shift+click anchor', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await makeFirstCueWordSplittable(page);
   const cues = page.locator('.cue');
 
@@ -1049,7 +1050,7 @@ test('B split makes the selected latter half the Shift+click anchor', async ({ p
 });
 
 test('waveform navigation keeps a cue row in the comfort zone', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await page.locator('#waveform-settings-toggle').click();
   await page.locator('#waveform-seconds-per-row').selectOption('20');
   await page.locator('#waveform-row-height').selectOption('64');
@@ -1098,7 +1099,7 @@ test('waveform navigation keeps a cue row in the comfort zone', async ({ page })
 });
 
 test('rapid subtitle navigation reuses cached waveform rows', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await expect(page.locator('.cue[data-idx="0"]')).toBeVisible();
   await page.locator('.cue[data-idx="0"]').click();
 
@@ -1136,7 +1137,7 @@ test('rapid subtitle navigation reuses cached waveform rows', async ({ page }) =
 });
 
 test('B does not split when the playhead is in a gap or while editing text', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await page.locator('.cue[data-idx="0"]').click();
   // 播放头位于空隙（20s）：列表外按 B 只提示、不拆分
   await page.evaluate(() => {
@@ -1157,7 +1158,7 @@ test('B does not split when the playhead is in a gap or while editing text', asy
 });
 
 test('B splits at the pointer audio position while hovering the waveform', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await makeFirstCueWordSplittable(page);
   const row = page.locator('.waveform-row').first();
   const box = await row.boundingBox();
@@ -1170,7 +1171,7 @@ test('B splits at the pointer audio position while hovering the waveform', async
 });
 
 test('Home and End seek the player and reveal the media boundaries', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await expect.poll(() => page.evaluate(() => {
     const scroll = document.getElementById('waveform-scroll');
     return scroll.scrollHeight > scroll.clientHeight;
@@ -1209,7 +1210,7 @@ test('Home and End seek the player and reveal the media boundaries', async ({ pa
 });
 
 test('Home and End preserve native search and help-tab behavior', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await page.locator('.cue[data-idx="2"]').click();
   await page.evaluate(() => {
     const nativeTargets = document.createElement('div');
@@ -1257,7 +1258,7 @@ test('Home and End preserve native search and help-tab behavior', async ({ page 
 });
 
 test('Home and End follow the main cue-list owner without seeking media', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await page.locator('.cue[data-idx="2"]').click();
   await page.locator('#search').fill('a');
   await expect(page.locator('.cue[data-idx="4"]')).toHaveClass(/hidden/);
@@ -1278,7 +1279,7 @@ test('Home and End follow the main cue-list owner without seeking media', async 
 });
 
 test('Home and End keep extension cue-list navigation on the exact track', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await page.evaluate(() => {
     MaweBoot.DATA.multi_subtitle = {
       schema: 'moy.asr.multi_subtitle.v1',
@@ -1323,7 +1324,7 @@ test('Home and End keep extension cue-list navigation on the exact track', async
 });
 
 test('Home and End help explains cue-list and media routing in Chinese and English', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await page.locator('#help-toggle').click();
   const helpPanel = page.locator('#help-panel');
   await expect(helpPanel).toContainText('选择并显示当前轨道首/末条可见字幕');
@@ -1335,7 +1336,7 @@ test('Home and End help explains cue-list and media routing in Chinese and Engli
 });
 
 test('hovering a selected subtitle shows the B split hint', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   const cue = page.locator('.cue[data-idx="0"]');
   await cue.click();
   const text = cue.locator('.text');
@@ -1355,7 +1356,7 @@ test('hovering a selected subtitle shows the B split hint', async ({ page }) => 
 });
 
 test('the last multi-row waveform uses the media remainder width', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await page.evaluate(() => {
     MaweCoreState.waveformEditor.settings.mode = 'multi';
     MaweCoreState.waveformEditor.settings.secondsPerRow = 64;
@@ -1382,7 +1383,7 @@ test('requires a second B in the split dialog before forcing a short-side cut', 
       splitUseWordTimestamps: false,
     }));
   });
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await page.evaluate(() => {
     const segment = MaweBoot.DATA.segments[0];
     segment.text = 'Alpha Bravo';
@@ -1426,7 +1427,7 @@ test('requires a second B in the split dialog before forcing a short-side cut', 
 });
 
 test('B and C refresh cue overlays without redrawing cached waveform canvases', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await makeFirstCueWordSplittable(page);
   await page.evaluate(() => {
     MaweCoreState.waveformEditor.settings.secondsPerRow = 60;
@@ -1475,7 +1476,7 @@ test('B and C refresh cue overlays without redrawing cached waveform canvases', 
 });
 
 test('waveform appearance wheel adjustments wait for input to settle', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await page.evaluate(() => {
     MaweCoreState.waveformEditor.settings.mode = 'multi';
     MaweCoreState.waveformEditor.settings.secondsPerRow = 300;
@@ -1536,7 +1537,7 @@ test('waveform appearance wheel adjustments wait for input to settle', async ({ 
 });
 
 test('spectral color toggle shows pending state and ignores repeated clicks', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await page.evaluate(() => {
     MaweCoreState.waveformEditor.settings.mode = 'multi';
     MaweCoreState.waveformEditor.settings.secondsPerRow = 10;
@@ -1616,7 +1617,7 @@ test('spectral color toggle shows pending state and ignores repeated clicks', as
 });
 
 test('settings gears stay at the end of their headers and rise above dividers', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   const settings = [
     ['#cue-editor-settings-toggle', '.cue-editor-toolbar', '#cue-editor-settings-panel'],
     ['#waveform-settings-toggle', '.waveform-toolbar', '#waveform-settings-panel'],
@@ -1670,7 +1671,7 @@ test('settings gears stay at the end of their headers and rise above dividers', 
 });
 
 test('help reflects the selected subtitle-edit split key', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await toggleGlobalSettings(page);
   await openSettingsPage(page, 'split-merge');
   await page.locator('#help-toggle').click();
@@ -1727,7 +1728,7 @@ test('help reflects the selected subtitle-edit split key', async ({ page }) => {
 });
 
 test('contextual help links open their matching Help tabs', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   const helpPanel = page.locator('#help-panel');
 
   await page.locator('#gap-remove-manage').click();
@@ -1767,7 +1768,7 @@ test('contextual help links open their matching Help tabs', async ({ page }) => 
 });
 
 test('Help settings actions open the related waveform and media settings', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   const helpPanel = page.locator('#help-panel');
 
   await page.locator('#help-toggle').click();
@@ -1833,7 +1834,7 @@ test('Help settings actions open the related waveform and media settings', async
 });
 
 test('waveform toolbar exposes grouped icon controls and selected cues use a yellow border', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
 
   const utilityGroup = page.locator('.toolbar-utility-group');
   const selectTool = page.locator('[data-waveform-tool="select"]');
@@ -1860,7 +1861,7 @@ test('waveform toolbar exposes grouped icon controls and selected cues use a yel
 });
 
 test('extends selected subtitles without remapping items and undoes the batch in one step', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   const cues = page.locator('.cue');
   await cues.nth(0).click();
   await page.keyboard.down('ControlOrMeta');
@@ -1904,7 +1905,7 @@ test('extends selected subtitles without remapping items and undoes the batch in
 });
 
 test('C merges a common group and Shift+A/D extends the subtitle selection', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   const cues = page.locator('.cue');
   await expect(cues).toHaveCount(6);
 
@@ -1969,7 +1970,7 @@ test('C merges a common group and Shift+A/D extends the subtitle selection', asy
 });
 
 test('context-menu subtitle deletion is immediate and undoable', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   let confirmationShown = false;
   page.on('dialog', async (dialog) => {
     confirmationShown = true;
@@ -2041,7 +2042,7 @@ test('colored subtitles export per-color SRT files including the uncolored defau
 });
 
 test('subtitle export keeps a stable menu and hides colors without enabled colored subtitles', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await expect(page.locator('#download-srt')).toHaveCount(0);
   await expect(page.locator('#subtitle-export-dropdown')).toBeVisible();
   await page.locator('#subtitle-export-btn').click();
@@ -2081,7 +2082,7 @@ test('subtitle export keeps a stable menu and hides colors without enabled color
 });
 
 test('nested export menus preserve pointer reachability and keyboard focus', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   const exportButton = page.locator('#extra-export-btn');
   const otioToggle = page.locator('#extra-export-menu > .dropdown-submenu').first()
     .locator(':scope > .dropdown-submenu-toggle');
@@ -2112,7 +2113,7 @@ test('nested export menus preserve pointer reachability and keyboard focus', asy
 });
 
 test('nested export menus keep the current submenu while the pointer crosses its aim corridor', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   const exportButton = page.locator('#extra-export-btn');
   const otioWrapper = page.locator('#extra-export-menu > .dropdown-submenu').first();
   const dynamicWrapper = page.locator('#extra-export-menu > .dropdown-submenu').nth(1);
@@ -2145,7 +2146,7 @@ test('nested export menus keep the current submenu while the pointer crosses its
 });
 
 test('sticker Resolve and OTIO exports expand references per enabled subtitle', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   const result = await page.evaluate(() => {
     MaweBoot.DATA.segments = [
       { start: 1000, end: 2000, text: 'one', sticker: { name: 'reaction', path: 'reaction.png' } },
@@ -2171,7 +2172,7 @@ test('sticker Resolve and OTIO exports expand references per enabled subtitle', 
 });
 
 test('gap-removed OTIO exports subtitle text as clip markers with Resolve colors', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   const result = await page.evaluate(() => {
     MaweBoot.DATA.segments.splice(
       0,
@@ -2286,7 +2287,7 @@ test('gap-removed export includes color SRT and names OTIO as a timeline project
 });
 
 test('server media loads from the resolved project path and OTIO keeps its absolute source URL', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   const state = await page.evaluate(() => ({
     media: MaweBoot.DATA.media,
     currentSrc: document.getElementById('player').currentSrc,
@@ -2381,7 +2382,7 @@ test('server media loads from the resolved project path and OTIO keeps its absol
 });
 
 test('OTIO exports every source audio stream as its own audio track', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   const result = await page.evaluate(() => {
     MaweBoot.DATA.media_metadata = {
       audio_tracks: [

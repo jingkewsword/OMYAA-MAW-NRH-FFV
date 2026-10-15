@@ -186,9 +186,27 @@ export function testSegments() {
   ];
 }
 
-// A word-mode split must land between words rather than in the middle of an
-// item. Keep the shared identity fixture unchanged for the other tests and
-// opt into this two-word shape only in split-specific scenarios.
+// Media availability can change the filmstrip shell after document load.
+export async function waitForWaveformLayout(page) {
+  await page.waitForFunction(() => {
+    const wave = window.MaweCoreState?.waveformEditor;
+    if (!wave?.renderedRows?.length) return false;
+    const pictures = wave.thumbnailController;
+    return !window.MaweBoot?.SERVER_CONFIG?.thumbnailBinding || !pictures?.enabled
+      || ['ready', 'partial', 'unavailable', 'error', 'cancelled'].includes(pictures.state);
+  });
+  // Binding availability changes the row shell height. Finish the queued
+  // layout frame before a scenario captures pointer geometry or canvas IDs.
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+}
+
+export async function gotoWaveform(page, url, options) {
+  const response = await page.goto(url, options);
+  await waitForWaveformLayout(page);
+  return response;
+}
+
+// Keep the shared identity fixture unchanged; split scenarios opt into two words.
 export async function makeFirstCueWordSplittable(page) {
   await page.evaluate(() => {
     const segment = MaweBoot.DATA.segments[0];

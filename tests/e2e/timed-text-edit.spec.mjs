@@ -6,6 +6,7 @@ import {
   findFreePort,
   generateWav,
   generateWaveformPayload,
+  gotoWaveform,
   makeTempDir,
   startServer,
 } from './helpers.mjs';
@@ -273,7 +274,7 @@ test('search reveals filtered rows in the center and highlights/scrolls the matc
 
 test('English whole-text search mirror preserves subtitles through highlights and language switches', async ({ page }, testInfo) => {
   await page.addInitScript(() => localStorage.setItem('moy.asr.editor.onboarding.v1', 'completed'));
-  await page.goto(`${server.url}?lang=en`);
+  await gotoWaveform(page, `${server.url}?lang=en`);
   await page.evaluate(() => {
     MaweBoot.DATA.segments[0].text = '查找';
     MaweBoot.DATA.segments[1].text = '查找保存';
@@ -285,6 +286,7 @@ test('English whole-text search mirror preserves subtitles through highlights an
   const textarea = page.locator('#timed-text-edit-single-textarea');
   await expect(mirror).toHaveText('查找\n查找保存');
   await page.locator('#timed-text-edit-find').fill('查找');
+  await expect(page.locator('#timed-text-edit-find')).toHaveValue('查找');
   await expect(mirror.locator('.search-match')).toHaveText(['查找', '查找']);
   await expect(mirror).toHaveText('查找\n查找保存');
   await expect(textarea).toHaveValue('查找\n查找保存');
@@ -293,12 +295,15 @@ test('English whole-text search mirror preserves subtitles through highlights an
     await expect(mirror).toHaveText('查找\n查找保存');
     await expect(textarea).toHaveValue('查找\n查找保存');
   }
-  const spacing = await page.locator('.timed-text-edit-search').evaluate((element) => ({
-    margin: parseFloat(getComputedStyle(element).marginTop),
-    distance: element.getBoundingClientRect().top - element.previousElementSibling.getBoundingClientRect().bottom,
-  }));
-  expect(spacing.margin).toBeGreaterThanOrEqual(8);
-  expect(spacing.distance).toBeGreaterThanOrEqual(8);
+  const spacing = await page.locator('.timed-text-edit-search').evaluate(element => {
+    const toolbar = element.closest('.timed-text-edit-toolbar');
+    return {
+      columns: element.getBoundingClientRect().left - element.previousElementSibling.getBoundingClientRect().right,
+      header: toolbar.getBoundingClientRect().top - toolbar.previousElementSibling.getBoundingClientRect().bottom,
+    };
+  });
+  expect(spacing.columns).toBeGreaterThanOrEqual(8);
+  expect(spacing.header).toBeGreaterThanOrEqual(8);
   console.log('pure-text search spacing:', JSON.stringify(spacing));
   await page.locator('#timed-text-edit-modal').screenshot({ path: testInfo.outputPath('english-project-search.png') });
 });

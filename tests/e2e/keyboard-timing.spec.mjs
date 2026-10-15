@@ -1,3 +1,4 @@
+import { gotoWaveform } from './helpers.mjs';
 import { expect, test } from '@playwright/test';
 import { join } from 'node:path';
 import {
@@ -35,7 +36,7 @@ async function loadAttachedCues(page, autoSnapAdjacentCues, adjacentBoundaryMode
       localStorage.setItem('moy.asr.editor.settings.v1', JSON.stringify(settings));
     }, { autoSnap: autoSnapAdjacentCues, boundaryMode: adjacentBoundaryMode });
   }
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await page.evaluate(() => {
     // Earlier frame-timebase cases autosave this shared test server's project.
     // Restore the fixture's millisecond baseline before testing default steps.
