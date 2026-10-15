@@ -22,6 +22,8 @@
     '关键帧标记': 'Keyframe marks',
     '隐藏画面带': 'Hidden',
     '显示关键帧标记': 'Showing keyframe marks',
+    '实时生成补间': 'Generate missing pictures live',
+    '铺满模式下为当前视图实时解码缺失的画面格；关闭后只读取并显示已有缓存画面。关键帧标记模式不参与实时解码': 'In Film strip mode, decode missing pictures for the current view live. Turn this off to show cached pictures only. Keyframe marks mode does not decode pictures live.',
     '在波形上方显示视频画面导航；本机 Server 绑定视频时可用': 'Show video picture navigation above the waveform when video is bound to the local Server',
     '视频画面导航，点击或拖动定位': 'Video picture navigation; click or drag to seek',
     '字词码': 'Timed words',
