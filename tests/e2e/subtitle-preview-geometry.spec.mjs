@@ -50,6 +50,10 @@ async function revealOverlay(page) {
   });
   const overlay = page.locator('#overlay');
   await expect(overlay).toBeVisible();
+  // Visibility can precede the media-loading overlay and final layout frames.
+  // Confirm the real drag surface is stable and receives events before callers
+  // capture coordinates; keep the actual mouse gesture and geometry assertions.
+  await overlay.hover();
   return overlay;
 }
 
