@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { spawnServerProcess, stopServerProcess, serverRequest } from './e2e/server-process.mjs';
 
-test('managed command preserves argument boundaries and stdout/stderr', { timeout: 15000 }, async () => {
+// Windows first starts the cold PowerShell/Job supervisor. This test checks
+// transport fidelity, not supervisor compilation speed or HTTP deadlines.
+test('managed command preserves argument boundaries and stdout/stderr',
+  { timeout: process.platform === 'win32' ? 60_000 : 15_000 }, async () => {
   const values = ['space here', '中文', 'quote"here', '', 'trailing\\', 'slash\\"quote', '$() & ; literal'];
   const child = spawnServerProcess(process.execPath, ['-e',
     'console.log(JSON.stringify(process.argv.slice(1))); console.error("stderr preserved");', '--', ...values]);
