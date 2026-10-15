@@ -17,11 +17,28 @@ uv run --no-sync python scripts/test_workflow.py --stage dev --component launche
 
 ```sh
 uv run --no-sync python scripts/run_check.py --timeout 90 -- uv run --no-sync python scripts/run_tests.py --required tests.test_project_io
-uv run --no-sync python scripts/test_workflow.py --stage merge --changed maw/reapeaks.py --plan-only
-uv run --no-sync python scripts/test_workflow.py --stage merge --changed maw/reapeaks.py
+uv run --no-sync python scripts/test_workflow.py --stage merge --changed maw/quapeaks.py --plan-only
+uv run --no-sync python scripts/test_workflow.py --stage merge --changed maw/quapeaks.py
 ```
 
 `--changed` 可以重复；省略时读取当前 HEAD 相对的暂存/工作区改动及未跟踪文件。分支整体检查应使用 `--base-ref origin/main`，先确认本地 ref 是预期基线；CI 使用事件给出的 base SHA。Git diff 失败会终止，不能用空列表掩盖；没有可靠改动列表时扩大为全套 required 组。改名按删除与新增两条路径处理。
+
+`--stage dev` 仅运行固定核心，不自动追加影响测试。先用目标方法/模块复现，一轮修改结束运行所属核心，再执行本次风险族。显式 `--base-ref` 只比较已提交的分支差异，未提交修改须另外纳入；默认工作区比较也不能代替整条已提交分支的检查。
+
+## 分级依据
+
+按影响面、错误后果与外部依赖分级，不按修改行数。少量共享状态或保存逻辑变化仍可能需要完整回归。
+
+| 影响 | 开发反馈 | 合并准入 |
+| --- | --- | --- |
+| 文档正文、已知文档工具 | 相关文档/脚本回归 | docs；不准备应用依赖 |
+| 独立测试 spec，无生产变化 | 该 spec 实际执行 | docs + 该 spec；多个修改取并集 |
+| 局部生产算法或 UI | 目标行为测试 + 所属核心；前端重建受影响 bundle | common/browser/smoke + 消费者族 |
+| 编解码、缩略图、媒体缓存 | 算法与短真实媒体 | media；长度/mip/长时声学偏移另加 long-media |
+| 进程启动、取消、所有权 | 状态机 + 真实进程代表 | lifecycle/相关媒体或服务边界，按 OS 验证 |
+| 共享 state/host/history/schema、测试 harness/锁/CI、未知边界 | 核心尽早反馈 + 定向故障复现 | 完整相关集合；共享基础设施和未知路径扩大全部 |
+
+每个缩减必须说明保留何种独立故障检出能力。算法组合适合低层；跨模块接线至少保留一次真实往返；OS 回收、编解码、DOM/像素几何保留真实环境。依赖缺失不能转换为成功。
 
 ## 合并与发布
 
@@ -30,7 +47,8 @@ uv run --no-sync python scripts/test_workflow.py --stage merge --changed maw/rea
 | 业务合并 | common Python/Node、构建与类型、browser 契约、两个真实文件/HTTP smoke specs、文档导航 | media、long-media、lifecycle、tools、完整浏览器回归 |
 | 纯文档 | 文档导航、发布归档与对应回归 | Schema 文档视为共享契约，扩大所有业务组 |
 | 网站 | 文档检查、网站构建 | 业务源码同批变化时合并相关组 |
-| 工具 | 文档检查、tools | 公共测试入口/依赖锁/工作流变更扩大全部组 |
+| 文档工具 | check_docs/prepare_release_notes 及对应两个测试文件精确匹配时，仅 docs | 与生产或其他测试同批修改取并集 |
+| 其他工具 | 已知 verification-checklist 走 tools；未知工具保守扩大 | 公共测试入口/依赖锁/工作流变更扩大全部组；目录名 tools 不能证明与业务无关 |
 | 发布 | 所有 required 组 | 打包平台分别验证 Python/媒体/长媒体/生命周期/工具与 Node 语义；完整 Chromium 在四个独立 Linux runner 执行并汇总 |
 
 `--stage merge --plan-only` 输出选择与原因；`--pack` 可以显式选择组进行复现。`pnpm run test:dev`、`test:merge`、`test:release` 是同一入口的快捷方式。历史 `pnpm run test:unit` 仍运行全部顶层 `.mjs`，其中含真实浏览器与进程测试；无参数 `scripts/run_tests.py` 仍保留历史全量 unittest 行为，不能拿其允许 skip 的结果代替 required 门禁。
@@ -51,6 +69,10 @@ uv run --no-sync python scripts/test_workflow.py --stage merge --changed maw/rea
 
 未知生产路径扩大全部组。当前业务路径规则刻意保守：`maw/` 与服务器触发媒体和相关浏览器族；涉及 waveform/reapeaks/quapeaks/project/history/script_timestamp 时再触发长媒体。`web/` 按叶子消费者族选 E2E，共享状态/host/history/boot/全局布局或未知叶子扩大完整浏览器。共享测试基础设施、依赖锁与工作流触发所有 required 组和预览打包。修改测试文件按其实际源代码内用例所属组选择。新测试默认 common；禁止通过未登记的新重测试逃避成本讨论。
 
+独立 `tests/e2e/**/*.spec.mjs` 修改选具体文件；文件缺失（包括改名旧路径）且未发现消费者时扩大完整浏览器；存在导出、其他测试 JS 引用或无法判断时扩大全组，防止遗漏读取该 spec 的 Node 消费者。helpers/fixtures/config 仍按共享基础设施处理。多路径只扩大集合，后加入 docs 或局部 spec 不得覆盖生产修改的要求。完整浏览器选择清空局部 spec 列表，禁止两种模式重复运行。该规则不自动批准测试删除，删掉独有保障仍需评审。
+
+纯文档工具的精确白名单为 `scripts/check_docs.py`、`scripts/prepare_release_notes.py`、`tests/test_docs_check.py`、`tests/test_release_notes.py`。docs 已执行脚本及对应回归，因此复用现有门禁；相似未知文件名不命中。tools 组的打包、重构、类型与 Playwright 工具仍保留原依赖。缩略图新增真实 FFmpeg/HTTP/多进程场景归 media，纯 SQLite/线程/合成进程留 common；waveform 族包含 filmstrip 消费者。
+
 每次运行的计划、聚合结果、Python IDs/skip 原因、Node JUnit 与 Playwright JSON 写入 `.artifacts/test-workflow/<id>/`，子命令的 bounded 日志与 PID/时限证据仍走 `scripts/run_check.py`。失败后停止当前批次，后续门禁尚未运行，不能宣称通过。NumPy/soundfile/Pillow/FFmpeg/内核缺失、编码器不支持、必需 fixture 缺失、Node/Playwright skip、超时均不能得到 required 成功。Windows 的特定 symlink 权限与 OS opener、不适用的 Unix checksum，以及非 Windows 的 LOCALAPPDATA/startfile 测试单独登记为 platform_not_applicable；Linux CI 必须运行符号链接边界。
 
 CI 有独立选择、文档、业务、Windows 生命周期、完整浏览器分片与网站任务，最后由 `Required test gate` 汇总实际必需 job 的成功。选择器必须输出全部 11 个准入 flag，缺失、非法值或互相矛盾的输出直接失败，不能当作未选择。选中的 job 失败、取消或跳过也不能通过。
@@ -70,7 +92,7 @@ uv run --no-sync python scripts/browser_results.py --reports .artifacts/browser-
 
 每片写入 `browser-run.json`，记录 Git SHA、配置、选择范围、完整 ID 集、片号、计划 ID 与实际通过 ID。完整汇总只接受同 SHA、干净工作区、完整 `editor-e2e` 范围的全部分片，要求计划不重不漏、实际结果与计划一致。单片或叶子 `e2e` 成功只证明其自身范围；缺片、重复片、scope 不同、失败、skip、重试、空完整集均失败。非空完整集确实没有分配用例的片必须明示 `empty-shard`，不能伪造运行成功。
 
-2026-10-13 第二阶段已验证 794 例实际发现与四片分配，并通过针对性故障检出回归；真实四片运行与远端 CI 尚未完成。这是已实现的流程，完整验收仍见计划账本。
+2026-10-14 已取得 794/794 真实四片与完整汇总通过证据；后续同步 main 新增用例，历史通过仅适用于当时受测 SHA。各阶段固定提交、实际结果与未验证边界见计划账本。
 
 ## 控制长期膨胀
 

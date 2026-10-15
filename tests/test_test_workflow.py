@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -20,7 +21,6 @@ from scripts.test_policy import ALL_MERGE, PYTHON_PACKS, select_packs
 
 class TestWorkflowTests(unittest.TestCase):
     def test_failed_gate_on_legacy_console_still_saves_summary(self):
-        import json
         area = ROOT / '.artifacts/console-fixtures'
         area.mkdir(parents=True, exist_ok=True)
         buffer = io.BytesIO()
@@ -52,11 +52,103 @@ class TestWorkflowTests(unittest.TestCase):
         self.assertTrue(ALL_MERGE.issubset(select_packs([])["packs"]))
 
     def test_media_changes_preserve_real_long_fixture(self):
-        plan = select_packs(["maw/reapeaks.py"])
+        plan = select_packs(["maw/quapeaks.py"])
         self.assertTrue({"common", "media", "long-media", "smoke"}.issubset(plan["packs"]))
 
     def test_tool_regression_change_does_not_select_application(self):
-        self.assertEqual(select_packs(["tests/test_docs_check.py"])["packs"], ["docs", "tools"])
+        for path in test_policy.DOC_TOOL_PATHS:
+            with self.subTest(path=path):
+                plan = select_packs([path])
+                self.assertEqual(plan["packs"], ["docs"])
+                self.assertFalse(plan["preview"])
+                commands = list(test_workflow.commands(plan["packs"], ROOT / ".artifacts"))
+                self.assertEqual([name for name, _, _ in commands],
+                                 ["docs-navigation", "release-docs", "docs-regressions"])
+                self.assertIn("tests.test_docs_check", commands[-1][1])
+                self.assertIn("tests.test_release_notes", commands[-1][1])
+        for path in ("scripts/check_docs_extra.py", "tools/filmstrip-lab/backend.py", "tools/unknown/check.py"):
+            with self.subTest(unknown_tool=path):
+                self.assertTrue(ALL_MERGE.issubset(select_packs([path])["packs"]))
+        self.assertIn("media", select_packs(["scripts/check_docs.py", "maw/quapeaks.py"])["packs"])
+
+    def test_spec_selection_unions_changes_and_broadens_shared_boundaries(self):
+        spec = "tests/e2e/keyboard-timing.spec.mjs"
+        other = "tests/e2e/shared-tooltip.spec.mjs"
+        plan = select_packs([spec])
+        self.assertEqual(plan["packs"], ["docs", "e2e"])
+        self.assertEqual(plan["e2e_specs"], [spec])
+        self.assertFalse(plan["preview"])
+        self.assertEqual(select_packs([spec, other])["e2e_specs"], sorted([spec, other]))
+        self.assertEqual(select_packs([spec, "scripts/check_docs.py"])["e2e_specs"], [spec])
+        leaf = select_packs(["web/shared/tooltip.js"])
+        mixed = select_packs([spec, "web/shared/tooltip.js"])
+        self.assertEqual(set(mixed["e2e_specs"]), set(leaf["e2e_specs"]) | {spec})
+        self.assertTrue(set(leaf["packs"]).issubset(mixed["packs"]))
+        for shared in ("web/editor/state/editor-state.js", "uv.lock", "tests/e2e/helpers.mjs"):
+            with self.subTest(shared=shared):
+                widened = select_packs([spec, shared])
+                self.assertIn("editor-e2e", widened["packs"])
+                self.assertNotIn("e2e", widened["packs"])
+                self.assertEqual(widened["e2e_specs"], [])
+        renamed = select_packs(["tests/e2e/deleted-old-name.spec.mjs", spec])
+        self.assertIn("editor-e2e", renamed["packs"])
+        self.assertEqual(renamed["e2e_specs"], [])
+
+    def test_referenced_or_exported_spec_cannot_hide_consumers(self):
+        area = ROOT / ".artifacts/spec-selection-fixtures"
+        area.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=area) as directory:
+            root = Path(directory)
+            spec = root / "tests/e2e/leaf.spec.mjs"
+            spec.parent.mkdir(parents=True)
+            spec.write_text("// independent test module\n", encoding="utf-8")
+            with patch.object(test_policy, "__file__", str(root / "scripts/test_policy.py")):
+                self.assertEqual(select_packs(["tests/e2e/leaf.spec.mjs"])["packs"], ["docs", "e2e"])
+                consumer = root / "tests/helpers/nested/consumer.mjs"
+                consumer.parent.mkdir(parents=True)
+                consumer.write_text("import '../../e2e/leaf.spec.mjs';\n", encoding="utf-8")
+                self.assertTrue(ALL_MERGE.issubset(select_packs(["tests/e2e/leaf.spec.mjs"])["packs"]))
+                consumer.write_text("// no dependency\n", encoding="utf-8")
+                for shared in ("export const shared = {};\n", "const local = 1; export {local};\n"):
+                    spec.write_text(shared, encoding="utf-8")
+                    self.assertTrue(ALL_MERGE.issubset(select_packs(["tests/e2e/leaf.spec.mjs"])["packs"]))
+                spec.write_text("// independent test module\n", encoding="utf-8")
+                (root / "tests/test_consumer.mjs").write_text("import './e2e/leaf.spec.mjs';\n", encoding="utf-8")
+                self.assertTrue(ALL_MERGE.issubset(select_packs(["tests/e2e/leaf.spec.mjs"])["packs"]))
+
+    def test_spec_plan_survives_ci_output_and_explicit_pack_handoff(self):
+        area = ROOT / ".artifacts/selection-output-fixtures"
+        area.mkdir(parents=True, exist_ok=True)
+        spec = "tests/e2e/shared-tooltip.spec.mjs"
+        with tempfile.TemporaryDirectory(dir=area) as directory:
+            output = Path(directory) / "outputs.txt"
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(test_workflow.main(["--stage", "merge", "--changed", spec,
+                    "--plan-only", "--github-output", str(output)]), 0)
+            values = dict(line.split("=", 1) for line in output.read_text(encoding="utf-8").splitlines())
+            self.assertEqual(values["app"], "true")
+            self.assertEqual(values["e2e"], "true")
+            self.assertEqual(values["editor_e2e"], "false")
+            self.assertEqual(values["preview"], "false")
+            self.assertEqual(json.loads(values["e2e_specs"]), [spec])
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(test_workflow.main(["--stage", "merge", "--pack", "e2e",
+                    "--e2e-specs", values["e2e_specs"], "--plan-only"]), 0)
+            command = next(command for name, command, _ in test_workflow.commands(
+                ["e2e"], Path(directory), specs=json.loads(values["e2e_specs"])) if name == "browser-regressions")
+            self.assertEqual(command[-1], spec)
+
+    def test_new_thumbnail_media_and_waveform_consumers_are_owned(self):
+        for path, expected in (("tests/test_thumbnail_jobs_integration.py", {"media"}),
+                               ("tests/test_thumbnail_server.py", {"media"}),
+                               ("tests/test_thumbnails.py", {"common", "media"}),
+                               ("tests/test_thumbnail_jobs.py", {"common"})):
+            with self.subTest(path=path):
+                self.assertEqual({test_policy.python_pack(name) for name in test_policy.source_test_ids(ROOT / path)}, expected)
+        plan = select_packs(["web/editor/media/waveform/render.js"])
+        self.assertIn("tests/e2e/filmstrip.spec.mjs", plan["e2e_specs"])
+        self.assertIn("tests/e2e/filmstrip-real.spec.mjs", plan["e2e_specs"])
+        self.assertNotIn("long-media", select_packs(["maw/thumbnails.py"])["packs"])
 
     def test_leaf_browser_change_selects_consumers_and_shared_change_expands(self):
         leaf = select_packs(["web/launcher/modules/provider-memory.js"])

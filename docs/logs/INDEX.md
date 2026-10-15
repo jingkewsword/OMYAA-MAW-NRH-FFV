@@ -14,6 +14,7 @@
 
 | 版本 / 范围 | 任务日期 | 主题与原文 | 说明 |
 | --- | --- | --- | --- |
+| release1.9.0-beta.1 | 2026-10-15 | [测试分级与主线集成验收](release1.9.0-beta.1/TEST_SCOPING.md) | 独立 spec、纯文档工具、媒体归属与本阶段实际验收 |
 | unversioned | 2026-10-13 | [测试成本与消融分析](unversioned/2026-10-13/TEST_SUITE_COST_AUDIT.md) | main 基线、成本/价值分析与第一阶段开发发现、验收边界 |
 | unversioned | 2026-10-11 | [AI 口播整理编辑稿改造](unversioned/2026-10-11/AI_CLEANUP_RC.md) | 模型编辑稿、固定转换与删除恢复的实现和验证 |
 | unversioned | 2026-10-11 | [AI 重新断句改进记录](unversioned/2026-10-11/AI_RESEGMENT.md) | 字数上限、复杂用例复测及主分支整合证据 |

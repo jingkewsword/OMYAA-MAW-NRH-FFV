@@ -3,11 +3,15 @@ from __future__ import annotations
 
 import os
 import ast
+import re
 from pathlib import Path
 
 PYTHON_PACKS = ("common", "media", "long-media", "tools", "manual")
 MEDIA_MODULES = {"test_gap_removed_audio_export", "test_gap_removed_video_compatibility",
-                 "test_media_cache", "test_quapeaks_generation"}
+                 "test_media_cache", "test_quapeaks_generation",
+                 "test_thumbnail_jobs_integration", "test_thumbnail_server"}
+DOC_TOOL_PATHS = {"scripts/check_docs.py", "scripts/prepare_release_notes.py",
+                  "tests/test_docs_check.py", "tests/test_release_notes.py"}
 TOOL_MODULES = {"test_docs_check", "test_release_notes", "test_run_check", "test_run_tests_runner",
                 "test_verification_checklist", "test_verify_sha256_script", "test_macos_icon",
                 "test_packaging_contract", "test_test_workflow", "test_browser_results"}
@@ -41,6 +45,8 @@ def python_pack(test_id: str) -> str:
         return "manual"
     if "LongMediaGeneratedFixtureTests" in parts or method == "test_eleven_minute_real_audio_preserves_acoustic_offsets":
         return "long-media"
+    if module == "test_thumbnails" and "ThumbnailIntegrationTests" in parts:
+        return "media"
     if module in MEDIA_MODULES or (module == "test_reapeaks_fixture" and "GeneratedFixtureTests" in parts):
         return "media"
     if method in MEDIA_METHODS or (module == "test_reapeaks" and method.startswith("test_generate_for_media_")):
@@ -85,7 +91,8 @@ E2E_FAMILIES = (
     (("gap",), ("gap-", "ai-cleanup", "script-alignment", "script-timestamp", "waveform-history", "waveform-deletion")),
     (("ai_cleanup", "ai-cleanup", "postprocess_ai"), ("ai-cleanup", "gap-", "marker")),
     (("script_match", "script-match", "script_alignment", "script_timestamp", "server-align/"), ("script-", "server-align", "launcher-script-match", "gap-")),
-    (("waveform", "reapeaks", "quapeaks", "media_cache", "playback", "seek", "audition"), ("waveform-", "playback-", "playhead-", "hover-seek", "subtitle-seek", "cue-context", "media-controls", "gap-")),
+    (("waveform", "reapeaks", "quapeaks", "media_cache", "playback", "seek", "audition"), ("waveform-", "playback-", "playhead-", "hover-seek", "subtitle-seek", "cue-context", "media-controls", "gap-", "filmstrip")),
+    (("thumbnail", "filmstrip"), ("filmstrip", "waveform-view-performance", "settings-structure")),
     (("segmentation", "punctuation", "word_timing", "word-timing", "timed-text", "text-tools", "split", "merge"), ("word-timing", "timed-text", "split-", "keyboard-timing", "editor-text-tools", "launcher-resegment")),
     (("ass_", "ass-", "/ass.", "font", "subtitle-preview"), ("ass-", "subtitle-preview", "bilingual-label")),
     (("export", "fcp7", "otio"), ("ass-export", "fcp7-export", "otio-export", "gap-", "multi-subtitle", "speaker-label", "waveform-history")),
@@ -111,6 +118,30 @@ def related_specs(path: str) -> list[str] | None:
     return specs or None
 
 
+def spec_scope(path: str) -> str:
+    """Only narrow runnable specs with no exported or referenced test module.
+
+    This is deliberately conservative, not a general JS dependency resolver.
+    Shared helpers/fixtures never enter this path. Literal references anywhere
+    in test JS, including Node consumers and nested helpers, keep all packs.
+    """
+    root = Path(__file__).resolve().parents[1]
+    source = root / path
+    try:
+        if ".." in Path(path).parts:
+            return "shared"
+        if source.is_file() and re.search(r"\bexport\s+(?:default|const|let|var|async|function|class)\b|\bexport\s*[{*]",
+                                         source.read_text(encoding="utf-8")):
+            return "shared"
+        for consumer in (root / "tests").rglob("*"):
+            if consumer != source and consumer.suffix in {".mjs", ".js", ".ts"} and consumer.is_file():
+                if source.name in consumer.read_text(encoding="utf-8"):
+                    return "shared"
+    except (OSError, UnicodeError):
+        return "shared"
+    return "independent" if source.is_file() else "missing"
+
+
 def select_packs(paths: list[str], *, release: bool = False) -> dict:
     """Unknown paths broaden; absence of a reliable diff also broadens."""
     selected = {"docs"}
@@ -129,8 +160,24 @@ def select_packs(paths: list[str], *, release: bool = False) -> dict:
         if path.startswith("website/"):
             selected.add("website")
             continue
-        if path.startswith(("tools/", "scripts/check_docs", "scripts/prepare_release_notes")):
+        if path in DOC_TOOL_PATHS:
+            reasons.append(f"document tooling and its regressions are covered by docs: {path}")
+            continue
+        if path.startswith("tools/verification-checklist/"):
             selected.add("tools")
+            continue
+        if path.startswith("tests/e2e/") and path.endswith(".spec.mjs"):
+            scope = spec_scope(path)
+            if scope == "independent":
+                selected.add("e2e")
+                e2e_specs.add(path)
+                reasons.append(f"independent browser spec: {path}")
+            elif scope == "missing":
+                selected.add("editor-e2e")
+                reasons.append(f"missing browser spec: {path}")
+            else:
+                selected.update(ALL_MERGE)
+                reasons.append(f"shared or unrecognized spec consumers: {path}")
             continue
         # Shared test infrastructure/locks/workflows can invalidate every gate.
         if path.startswith(("scripts/test_", "scripts/run_", "scripts/browser_results", "scripts/check_test_gate", ".github/workflows/", "tests/e2e/", "tests/fixtures/")) or path in {"pyproject.toml", "uv.lock", "package.json", "pnpm-lock.yaml", "playwright.config.mjs"}:
