@@ -36,7 +36,7 @@ source: "docs/user/CLI.md"
 - 输出父目录会创建。不要假设所有入口都有 Launcher 的防覆盖规则，应使用新的输出路径。
 - 默认不生成 HTML，`--html` 额外生成 `.edit.html`；`--json` 是历史兼容参数，公开 CLI 已默认生成工程。
 
-`-ll 2m` 只处理前两分钟；完整转写时移除该参数。不要默默截断用户要求的完整媒体。
+`-ll 2m` 只处理前两分钟；`-ll 500ms`（或 `--length-limit 500ms`）只处理前 0.5 秒。无单位数值按秒，`ms` / `s` / `m` / `h` 分别表示毫秒 / 秒 / 分钟 / 小时，也支持小数。完整转写时移除该参数。不要默默截断用户要求的完整媒体。
 
 ## 公开转写参数
 
@@ -58,7 +58,7 @@ source: "docs/user/CLI.md"
 | `--strip-tail-punct CHARS` | 指定剥除的句尾标点；公开入口不转发空字符串，需禁用剥除时使用底层脚本。 |
 | `--extra-strong-punct CHARS` | 额外强断句符号，仅向 Qwen 下发。 |
 | `--speaker` / `--speaker-colors` | 请求说话人分离；后者同时写颜色快照，无需重复前者。能力取决于模型。 |
-| `-ll` / `--length-limit VALUE` | 限制处理时长，支持 `90`、`20s`、`2m`、`1h`。 |
+| `-ll` / `--length-limit VALUE` | 限制处理时长，支持 `500ms`、`20s`、`2m`、`1h`；无单位按秒（如 `90`）。 |
 | `--json` | 兼容旧调用；输出仍为 `.mosp`。 |
 | `--with-waveform` | 提前生成外置波形缓存，工程落盘不内嵌缓存。 |
 | `--with-spectral` | 额外生成频谱层，要求 `--with-waveform`。 |

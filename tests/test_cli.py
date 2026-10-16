@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import io
 import tempfile
 import unittest
@@ -7,7 +8,41 @@ from contextlib import redirect_stderr
 from pathlib import Path
 from unittest import mock
 
+from generate_subtitle_qwen_api import parse_duration
 from maw import cli
+
+
+class DurationParsingTests(unittest.TestCase):
+    def test_duration_units_and_unitless_seconds(self) -> None:
+        cases = (
+            ("90", 90.0),
+            ("90.5", 90.5),
+            (".5", 0.5),
+            ("20s", 20.0),
+            ("2m", 120.0),
+            ("1h", 3600.0),
+            ("1.5m", 90.0),
+            ("500ms", 0.5),
+            ("1ms", 0.001),
+            ("0.5ms", 0.0005),
+            (" 500 MS ", 0.5),
+            ("0ms", 0.0),
+        )
+        for value, expected in cases:
+            with self.subTest(value=value):
+                self.assertEqual(parse_duration(value), expected)
+
+    def test_invalid_duration_values_remain_argument_errors(self) -> None:
+        parser = argparse.ArgumentParser(add_help=False)
+        parser.add_argument("--length-limit", type=parse_duration)
+        for value in (
+            "", "ms", "1mss", "1ms2", "1us", "-500ms", "+500ms",
+            "1e3ms", "1.2.3ms", ".", "nan", "inf", "20sec",
+        ):
+            with self.subTest(value=value), redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as raised:
+                    parser.parse_args([f"--length-limit={value}"])
+                self.assertEqual(raised.exception.code, 2)
 
 
 class CliTests(unittest.TestCase):
@@ -20,6 +55,18 @@ class CliTests(unittest.TestCase):
         self.assertEqual(args.outputs, ["clip.srt", "clip.mosp"])
         self.assertIsNone(args.server)
         self.assertIsNone(args.stop_server)
+
+    def test_millisecond_length_limit_is_forwarded_to_shared_parser(self) -> None:
+        for provider in ("qwen", "soniox", "doubao", "tencent", "openai", "bcut"):
+            for flag in ("-ll", "--length-limit"):
+                with self.subTest(provider=provider, flag=flag):
+                    args = cli.build_parser("MAW.exe").parse_args(
+                        ["--provider", provider, "-i", "clip.wav", flag, "500ms"]
+                    )
+                    generated = cli._generator_args(args, Path("clip.wav"), Path("out.srt"))
+                    value = generated[generated.index("--length-limit") + 1]
+                    self.assertEqual(value, "500ms")
+                    self.assertEqual(parse_duration(value), 0.5)
 
     def test_openai_provider_forwards_base_url_to_generator(self) -> None:
         args = cli.build_parser("MAW.exe").parse_args(

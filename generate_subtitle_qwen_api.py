@@ -351,14 +351,16 @@ def get_duration_sec(
 
 
 def parse_duration(value: str) -> float:
-    """解析时长字符串，支持 h/m/s 后缀。"""
+    """解析时长为秒，支持 ms/s/m/h 后缀，无单位时按秒。"""
     value = value.strip().lower()
-    m = _re.fullmatch(r'([\d.]+)\s*(h|m|s)?', value)
+    m = _re.fullmatch(r'([\d.]+)\s*(ms|h|m|s)?', value)
     if not m:
-        raise argparse.ArgumentTypeError(f"无法解析时长: '{value}'，示例: 10m, 20s, 1h, 90")
+        raise argparse.ArgumentTypeError(f"无法解析时长: '{value}'，示例: 500ms, 10m, 20s, 1h, 90")
     num = float(m.group(1))
     unit = m.group(2)
-    if unit == 'h':
+    if unit == 'ms':
+        return num / 1000
+    elif unit == 'h':
         return num * 3600
     elif unit == 'm':
         return num * 60
@@ -2320,7 +2322,7 @@ def main():
     )
     parser.add_argument(
         "-ll", "--length-limit", type=_parse_duration, default=None,
-        help="只处理音频前 N 时长，用于测试（示例: 10m, 20s, 1h, 90）",
+        help="只处理音频前 N 时长，用于测试（示例: 500ms, 10m, 20s, 1h, 90）",
     )
     parser.add_argument(
         "--file-url", default=None,
