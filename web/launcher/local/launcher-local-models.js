@@ -389,6 +389,7 @@ function renderLocalRuntime() {
   $("localRuntimeProgressBar").style.width = `${Math.max(0, Math.min(100, state.localRuntimeProgress))}%`;
   $("localRuntimeProgressMessage").textContent = state.localRuntimeProgressMessage || "";
   renderLocalRuntimeInventory();
+  renderRuntimeDiagnostics();
 }
 function renderOcrRuntime() {
   const runtime = state.config?.ocrRuntime || {};
