@@ -128,6 +128,77 @@ class TestWorkflowTests(unittest.TestCase):
                 self.assertIn("tests/e2e/waveform-history.spec.mjs", plan["e2e_specs"])
                 self.assertNotIn("editor-e2e", plan["packs"])
 
+    def test_checklist_preparation_keeps_consumers_and_omits_unrelated_builds(self):
+        paths = ["tools/verification-checklist/templates/verification-checklist.html",
+                 "tests/test_verification_checklist.py", "tests/test_verification_checklist_build.py",
+                 "tests/test_verification_checklist.mjs", test_policy.CHECKLIST_SPEC]
+        for path in paths:
+            with self.subTest(path=path):
+                plan = select_packs([path])
+                self.assertEqual(plan["tools_scope"], "checklist")
+                steps = list(test_workflow.commands(plan["packs"], ROOT / ".artifacts",
+                    specs=plan["e2e_specs"], tools_scope=plan["tools_scope"]))
+                names = [name for name, _, _ in steps]
+                self.assertFalse({"build", "build-launcher", "typecheck", "python-lint"}.intersection(names))
+                self.assertEqual(test_workflow.preparation(plan["packs"], plan["e2e_specs"], "checklist"),
+                                 {"application": False, "real_media": False})
+                if "tools" in plan["packs"]:
+                    python = next(cmd for name, cmd, _ in steps if name == "python-tools")
+                    self.assertTrue(set(test_policy.CHECKLIST_PYTHON).issubset(python))
+                    self.assertNotIn("--pack", python)
+                    node = next(cmd for name, cmd, _ in steps if name == "node-tools")
+                    self.assertEqual([arg for arg in node if arg.endswith('.mjs')], [test_policy.CHECKLIST_NODE])
+                    self.assertIn("docs-regressions", names)
+                if "e2e" in plan["packs"]:
+                    self.assertIn("browser-regressions", names)
+                    self.assertEqual(next(cmd for name, cmd, _ in steps if name == "browser-regressions")[-1],
+                                     test_policy.CHECKLIST_SPEC)
+
+    def test_checklist_mixed_unknown_and_release_scopes_broaden(self):
+        source = "tools/verification-checklist/build.py"
+        for path in ("tests/test_type_gate.mjs", "tests/e2e/shared-tooltip.spec.mjs", "uv.lock",
+                     "AGENTS.md", "JSON_SCHEMA.md", "tools/verification-checklist/../unknown.py", "unknown.py"):
+            with self.subTest(path=path):
+                plan = select_packs([source, path])
+                # An unrelated browser consumer also restores the full tools pack.
+                scope = plan["tools_scope"]
+                self.assertEqual(scope, "all")
+                self.assertTrue(test_workflow.preparation(plan["packs"], plan["e2e_specs"], scope)["application"])
+        release = select_packs([source], release=True)
+        self.assertEqual(release.get("tools_scope", "all"), "all")
+        self.assertTrue(test_workflow.preparation(release["packs"])["real_media"])
+        for specs in ([], [test_policy.CHECKLIST_SPEC, "tests/e2e/shared-tooltip.spec.mjs"]):
+            self.assertEqual(test_workflow.preparation(["e2e"], specs),
+                             {"application": True, "real_media": True})
+        full = list(test_workflow.commands(["tools"], ROOT / ".artifacts"))
+        self.assertIn("typecheck", [name for name, _, _ in full])
+        self.assertIn("--pack", next(cmd for name, cmd, _ in full if name == "python-tools"))
+
+    def test_checklist_ci_handoff_retains_scope_and_preparation(self):
+        from scripts.check_test_gate import check_gate
+        area = ROOT / ".artifacts/selection-output-fixtures"
+        area.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=area) as directory:
+            output = Path(directory) / "outputs.txt"
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(test_workflow.main(["--stage", "merge", "--changed",
+                    "tools/verification-checklist/build.py", "--plan-only", "--github-output", str(output)]), 0)
+            values = dict(line.split("=", 1) for line in output.read_text(encoding="utf-8").splitlines())
+            self.assertEqual(values["app"], "true", "the required job must still execute")
+            self.assertEqual(values["tools_scope"], "checklist")
+            self.assertEqual(values["application"], "false")
+            self.assertEqual(values["real_media"], "false")
+            jobs = {"selection": {"result": "success", "outputs": values},
+                    "documentation": {"result": "success"}, "editor": {"result": "success"}}
+            self.assertEqual(check_gate(jobs), [])
+            for key, value in (("tools_scope", ""), ("real_media", "true"), ("application", "true")):
+                with self.subTest(key=key), self.assertRaises(ValueError):
+                    check_gate({**jobs, "selection": {"result": "success", "outputs": {**values, key: value}}})
+            with contextlib.redirect_stdout(io.StringIO()), patch.object(test_workflow, "execute") as execute:
+                self.assertEqual(test_workflow.main(["--stage", "merge", "--pack", "tools", "--pack", "e2e",
+                    "--tools-scope", values["tools_scope"], "--e2e-specs", values["e2e_specs"], "--plan-only"]), 0)
+                execute.assert_not_called()
+
     def test_referenced_or_exported_spec_cannot_hide_consumers(self):
         area = ROOT / ".artifacts/spec-selection-fixtures"
         area.mkdir(parents=True, exist_ok=True)

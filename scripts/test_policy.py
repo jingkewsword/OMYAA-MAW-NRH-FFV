@@ -30,6 +30,9 @@ MEDIA_METHODS = {
 NODE_BROWSER = {"test_asr_presets_browser.mjs", "test_ass_canvas_raster.mjs", "test_shared_tooltip_browser.mjs"}
 NODE_TOOLS = {"test_ns_rewrite_scope.mjs", "test_refactor_layout_tools.mjs", "test_type_gate.mjs",
               "test_verification_checklist.mjs"}
+CHECKLIST_PYTHON = ("tests.test_verification_checklist", "tests.test_verification_checklist_build")
+CHECKLIST_NODE = "tests/test_verification_checklist.mjs"
+CHECKLIST_SPEC = "tests/e2e/verification-checklist.spec.mjs"
 DEV_PYTHON = ("tests.test_project_contract", "tests.test_project_io", "tests.test_project_backups")
 DEV_NODE = ("test_editor_runtime.mjs", "test_editor_state.mjs", "test_editor_commands.mjs",
             "test_editor_host.mjs", "test_editor_history_gestures.mjs")
@@ -227,4 +230,18 @@ def select_packs(paths: list[str], *, release: bool = False) -> dict:
     if "editor-e2e" in selected:
         selected.discard("e2e")
         e2e_specs.clear()
-    return {"packs": sorted(selected), "preview": preview, "reasons": reasons, "e2e_specs": sorted(e2e_specs)}
+    return {"packs": sorted(selected), "preview": preview, "reasons": reasons, "e2e_specs": sorted(e2e_specs),
+            "tools_scope": checklist_tools_scope(paths)}
+
+
+def checklist_tools_scope(paths: list[str]) -> str:
+    """A closed consumer boundary, never inferred from tools pack membership."""
+    normalized = [path.replace("\\", "/").removeprefix("./") for path in paths]
+    checklist = {CHECKLIST_NODE, CHECKLIST_SPEC, *(module.replace(".", "/") + ".py" for module in CHECKLIST_PYTHON)}
+    def owned(path):
+        return ".." not in Path(path).parts and (path.startswith("tools/verification-checklist/") or path in checklist)
+    def docs(path):
+        return (path.startswith("docs/") or path in {"README.md", "CHANGELOG.md", "CONTRIBUTING.md"}
+                or path in DOC_TOOL_PATHS)
+    return "checklist" if normalized and any(owned(path) for path in normalized) and all(
+        owned(path) or docs(path) for path in normalized) else "all"

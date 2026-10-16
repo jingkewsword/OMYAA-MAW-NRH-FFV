@@ -17,6 +17,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       app: ${{ steps.plan.outputs.app }}
+      application: ${{ steps.plan.outputs.application }}
+      real_media: ${{ steps.plan.outputs.real_media }}
+      tools_scope: ${{ steps.plan.outputs.tools_scope }}
       common: ${{ steps.plan.outputs.common }}
       browser: ${{ steps.plan.outputs.browser }}
       smoke: ${{ steps.plan.outputs.smoke }}
@@ -92,13 +95,15 @@ jobs:
         with:
           python-version: '3.11'
       - uses: astral-sh/setup-uv@v7
+        if: needs.selection.outputs.application == 'true' || needs.selection.outputs.tools_scope != 'checklist'
         with:
           enable-cache: true
       - run: uv sync --frozen --group test --group dev --no-group build
+        if: needs.selection.outputs.application == 'true' || needs.selection.outputs.tools_scope != 'checklist'
       - run: pnpm exec playwright install --with-deps chromium
         if: needs.selection.outputs.browser == 'true' || needs.selection.outputs.smoke == 'true' || needs.selection.outputs.e2e == 'true' || needs.selection.outputs.editor_e2e == 'true'
       - name: Install real media dependencies
-        if: needs.selection.outputs.media == 'true' || needs.selection.outputs.long_media == 'true' || needs.selection.outputs.e2e == 'true' || needs.selection.outputs.editor_e2e == 'true'
+        if: needs.selection.outputs.real_media == 'true'
         run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-noto-cjk
       - name: Required common and impacted gates
         env:
@@ -111,6 +116,8 @@ jobs:
           TOOLS: ${{ needs.selection.outputs.tools }}
           E2E: ${{ needs.selection.outputs.e2e }}
           E2E_SPECS: ${{ needs.selection.outputs.e2e_specs }}
+          TOOLS_SCOPE: ${{ needs.selection.outputs.tools_scope }}
+          APPLICATION: ${{ needs.selection.outputs.application }}
         run: |
           packs=()
           [[ "$COMMON" != true ]] || packs+=(--pack common)
@@ -121,7 +128,9 @@ jobs:
           [[ "$LIFECYCLE" != true ]] || packs+=(--pack lifecycle)
           [[ "$TOOLS" != true ]] || packs+=(--pack tools)
           [[ "$E2E" != true ]] || packs+=(--pack e2e)
-          uv run --no-sync python scripts/test_workflow.py --stage merge --e2e-specs "$E2E_SPECS" "${packs[@]}"
+          runner=(uv run --no-sync python)
+          if [[ "$APPLICATION" == false && "$TOOLS_SCOPE" == checklist ]]; then runner=(python); fi
+          "${runner[@]}" scripts/test_workflow.py --stage merge --tools-scope "$TOOLS_SCOPE" --e2e-specs "$E2E_SPECS" "${packs[@]}"
       - uses: actions/upload-artifact@v6
         if: always()
         with:

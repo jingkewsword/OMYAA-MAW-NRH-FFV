@@ -17,11 +17,11 @@ import xml.etree.ElementTree as ET
 if __package__:
     from .run_check import run
     from .browser_results import SCHEMA, browser_config, discovery, verify_run
-    from .test_policy import DEV_NODE, DEV_PYTHON, PYTHON_PACKS, node_pack, select_packs
+    from .test_policy import CHECKLIST_NODE, CHECKLIST_PYTHON, CHECKLIST_SPEC, DEV_NODE, DEV_PYTHON, PYTHON_PACKS, node_pack, select_packs
 else:
     from run_check import run
     from browser_results import SCHEMA, browser_config, discovery, verify_run
-    from test_policy import DEV_NODE, DEV_PYTHON, PYTHON_PACKS, node_pack, select_packs
+    from test_policy import CHECKLIST_NODE, CHECKLIST_PYTHON, CHECKLIST_SPEC, DEV_NODE, DEV_PYTHON, PYTHON_PACKS, node_pack, select_packs
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKS = ("docs", "common", "browser", "smoke", "media", "long-media", "lifecycle", "tools", "e2e", "editor-e2e", "website", "manual")
@@ -38,7 +38,17 @@ def changed_paths(base_ref: str | None) -> list[str]:
     return sorted(set(paths))
 
 
-def commands(packs: list[str], report_dir: Path, *, dev: bool = False, component: str = "all", specs=(), shard=None):
+def preparation(packs, specs=(), tools_scope="all"):
+    """Unknown/mixed browser consumers retain the existing application/media prep."""
+    app = bool(set(packs) & {"common", "browser", "smoke", "editor-e2e", "media", "long-media"}
+               or "tools" in packs and tools_scope != "checklist"
+               or "e2e" in packs and (not specs or set(specs) != {CHECKLIST_SPEC}))
+    media = bool(set(packs) & {"media", "long-media", "editor-e2e"}
+                 or "e2e" in packs and (not specs or set(specs) != {CHECKLIST_SPEC}))
+    return {"application": app, "real_media": media}
+
+
+def commands(packs: list[str], report_dir: Path, *, dev: bool = False, component: str = "all", specs=(), shard=None, tools_scope="all"):
     python = sys.executable
     node = shutil.which("node") or "node"
     playwright = [node, "node_modules/@playwright/test/cli.js", "test", "--project=chromium",
@@ -51,9 +61,9 @@ def commands(packs: list[str], report_dir: Path, *, dev: bool = False, component
         if component == "launcher":
             yield "launcher-kernel", [python, "scripts/run_tests.py", "--required", "tests.test_launcher_contract"], 60
         return
-    if set(packs) & {"common", "tools"}:
+    if "common" in packs or "tools" in packs and tools_scope != "checklist":
         yield "python-lint", [python, "-m", "ruff", "check"], 60
-    if set(packs) & {"common", "browser", "smoke", "e2e", "editor-e2e", "media", "long-media", "tools"}:
+    if preparation(packs, specs, tools_scope)["application"]:
         yield "build", [node, "scripts/build-editor.mjs", "--write"], 60
         yield "build-launcher", [node, "scripts/build-launcher.mjs", "--write"], 60
         yield "typecheck", [node, "node_modules/typescript/bin/tsc", "-p", "tsconfig.typecheck.json"], 120
@@ -61,13 +71,16 @@ def commands(packs: list[str], report_dir: Path, *, dev: bool = False, component
         if pack == "docs":
             yield "docs-navigation", [python, "scripts/check_docs.py"], 60
             yield "release-docs", [python, "scripts/prepare_release_notes.py", "--check-all"], 60
-            if "tools" not in packs:
+            if "tools" not in packs or tools_scope == "checklist":
                 yield "docs-regressions", [python, "scripts/run_tests.py", "--required", "tests.test_docs_check", "tests.test_release_notes"], 120
         if pack in PYTHON_PACKS:
-            yield f"python-{pack}", [python, "scripts/run_tests.py", "--pack", pack, "--required",
+            targets = list(CHECKLIST_PYTHON) if pack == "tools" and tools_scope == "checklist" else ["--pack", pack]
+            yield f"python-{pack}", [python, "scripts/run_tests.py", *targets, "--required",
                    "--report", str(report_dir / f"python-{pack}.json")], 300 if pack == "long-media" else 240
         if pack in {"common", "browser", "lifecycle", "tools"}:
             targets = [str(p.relative_to(ROOT)) for p in sorted((ROOT / "tests").glob("*.mjs")) if node_pack(p.name) == pack]
+            if pack == "tools" and tools_scope == "checklist":
+                targets = [CHECKLIST_NODE]
             if targets:
                 yield f"node-{pack}", [node, "--test", "--test-reporter=spec", "--test-reporter-destination=stdout",
                        "--test-reporter=junit", f"--test-reporter-destination={report_dir / ('node-' + pack + '.xml')}", *targets], 240
@@ -146,6 +159,7 @@ def main(argv=None) -> int:
     parser.add_argument("--plan-only", action="store_true")
     parser.add_argument("--github-output", type=Path)
     parser.add_argument("--e2e-specs", help="JSON concrete spec paths from the CI selector")
+    parser.add_argument("--tools-scope", choices=("all", "checklist"), help="explicit tool consumer scope from the CI selector")
     parser.add_argument("--browser-shard", type=parse_shard, help="explicit browser partition; full success requires every shard")
     args = parser.parse_args(argv)
     os.chdir(ROOT)
@@ -168,8 +182,13 @@ def main(argv=None) -> int:
         parser.error("duplicate packs would repeat the same gate")
     if args.browser_shard and not set(packs) & {"e2e", "editor-e2e"}:
         parser.error("browser-shard requires e2e or editor-e2e")
+    tools_scope = args.tools_scope or ("all" if args.pack else plan.get("tools_scope", "all"))
+    if args.stage == "release" or set(packs) - {"docs", "tools", "e2e", "website"} or (
+            "e2e" in packs and set(specs) != {CHECKLIST_SPEC}):
+        tools_scope = "all"
     plan.update(stage=args.stage, changed_paths=paths, packs=packs, e2e_specs=specs,
-                browser_shard=args.browser_shard)
+                browser_shard=args.browser_shard, tools_scope=tools_scope,
+                preparation=preparation(packs, specs, tools_scope))
     output_dir = ROOT / ".artifacts/test-workflow" / uuid.uuid4().hex[:12]
     output_dir.mkdir(parents=True)
     (output_dir / "plan.json").write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -180,14 +199,17 @@ def main(argv=None) -> int:
             output.write(f"app={str(bool(set(packs) - {'docs', 'website'})).lower()}\n")
             output.write(f"preview={str(plan['preview']).lower()}\n")
             output.write(f"e2e_specs={json.dumps(specs)}\n")
+            output.write(f"tools_scope={tools_scope}\n")
+            for name, needed in plan['preparation'].items():
+                output.write(f"{name}={str(needed).lower()}\n")
     print(json.dumps(plan, ensure_ascii=False, indent=2))
     print(f"Evidence: {output_dir.relative_to(ROOT)}")
     if args.plan_only:
         return 0
     required_modules = {"numpy", "soundfile"} if set(packs) & {"common", "media", "long-media"} else set()
-    if set(packs) & {"common", "tools"}:
+    if "common" in packs or "tools" in packs and tools_scope != "checklist":
         required_modules.add("ruff")
-    if set(packs) & {"media", "long-media", "tools"}:
+    if set(packs) & {"media", "long-media"} or "tools" in packs and tools_scope != "checklist":
         required_modules.add("PIL")
     if set(packs) & {"media", "long-media"}:
         required_modules.add("quapeaks")
@@ -207,7 +229,7 @@ def main(argv=None) -> int:
     for key in ("TEMP", "TMP", "TMPDIR"):
         os.environ[key] = str(temp)
     results = []
-    for name, command, timeout in commands(packs, output_dir, dev=args.stage == "dev" and not args.pack, component=args.component, specs=specs, shard=args.browser_shard):
+    for name, command, timeout in commands(packs, output_dir, dev=args.stage == "dev" and not args.pack, component=args.component, specs=specs, shard=args.browser_shard, tools_scope=tools_scope):
         browser_record = None
         if name in {"editor-http-smoke", "browser-regressions"}:
             try:

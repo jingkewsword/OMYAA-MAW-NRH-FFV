@@ -4,7 +4,12 @@ from __future__ import annotations
 import json
 import os
 
-FLAGS = ("app", "common", "browser", "smoke", "media", "long_media", "lifecycle", "tools", "website", "e2e", "editor_e2e")
+if __package__:
+    from .test_workflow import preparation
+else:
+    from test_workflow import preparation
+
+FLAGS = ("app", "common", "browser", "smoke", "media", "long_media", "lifecycle", "tools", "website", "e2e", "editor_e2e", "application", "real_media")
 
 
 def check_gate(jobs: dict) -> list[str]:
@@ -12,6 +17,15 @@ def check_gate(jobs: dict) -> list[str]:
     outputs = jobs["selection"]["outputs"]
     if any(outputs.get(flag) not in ("true", "false") for flag in FLAGS):
         raise ValueError("Missing or invalid required selector flags")
+    if outputs.get("tools_scope") not in {"all", "checklist"}:
+        raise ValueError("Missing or invalid tool consumer scope")
+    specs = json.loads(outputs.get("e2e_specs", "[]"))
+    if not isinstance(specs, list) or any(not isinstance(spec, str) for spec in specs):
+        raise ValueError("Invalid browser consumer scope")
+    expected = preparation([flag.replace("_", "-") for flag in FLAGS if outputs[flag] == "true"],
+                           specs, outputs["tools_scope"])
+    if any(outputs[key] != str(value).lower() for key, value in expected.items()):
+        raise ValueError("Preparation flags do not match selected consumers")
     if ((outputs["app"] == "false" and any(outputs[flag] == "true" for flag in FLAGS if flag not in ("app", "website")))
             or outputs["e2e"] == outputs["editor_e2e"] == "true"):
         raise ValueError("Contradictory required selector flags")

@@ -48,7 +48,8 @@ uv run --no-sync python scripts/test_workflow.py --stage merge --changed maw/qua
 | 纯文档 | 文档导航、发布归档与对应回归 | Schema 文档视为共享契约，扩大所有业务组 |
 | 网站 | 文档检查、网站构建 | 业务源码同批变化时合并相关组 |
 | 文档工具 | check_docs/prepare_release_notes 及对应两个测试文件精确匹配时，仅 docs | 与生产或其他测试同批修改取并集 |
-| 其他工具 | verification-checklist 源目录走 tools + 自身真实 E2E；未知工具保守扩大 | 公共测试入口/依赖锁/工作流变更扩大全部组；目录名 tools 不能证明与业务无关 |
+| 清单工具独立改动 | docs + 清单专属 tools 消费者；源目录带上自身真实 E2E | 无应用构建/类型检查/媒体依赖，混入其他消费者则恢复宽范围 |
+| 其他工具 | 完整 tools；未知工具保守扩大 | 公共测试入口/依赖锁/工作流变更扩大全部组；目录名 tools 不能证明与业务无关 |
 | 发布 | 所有 required 组 | 打包平台分别验证 Python/媒体/长媒体/生命周期/工具与 Node 语义；完整 Chromium 在四个独立 Linux runner 执行并汇总 |
 
 `--stage merge --plan-only` 输出选择与原因；`--pack` 可以显式选择组进行复现。`pnpm run test:dev`、`test:merge`、`test:release` 是同一入口的快捷方式。历史 `pnpm run test:unit` 仍运行全部顶层 `.mjs`，其中含真实浏览器与进程测试；无参数 `scripts/run_tests.py` 仍保留历史全量 unittest 行为，不能拿其允许 skip 的结果代替 required 门禁。
@@ -77,11 +78,20 @@ uv run --no-sync python scripts/test_workflow.py --stage merge --changed maw/qua
 
 清单工具的 HTML 与 Markdown 构建回归均属于 tools，包括 `test_verification_checklist_build` 的 16 项用例；对应 Python 测试单独改动选择 docs/tools。工具源码、模板或示例目录还选择 `verification-checklist.spec.mjs`，保留真实 localStorage、下载/复制、布局与禁用状态消费者；只增加自身 spec，不准备应用预览。归属回归同时核对模块全部 ID，防止新增模块落入 common 后被工具选择漏过。
 
+清单独立改动的计划另标 `tools_scope=checklist`：tools 精确执行两个 Python 模块（30 项）与一个 Node 文件（17 项），源目录带上 9 项真实 Chromium。它们不依赖应用 bundle、应用 tsc、Pillow 或媒体工具；CI 不同步应用 Python 环境、不安装 FFmpeg/媒体字体。docs 仍保留自身 37 项回归。新增应用消费者、未知路径、共享 harness/锁/工作流或混合应用 spec 会恢复宽范围；发布与显式 `--pack tools` 默认完整工具组。`--tools-scope checklist` 仅用于复现已确认的专属消费者或 CI 交接，不能拿局部结果代替整条分支的准入。
+
+```sh
+python scripts/test_workflow.py --stage merge --changed tools/verification-checklist/build.py --plan-only
+python scripts/test_workflow.py --stage merge --changed tools/verification-checklist/build.py
+```
+
+清单设计需求、全部 56 项用例的用户后果、准备边界与实际隔离验收见[清单工具准备优化](../logs/release1.9.0-beta.2/261016_测试治理优化/清单工具准备优化.md)。低层表驱动失败组合与浏览器接线保障各自保留；页面不启动应用，仍必须实际启动 Chromium，不能用发现结果冒充执行。
+
 导出菜单/时间线叶子修改除导出与混合波形消费者外，还选择 `editor-menu-focus.spec.mjs`，保留菜单实际间距及关闭后焦点/播放快捷键边界。新增测试文件进入全量集合不代表叶子选择已覆盖它；新功能引入消费者时需一并检查映射。共享输入仍扩大完整集合，多路径继续取并集。
 
 每次运行的计划、聚合结果、Python IDs/skip 原因、Node JUnit 与 Playwright JSON 写入 `.artifacts/test-workflow/<id>/`，子命令的 bounded 日志与 PID/时限证据仍走 `scripts/run_check.py`。失败后停止当前批次，后续门禁尚未运行，不能宣称通过。NumPy/soundfile/Pillow/FFmpeg/内核缺失、编码器不支持、必需 fixture 缺失、Node/Playwright skip、超时均不能得到 required 成功。Windows 的特定 symlink 权限与 OS opener、不适用的 Unix checksum，以及非 Windows 的 LOCALAPPDATA/startfile 测试单独登记为 platform_not_applicable；Linux CI 必须运行符号链接边界。
 
-CI 有独立选择、文档、业务、Windows 生命周期、完整浏览器分片与网站任务，最后由 `Required test gate` 汇总实际必需 job 的成功。选择器必须输出全部 11 个准入 flag，缺失、非法值或互相矛盾的输出直接失败，不能当作未选择。选中的 job 失败、取消或跳过也不能通过。
+CI 有独立选择、文档、业务、Windows 生命周期、完整浏览器分片与网站任务，最后由 `Required test gate` 汇总实际必需 job 的成功。选择器必须输出全部 13 个布尔 flag（含 application/real_media 准备需求）及 tools_scope；缺失、非法值、准备需求与消费者矛盾的输出直接失败，不能当作未选择。选中的 job 失败、取消或跳过也不能通过。`app` 继续表示需执行的业务/工具 job，不等于需要构建应用。
 
 预览打包只在打包/资源/依赖/共享基础设施或未知路径触发，避免每个文案改动生成 Windows 包。正式发布先完成 Linux 质量组和完整浏览器汇总，再开始各平台打包；`publish` 的条件显式要求质量、完整浏览器和 Windows 打包成功。各平台发布验证包含 lifecycle，不依赖 PR 阶段曾跑过另一个 SHA。仓库外的 branch protection 要将汇总 `Required test gate` 设为 required，改源码不会自动修改 GitHub 的保护设置；既有 required job 名称需维护者迁移。
 

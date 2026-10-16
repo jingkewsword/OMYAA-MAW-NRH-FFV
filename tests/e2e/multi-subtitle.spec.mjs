@@ -175,8 +175,8 @@ test('creates an empty secondary track on enable and imports subtitles optionall
   await expect(page.locator('#multi-subtitle-toggle-label'))
     .toHaveAttribute('data-title', '开启后显示副字幕轨，可手动添加或导入第二条字幕。');
   await setProjectTrackEnabled(page, 'multi-subtitle-toggle', true);
-  await expect(page.locator('#project-multi-subtitle-settings')).not.toHaveAttribute('hidden');
   await openMultiSubtitleSettings(page);
+  await expect(page.locator('#editor-settings-page-multi-subtitle')).not.toHaveAttribute('hidden');
   await expect(page.locator('#editor-settings-page-multi-subtitle')).toBeVisible();
   await expect(page.locator('#multi-subtitle-empty-hint')).toBeVisible();
   await closeSettingsPanels(page);
@@ -213,11 +213,13 @@ test('creates an empty secondary track on enable and imports subtitles optionall
   await chooser.setFiles({ name: 'translation.srt', mimeType: 'text/plain', buffer: Buffer.from(extensionSrt, 'utf8') });
   await expect(page.locator('#multi-subtitle-import-modal')).toHaveClass(/show/);
   await page.locator('#multi-subtitle-import-result-confirm').click();
+  await openMultiSubtitleSettings(page);
   await expect(page.locator('#multi-subtitle-empty-hint')).toBeHidden();
+  await closeSettingsPanels(page);
   expect(await page.evaluate(() => MaweMultiSubtitleCore.getActiveExtensionTrack().id)).toBe(trackId);
   expect(await page.evaluate(() => MaweMultiSubtitleCore.getActiveExtensionTrack().segments.length)).toBe(3);
   await page.locator('#undo-btn').click();
-  await openSettingsPage(page, 'project-tracks');
+  await openMultiSubtitleSettings(page);
   await expect(page.locator('#multi-subtitle-empty-hint')).toBeVisible();
   await closeSettingsPanels(page);
   expect(await page.evaluate(() => MaweMultiSubtitleCore.getActiveExtensionTrack().segments.length)).toBe(0);
@@ -234,14 +236,16 @@ test('keeps the quick-import prompt when enabling an empty secondary track', asy
   const chooser = await chooserPromise;
   expect(prompt).toBe('是否导入第二条字幕？（后续也可以将字幕或工程拖入编辑器加载）');
   await expect(page.locator('#multi-subtitle-toggle')).toBeChecked();
-  await openSettingsPage(page, 'project-tracks');
+  await openMultiSubtitleSettings(page);
   await expect(page.locator('#multi-subtitle-empty-hint')).toBeVisible();
   await closeSettingsPanels(page);
   const trackId = await page.evaluate(() => MaweMultiSubtitleCore.getActiveExtensionTrack().id);
   await chooser.setFiles({ name: 'translation.srt', mimeType: 'text/plain', buffer: Buffer.from(extensionSrt, 'utf8') });
   await expect(page.locator('#multi-subtitle-import-modal')).toHaveClass(/show/);
   await page.locator('#multi-subtitle-import-result-confirm').click();
+  await openMultiSubtitleSettings(page);
   await expect(page.locator('#multi-subtitle-empty-hint')).toBeHidden();
+  await closeSettingsPanels(page);
   expect(await page.evaluate(() => MaweMultiSubtitleCore.getActiveExtensionTrack().id)).toBe(trackId);
   expect(await page.evaluate(() => MaweMultiSubtitleCore.getActiveExtensionTrack().segments.length)).toBe(3);
   await setProjectTrackEnabled(page, 'multi-subtitle-toggle', false);
@@ -274,7 +278,7 @@ test('saves an empty secondary track and supports manual creation, edits, undo a
   expect(empty.multi_subtitle.tracks).toHaveLength(1);
   expect(empty.multi_subtitle.tracks[0].segments).toEqual([]);
   await dropProject(empty);
-  await openSettingsPage(page, 'project-tracks');
+  await openMultiSubtitleSettings(page);
   await expect(page.locator('#multi-subtitle-empty-hint')).toBeVisible();
   await closeSettingsPanels(page);
   await page.screenshot({ path: test.info().outputPath('empty-secondary-lane.png') });
@@ -292,7 +296,9 @@ test('saves an empty secondary track and supports manual creation, edits, undo a
   await editor.fill('手动副字幕');
   await editor.press('ControlOrMeta+Enter');
   await expect(page.locator('.waveform-cue-block[data-track="extension"]')).toHaveCount(1);
+  await openMultiSubtitleSettings(page);
   await expect(page.locator('#multi-subtitle-empty-hint')).toBeHidden();
+  await closeSettingsPanels(page);
   await page.locator('#undo-btn').click();
   expect(await page.evaluate(() => MaweMultiSubtitleCore.getActiveExtensionTrack().segments[0].text)).toBe('');
   await page.locator('#undo-btn').click();
