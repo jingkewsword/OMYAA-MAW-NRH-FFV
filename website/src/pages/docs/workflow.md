@@ -96,7 +96,7 @@ uv run --no-sync python server-editor/serve.py "example.mosp" -m "moved-video.mp
 uv run --no-sync python server-editor/serve.py --blank
 ```
 
-检查文字、起止时间和较长字幕。双击文本修改，拖动波形块或边缘调整时间；拆分、合并、多重字幕与空隙操作见 [编辑器指南](../editor-guide/)。保存时用 `Ctrl+S`，macOS 用 `Cmd+S`。
+检查文字、起止时间和较长字幕。双击文本修改，拖动波形块或边缘调整时间；拆分、合并、双语字幕与空隙操作见 [编辑器指南](../editor-guide/)。保存时用 `Ctrl+S`，macOS 用 `Cmd+S`。
 
 需要便携 HTML 时可从已有工程生成（媒体仍需单独携带）：
 

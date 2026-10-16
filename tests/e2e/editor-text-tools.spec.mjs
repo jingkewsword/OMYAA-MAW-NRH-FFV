@@ -175,3 +175,56 @@ test('expanded wrapping menu stays inside a short viewport and keeps custom wrap
   await page.locator('#wrap-chars-right').press('Enter');
   expect(await page.evaluate(() => MaweBoot.DATA.segments[0].text)).toBe('【甲乙丙丁】');
 });
+
+test('ASS wrapping menu separates comment format and preserves outer fade markers with undo', async ({ page }, testInfo) => {
+  await seed(page, { text: '>> hello <<', timed: false });
+  await openSettingsPage(page, 'subtitle-style');
+  await page.locator('#ass-mode-toggle').check();
+  await page.locator('#project-settings-close').click();
+  const openWrapMenu = async () => {
+    await page.evaluate(() => MaweContextMenus.showContextMenu(350, 350, 0));
+    await page.locator('.word-timing-advanced > .item').hover();
+    await page.getByText('左右添加字符', { exact: true }).click();
+  };
+  await openWrapMenu();
+  const list = page.getByText('//文//', { exact: true }).locator('..').locator('..');
+  const divider = list.locator(':scope > [role="separator"]');
+  await expect(divider).toHaveCount(1);
+  expect(await divider.evaluate(el => [el.previousElementSibling.textContent, el.nextElementSibling.textContent]))
+    .toEqual(['淡出淡入>>文<<', '音符♪文♪']);
+  await page.screenshot({ path: testInfo.outputPath('ass-wrap-menu.png') });
+  await list.getByText('注释', { exact: true }).click();
+  expect(await page.evaluate(() => MaweBoot.DATA.segments[0].text)).toBe('>>// hello //<<');
+  await openWrapMenu();
+  await list.getByText('注释', { exact: true }).click();
+  expect(await page.evaluate(() => MaweBoot.DATA.segments[0].text)).toBe('>>// hello //<<');
+  await page.locator('#undo-btn').click();
+  expect(await page.evaluate(() => MaweBoot.DATA.segments[0].text)).toBe('>> hello <<');
+  await openWrapMenu();
+  await list.getByText('自定义…', { exact: true }).click();
+  await page.locator('#wrap-chars-left').fill('++');
+  await page.locator('#wrap-chars-right').fill('++');
+  await page.locator('#wrap-chars-right').press('Enter');
+  expect(await page.evaluate(() => MaweBoot.DATA.segments[0].text)).toBe('>>++ hello ++<<');
+  await page.locator('#undo-btn').click();
+  expect(await page.evaluate(() => MaweBoot.DATA.segments[0].text)).toBe('>> hello <<');
+  await page.evaluate(() => MaweSettings.updateEditorSettings({ assMode: false }));
+  await openWrapMenu();
+  await expect(page.locator('#ctxmenu').getByText('注释', { exact: true })).toHaveCount(0);
+  await expect(page.locator('#ctxmenu [role="separator"]')).toHaveCount(0);
+});
+
+test('batch wrapping inserts inside fades and keeps preview, execution and undo consistent', async ({ page }) => {
+  await seed(page, { text: '>> hello <<', timed: false });
+  await openSettingsPage(page, 'subtitle-style');
+  await page.locator('#ass-mode-toggle').check();
+  await page.locator('#project-settings-close').click();
+  await page.evaluate(() => MaweTextProcess.openTextProcessModal());
+  await page.locator('#text-process-wrap-presets button').filter({ hasText: '放大文本' }).click();
+  expect(await page.evaluate(() => MaweTextProcess.buildTextProcessPreview(MaweTextProcess.textProcessTargets(),
+    MaweTextProcess.getTextProcessOptions())[0].after)).toBe('>>++ hello ++<<');
+  await page.locator('#text-process-confirm').click();
+  expect(await page.evaluate(() => MaweBoot.DATA.segments[0].text)).toBe('>>++ hello ++<<');
+  await page.locator('#undo-btn').click();
+  expect(await page.evaluate(() => MaweBoot.DATA.segments[0].text)).toBe('>> hello <<');
+});

@@ -1734,8 +1734,10 @@ test('contextual help links open their matching Help tabs', async ({ page }) => 
   await page.locator('#gap-remove-help').click();
   await expect(helpPanel).toHaveClass(/show/);
   await expect(page.locator('#help-tab-gap')).toHaveAttribute('aria-selected', 'true');
-  await expect(page.locator('#gap-remove-panel')).not.toHaveClass(/show/);
+  // Contextual help preserves its source window so settings remain accessible.
+  await expect(page.locator('#gap-remove-panel')).toHaveClass(/show/);
   await page.locator('#help-close').click();
+  await page.locator('#gap-remove-close').click();
 
   for (const { button, tab } of [
     { button: '#waveform-settings-help', tab: '#help-tab-waveform' },
@@ -1745,8 +1747,9 @@ test('contextual help links open their matching Help tabs', async ({ page }) => 
     await page.locator(button).click();
     await expect(helpPanel).toHaveClass(/show/);
     await expect(page.locator(tab)).toHaveAttribute('aria-selected', 'true');
-    await expect(page.locator('#waveform-settings-panel')).toBeHidden();
+    await expect(page.locator('#waveform-settings-panel')).toBeVisible();
     await page.locator('#help-close').click();
+    await page.locator('#waveform-settings-toggle').click();
   }
   // 波形操作/按键微调/空隙操作方式设置已移入全局设置「通用操作」，其帮助入口随之迁移
   for (const { button, tab } of [
@@ -1758,8 +1761,9 @@ test('contextual help links open their matching Help tabs', async ({ page }) => 
     await page.locator(button).click();
     await expect(helpPanel).toHaveClass(/show/);
     await expect(page.locator(tab)).toHaveAttribute('aria-selected', 'true');
-    await expect(page.locator('#editor-settings-panel')).toBeHidden();
+    await expect(page.locator('#editor-settings-panel')).toBeVisible();
     await page.locator('#help-close').click();
+    await page.locator('#editor-settings-close').click();
   }
 });
 

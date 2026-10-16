@@ -293,6 +293,88 @@ document.getElementById('download-plain-text')?.addEventListener('click', async 
     desc: '纯文本字幕文件', types: { 'text/plain': ['.txt'] }
   });
 });
+// Keep the export streamed: long videos must not be buffered in browser memory.
+document.getElementById('download-burn-video')?.addEventListener('click', async (event) => {
+  const button = event.currentTarget;
+  if (button.disabled) return;
+  const tr = (text) => window.MAWE_I18N?.translateText?.(text) || text;
+  const config = MaweBoot.SERVER_CONFIG;
+  const player = MaweCoreState.player;
+  const mediaUrl = new URL(player?.currentSrc || player?.src || location.href, location.href);
+  if (!config?.canBurnVideoExport || !config.burnVideoExportUrl
+    || mediaUrl.origin !== location.origin || mediaUrl.pathname !== '/media') {
+    MaweHint.flashHint(tr('烧录视频需要本机服务器绑定当前媒体；请从 Launcher 打开工程'), 'warning');
+    return;
+  }
+  if (!MaweHost.files.hasSavePicker()) {
+    MaweHint.flashHint(tr('当前浏览器不支持流式保存视频，请使用 Chrome 或 Edge'), 'warning');
+    return;
+  }
+  if (MaweInlineEdit.editingState) MaweInlineEdit.finishEdit(true);
+  if (MaweInlineEdit.extensionEditingState) MaweInlineEdit.finishExtensionEdit(true);
+  const format = MaweSettings.EDITOR_SETTINGS.assMode ? 'ass' : 'srt';
+  const subtitles = format === 'ass' ? MaweExportSrt.buildAss() : MaweExportSrt.buildSrt();
+  if (!subtitles?.trim()) {
+    MaweHint.flashHint(tr('没有可烧录的字幕'), 'warning');
+    return;
+  }
+  let writable = null;
+  let reader = null;
+  let response = null;
+  let complete = false;
+  button.disabled = true;
+  try {
+    const handle = await MaweHost.files.pickSaveFile({
+      suggestedName: `${MaweBoot.FILENAME_BASE}_subtitled.mp4`,
+      types: [{ description: tr('烧录视频'), accept: { 'video/mp4': ['.mp4'] } }],
+    });
+    if (!handle.name.toLowerCase().endsWith('.mp4')) throw new Error(tr('烧录目标需要使用 MP4 扩展名'));
+    if (handle.name.toLowerCase() === config.burnVideoSourceName?.toLowerCase()) {
+      throw new Error(tr('保存目标不能与源视频同名'));
+    }
+    MaweHint.flashHint(tr('正在烧录字幕并重新编码视频，请等待…'));
+    response = await MaweHost.server.fetch(config.burnVideoExportUrl, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestToken: config.requestToken, format, subtitles }),
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.error || `HTTP ${response.status}`);
+    }
+    if ((response.headers.get('Content-Type') || '').split(';')[0].trim() !== 'video/mp4') {
+      throw new Error(tr('服务器返回的视频格式无效'));
+    }
+    const expectedLength = Number(response.headers.get('Content-Length'));
+    if (!Number.isSafeInteger(expectedLength) || expectedLength <= 0 || !response.body?.getReader) {
+      throw new Error(tr('服务器返回的视频大小无效'));
+    }
+    writable = await handle.createWritable();
+    reader = response.body.getReader();
+    let receivedLength = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      receivedLength += value.byteLength;
+      if (receivedLength > expectedLength) throw new Error(tr('服务器返回的视频长度超出预期'));
+      await writable.write(value);
+    }
+    if (receivedLength !== expectedLength) throw new Error(tr('视频传输不完整，未保存部分文件'));
+    await writable.close();
+    writable = null;
+    complete = true;
+    MaweHint.flashHint(tr('烧录视频已保存'), 'success');
+  } catch (error) {
+    if (error?.name !== 'AbortError') MaweHint.flashHint(`${tr('烧录视频导出失败')}：${error?.message || error}`, 'warning');
+  } finally {
+    if (!complete && response?.body) {
+      try { void (reader ? reader.cancel() : response.body.cancel()).catch(() => {}); } catch (_) {}
+    }
+    reader?.releaseLock();
+    if (writable) await writable.abort().catch(() => {});
+    button.disabled = false;
+  }
+});
+
 document.getElementById('download-json')?.addEventListener('click', async () => {
   if (MaweInlineEdit.editingState) MaweInlineEdit.finishEdit(true);
   await MaweExportTimeline.downloadFile(MaweJsonRepair.buildJson(), `${MaweBoot.FILENAME_BASE}.mosp`, 'application/json', {

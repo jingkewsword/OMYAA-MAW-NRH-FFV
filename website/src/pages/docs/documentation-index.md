@@ -13,7 +13,7 @@ source: "docs/README.md"
 
 1. [工作流](../workflow/)：先完成一次安装、转写、保存与导出，无需先读全部参数。
 2. [Launcher 指南](../launcher/) 与 [编辑器指南](../editor-guide/)：掌握日常识别与校对；遇到问题再查 [FAQ](../faq/)。
-3. 按需阅读 [多重字幕](../multi-subtitle/)、[ASS 样式](../ass-styles/)、[工具箱](../toolbox/) 和 [自动处理](../postprocess-pipeline/)；本地模型与 OCR 需要额外环境。
+3. 按需阅读 [双语字幕](../multi-subtitle/)、[ASS 样式](../ass-styles/)、[工具箱](../toolbox/) 和 [自动处理](../postprocess-pipeline/)；本地模型与 OCR 需要额外环境。
 4. 自动化或开发时再查 [CLI](../cli/)、[工程格式](../json-schema/) 与 [开发概览](../development/)。
 
 ## 安装与转写
@@ -33,7 +33,7 @@ source: "docs/README.md"
 | --- | --- |
 | [编辑器指南](../editor-guide/) | 字幕编辑、播放、时间调整、保存、备份和导出。 |
 | [按键调整](../keyboard-adjustment/) | 时间微调与相邻字幕联动规则。 |
-| [多重字幕](../multi-subtitle/) | 主副轨、绑定、拆分、吸附与联动的完整说明。 |
+| [双语字幕](../multi-subtitle/) | 主副轨、绑定、拆分、吸附与联动的完整说明。 |
 | [ASS 样式](../ass-styles/) | 样式库、预览、特殊文本与 ASS 导出。 |
 | [工具箱](../toolbox/) | 文稿匹配、AI 整理、LLM、固定替换和媒体处理。 |
 | [转写后自动处理](../postprocess-pipeline/) | 固定处理链、连接预检、中间产物与失败重试。 |

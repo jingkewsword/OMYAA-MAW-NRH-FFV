@@ -22,7 +22,7 @@ from maw.ass_styles import DEFAULT_SRT_STYLE, ass_style_force_style, ass_style_l
 
 ALLOWED_DIRECTIVES: Final = frozenset({"ffconcat", "file", "inpoint", "outpoint", "duration"})
 VIDEO_EXTENSIONS: Final = frozenset({".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".ts", ".m4v"})
-MEDIA_EXTENSIONS: Final = frozenset((*VIDEO_EXTENSIONS, ".mp3", ".wav", ".m4a", ".flac", ".aac", ".ogg"))
+MEDIA_EXTENSIONS: Final = frozenset((*VIDEO_EXTENSIONS, ".mp3", ".wav", ".m4a", ".flac", ".aac", ".ogg", ".opus"))
 SUBTITLE_EXTENSIONS: Final = frozenset({".srt", ".ass", ".ssa"})
 X264_PRESETS: Final = frozenset({"veryfast", "fast", "medium", "slow", "veryslow"})
 AUDIO_BITRATES: Final = frozenset({"96k", "128k", "160k", "192k", "224k", "256k", "320k"})
@@ -126,6 +126,10 @@ class BurnSubtitleRequest:
     crf: int | None = None
     preset: str | None = None
     audio_bitrate: str | None = None
+    # Editor exports use a private output, and audio projects keep their sound.
+    output_path: Path | None = None
+    green_screen_audio: bool = False
+    green_screen_duration: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -375,7 +379,7 @@ def _subtitle_time_ms(value: str) -> int | None:
     return ((int(hours) * 60 + int(minutes)) * 60 + int(seconds)) * 1000 + int(fraction.ljust(3, "0"))
 
 
-def _green_screen_input(subtitle: Path) -> list[str]:
+def _green_screen_input(subtitle: Path, duration: float | None = None) -> list[str]:
     """Make a finite green canvas from subtitle timing; no source video is needed."""
     try:
         contents = subtitle.read_text(encoding="utf-8-sig", errors="replace")
@@ -415,8 +419,10 @@ def _green_screen_input(subtitle: Path) -> list[str]:
                         ends.append(end)
     if not ends or max(ends) <= 0:
         raise MediaToolError("字幕文件没有可用的结束时间，无法确定绿幕视频时长。")
-    # Keep half a second after the last cue so its final frame is fully visible.
-    frame_count = max(30, math.ceil(max(ends) * 30 / 1000) + 15)
+    # Toolbox canvases end after the last cue; editor canvases follow the audio.
+    if duration is not None and (not math.isfinite(duration) or duration <= 0):
+        raise MediaToolError("绿幕视频时长无效")
+    frame_count = math.ceil(duration * 30) if duration is not None else max(30, math.ceil(max(ends) * 30 / 1000) + 15)
     return ["-f", "lavfi", "-i", f"color=c=0x00ff00:s={width}x{height}:r=30:d={frame_count / 30:.3f}"]
 
 
@@ -431,21 +437,26 @@ def run_burn_subtitles(
     """Render SRT/ASS subtitles into a new H.264 MP4."""
     subtitle = _validated_media_path(request.subtitle_path, extensions=SUBTITLE_EXTENSIONS, label="subtitle")
     green_screen = request.green_screen is True
-    media = None if green_screen else _validated_media_path(
-        request.media_path or Path(""), extensions=VIDEO_EXTENSIONS, label="video"
+    keep_green_audio = green_screen and request.green_screen_audio
+    media = None if green_screen and not keep_green_audio else _validated_media_path(
+        request.media_path or Path(""), extensions=MEDIA_EXTENSIONS if keep_green_audio else VIDEO_EXTENSIONS, label="media"
     )
     crf, preset, audio_bitrate = _burn_encoding_settings(request)
     output_source = subtitle if green_screen else media
     assert output_source is not None
-    output = _available_media_output(
+    output = request.output_path or _available_media_output(
         output_source,
         suffix="green-screen" if green_screen else "subtitled",
         extension=".mp4",
     )
+    if request.output_path is not None:
+        output = output.expanduser().resolve()
+        if output.suffix.lower() != ".mp4" or output.exists() or output in (media, subtitle):
+            raise MediaToolError("烧录目标必须是尚不存在的新 MP4 文件")
     temporary = output.with_name(f"{output.stem}.part{output.suffix}")
     requested_encoder = normalize_video_encoder(request.video_encoder)
     attempts = _video_encoder_attempts(ffmpeg_path, requested_encoder)
-    green_input = _green_screen_input(subtitle) if green_screen else []
+    green_input = _green_screen_input(subtitle, request.green_screen_duration) if green_screen else []
     prepared_subtitle = subtitle
     converted_subtitle: Path | None = None
     last_error: MediaToolError | None = None
@@ -460,7 +471,13 @@ def run_burn_subtitles(
                 on_progress=on_progress,
             )
             prepared_subtitle = converted_subtitle
-        input_command = ["-i", str(media)] if media is not None else green_input
+        if green_screen:
+            input_command = green_input + (["-i", str(media)] if keep_green_audio else [])
+            audio_maps = ["-map", "1:a", "-map_metadata", "1"] if keep_green_audio else []
+        else:
+            input_command = ["-i", str(media)]
+            audio_maps = ["-map", "0:a?", "-map_metadata", "0"]
+        audio_options = ["-an"] if green_screen and not keep_green_audio else ["-c:a", "aac", "-b:a", audio_bitrate]
         common_command = [
             str(ffmpeg_path),
             "-y",
@@ -474,8 +491,8 @@ def run_burn_subtitles(
             "-vf",
             _subtitle_filter(prepared_subtitle),
             "-map",
-            "0:v:0",
-            *([] if green_screen else ["-map", "0:a?", "-map_metadata", "0"]),
+            "0:V:0",
+            *audio_maps,
         ]
         for encoder in attempts:
             temporary.unlink(missing_ok=True)
@@ -484,7 +501,8 @@ def run_burn_subtitles(
                 *_video_encoder_options(encoder, crf, preset),
                 "-pix_fmt",
                 "yuv420p",
-                *(["-an"] if green_screen else ["-c:a", "aac", "-b:a", audio_bitrate]),
+                *audio_options,
+                *(["-shortest"] if keep_green_audio else []),
                 "-movflags",
                 "+faststart",
                 str(temporary),

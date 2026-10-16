@@ -176,6 +176,54 @@ async function projectSettings(page, tab) {
   if (!await page.locator('#project-settings-panel').isVisible()) await page.locator('#project-settings-toggle').click();
   await page.locator('#editor-settings-tab-' + tab).click();
 }
+
+test('new concise help pages open from their settings and marker entrances', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  for (const [settingsTab, button, helpTab] of [
+    ['subtitle-style', '#ass-settings-help', 'ass'],
+    ['project-tracks', '#multi-subtitle-settings-help', 'multi'],
+  ]) {
+    await projectSettings(page, settingsTab);
+    await page.locator(button).click();
+    await expect(page.locator('#project-settings-panel')).toBeVisible();
+    await expect(page.locator('#help-tab-' + helpTab)).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('#help-tab-panel-' + helpTab)).toBeVisible();
+    if (helpTab === 'ass') {
+      await expect(page.locator('#help-tab-panel-ass')).toContainText('>>++文字++<<');
+      await page.locator('#help-panel').screenshot({ path: testInfo.outputPath('help-ass.png'), animations: 'disabled' });
+    }
+    await page.locator('#help-close').click();
+  }
+  await expect(page.locator('#help-tab-multi')).toHaveText('双语字幕');
+  await page.locator('#project-settings-close').click();
+  await settings(page, 'export');
+  await page.locator('#export-settings-help').click();
+  await expect(page.locator('#editor-settings-panel')).toBeVisible();
+  await expect(page.locator('#help-tab-panel-export')).toBeVisible();
+  await expect(page.locator('#help-tab-panel-export')).toContainText('去空隙烧录暂缓');
+  await page.locator('#help-close').click();
+  await page.locator('#editor-settings-close').click();
+  await projectSettings(page, 'project-tracks');
+  await page.locator('#project-marker-track-toggle').check();
+  await page.locator('#project-settings-close').click();
+  await page.locator('#markers-manage').click();
+  await page.locator('#markers-help').click();
+  await expect(page.locator('#markers-panel')).toBeVisible();
+  await expect(page.locator('#help-tab-panel-markers')).toBeVisible();
+  await expect(page.locator('#help-panel')).not.toContainText('多重字幕');
+  await page.evaluate(() => MAWE_I18N.applyLanguage('en'));
+  for (const [key, title] of [['ass', 'ASS subtitle styles'], ['multi', 'Bilingual subtitles'],
+    ['export', 'Export and burn'], ['markers', 'Markers and regions']]) {
+    await page.locator('#help-tab-' + key).click();
+    await expect(page.locator('#help-tab-panel-' + key + ' .help-title')).toHaveText(title);
+    expect(await page.locator('#help-tab-panel-' + key).innerText()).not.toMatch(/[\u4e00-\u9fff]/);
+  }
+  await page.setViewportSize({ width: 800, height: 600 });
+  await page.locator('#help-tab-ass').click();
+  const overflow = await page.locator('#help-tab-panel-ass').evaluate(el => el.scrollWidth - el.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(1);
+  await page.locator('#help-panel').screenshot({ path: testInfo.outputPath('help-ass-en-narrow.png'), animations: 'disabled' });
+});
 test('Escape closes only the top visible settings window in either opening order', async ({ page }) => {
   await settings(page, 'general');
   const drag = await dragFloatingPanelAwayFrom(page, '#editor-settings-panel',

@@ -69,11 +69,10 @@ export function createUtilsModule(dependencies) {
     if (options.stripMarkdown) result = stripMarkdownFormatting(result);
     if (options.trim) result = result.trim();
     if (options.capitalize) result = capitalizeFirstLetter(result);
-    if (options.skipWrapped && options.addPrefix && options.addSuffix
-        && isTextWrappedBy(result, options.prefix, options.suffix)) return result;
-    if (options.addPrefix) result = `${String(options.prefix == null ? '' : options.prefix)}${result}`;
-    if (options.addSuffix) result = `${result}${String(options.suffix == null ? '' : options.suffix)}`;
-    return result;
+    return insertAroundFadeMarkers(result,
+      options.addPrefix ? String(options.prefix ?? '') : '',
+      options.addSuffix ? String(options.suffix ?? '') : '',
+      options.skipWrapped === true).text;
   }
 
 
@@ -136,6 +135,7 @@ export function createUtilsModule(dependencies) {
     { id: 'small', label: '缩小文本', left: '--', right: '--', ass: true },
     { id: 'underline', label: '下划线', left: '__', right: '__', ass: true },
     { id: 'strike', label: '删除线', left: '~~', right: '~~', ass: true },
+    { id: 'comment', label: '注释', left: '//', right: '//', ass: true },
     { id: 'fade', label: '淡出淡入', left: '>>', right: '<<', ass: true },
     { id: 'note', label: '音符', left: '♪', right: '♪' },
     { id: 'music', label: '双音符', left: '♬', right: '♬' },
@@ -152,15 +152,28 @@ export function createUtilsModule(dependencies) {
   }
 
 
-  // 在文本两端插入字符。已用同一对符号包裹时跳过（同一对双符号不重复包），
-  // skipped 供调用方提示；空文本与空符号视为无操作。
+  // 淡入淡出标记必须位于整句两端；其他包裹字符插入其内侧，保留正文空格。
+  function insertAroundFadeMarkers(source, l, r, skipWrapped) {
+    const leading = source.match(/^(>>|>)/)?.[0] || '';
+    const remaining = source.slice(leading.length);
+    const trailing = remaining.match(/(<<|<)$/)?.[0] || '';
+    const body = trailing ? remaining.slice(0, -trailing.length) : remaining;
+    const leftFade = l === '>>' || l === '>';
+    const rightFade = r === '<<' || r === '<';
+    if (skipWrapped && isTextWrappedBy(body, l, r)) {
+      return { changed: false, skipped: true, text: source };
+    }
+    const text = `${leftFade ? (leading || l) : leading + l}${body}${rightFade ? (trailing || r) : r + trailing}`;
+    return { changed: text !== source, skipped: skipWrapped && text === source && !!(l || r), text };
+  }
+
+  // 已用同一对符号包裹时跳过；空文本与空符号视为无操作。
   function wrapCharsAroundText(text, left, right) {
     const source = String(text == null ? '' : text);
     const l = String(left == null ? '' : left);
     const r = String(right == null ? '' : right);
     if (source === '' || (!l && !r)) return { changed: false, skipped: false, text: source };
-    if (isTextWrappedBy(source, l, r)) return { changed: false, skipped: true, text: source };
-    return { changed: true, skipped: false, text: `${l}${source}${r}` };
+    return insertAroundFadeMarkers(source, l, r, true);
   }
 
 

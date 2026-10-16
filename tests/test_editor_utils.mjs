@@ -6682,6 +6682,7 @@ test('wrap chars presets insert at both ends and skip already wrapped text', () 
       { id: 'small', label: '缩小文本', left: '--', right: '--', ass: true },
       { id: 'underline', label: '下划线', left: '__', right: '__', ass: true },
       { id: 'strike', label: '删除线', left: '~~', right: '~~', ass: true },
+      { id: 'comment', label: '注释', left: '//', right: '//', ass: true },
       { id: 'fade', label: '淡出淡入', left: '>>', right: '<<', ass: true },
       { id: 'note', label: '音符', left: '♪', right: '♪' },
       { id: 'music', label: '双音符', left: '♬', right: '♬' },
@@ -6706,6 +6707,41 @@ test('wrap chars presets insert at both ends and skip already wrapped text', () 
   assert.equal(helpers.isTextWrappedBy('**文**', '>>', '<<'), false);
 });
 
+test('wrapping preserves fade edges, whitespace and duplicate skipping across text processing', () => {
+  const cases = [
+    ['>> hello <<', '++', '++', '>>++ hello ++<<'],
+    ['>>hello', '//', '//', '>>//hello//'],
+    ['hello<<', '**', '**', '**hello**<<'],
+    ['>hello<', '[', ']', '>[hello]<'],
+    ['>>hello<<', '【', '', '>>【hello<<'],
+    ['>>hello<<', '', '】', '>>hello】<<'],
+    ['>>hello', '>>', '<<', '>>hello<<'],
+    ['hello<<', '>>', '<<', '>>hello<<'],
+    ['>hello<', '>>', '<<', '>hello<'],
+  ];
+  for (const [before, left, right, after] of cases) {
+    const result = helpers.wrapCharsAroundText(before, left, right);
+    assert.equal(result.text, after);
+    assert.equal(result.changed, before !== after);
+    assert.equal(helpers.applyTextProcessing(before, {
+      addPrefix: true, prefix: left, addSuffix: true, suffix: right, skipWrapped: true,
+    }), after);
+  }
+  for (const text of ['>>++ hello ++<<', '>>++hello++', '++hello++<<', '>++hello++<']) {
+    assert.deepEqual({ ...helpers.wrapCharsAroundText(text, '++', '++') },
+      { changed: false, skipped: true, text });
+    assert.equal(helpers.applyTextProcessing(text, {
+      addPrefix: true, prefix: '++', addSuffix: true, suffix: '++', skipWrapped: true,
+    }), text);
+  }
+  assert.equal(helpers.applyTextProcessing('>>++hello++<<', {
+    addPrefix: true, prefix: '[', addSuffix: true, suffix: ']',
+  }), '>>[++hello++]<<');
+  assert.equal(helpers.applyTextProcessing('', { addPrefix: true, prefix: 'a' }), 'a');
+  const parsed = helpers.parseSentenceFadeMarkers(helpers.wrapCharsAroundText('>>hello<<', '++', '++').text);
+  assert.deepEqual({ ...parsed }, { text: '++hello++', fadeIn: true, fadeOut: true });
+});
+
 test('wrap chars menu copy has English translations', () => {
   for (const preset of helpers.WRAP_CHAR_PRESETS) {
     assert.notEqual(i18n.translateText(preset.label, 'en'), preset.label, preset.label);
@@ -6713,7 +6749,7 @@ test('wrap chars menu copy has English translations', () => {
   const keys = [
     '左右添加字符', '左右添加字符预设', '自定义左右字符', '左侧字符', '右侧字符', '插入',
     '左右添加字符（插入到字幕两端）',
-    '在选中字幕文本两端原样插入字符；不做样式转换，也不受「单双符号」规则影响。',
+    '在选中字幕两端插入字符；已有淡入淡出标记时插入其内侧，不改变符号识别规则。',
     '选中字幕已包裹相同符号，未重复添加', '没有可添加字符的字幕',
     '请至少输入一侧字符', '请先选择要处理的字幕',
   ];

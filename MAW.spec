@@ -214,6 +214,7 @@ a = Analysis(
         "maw.postprocess_io",
         "maw.postprocess_llm",
         "maw.postprocess_ffmpeg",
+        "maw.editor_burn",
         "maw.postprocess_match",
         "maw.postprocess_ocr",
         "maw.project",

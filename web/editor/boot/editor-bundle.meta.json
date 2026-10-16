@@ -208,7 +208,7 @@
     "shared/utils/speakers.js": "6549e243fa65b53144f2b19ad6f609df7a6747e2173a34aa1612e2b498c37d46",
     "shared/utils/media-metadata.js": "0708ed6b70ceb365bdc2400e308463d1a5d6625bc3b09ed30d6646bf39f9188d",
     "shared/utils/navigation.js": "130b91b4b645ca1545da7ce33c6cee3fa01c9bd4dbc56dc2d114833344945062",
-    "shared/utils/text-processing.js": "6bba4f077395cfc79bb664690ea0c95585915f28758360aa8d4cbe38822718cd",
+    "shared/utils/text-processing.js": "e6a2ce30ba5f5e78fb3673954df8c90cfdbe27c48a68808d6f40889886c4c273",
     "shared/utils/timed-text-core.js": "b643cd5667e86f6c76659e41590f21814560f37b124358d4cf9168bcff6adb3b",
     "shared/utils/timed-text-plans.js": "6beda14f3b784ec33ca74d6db0cb7be35c3c4599337c47a32c2930ccbaef4cbb",
     "shared/utils/timed-text-edit.js": "faa4bb7cc7331382b2091fce1aef3da13896154683a54e2d8376c83f4d82bcfe",
@@ -238,7 +238,7 @@
     "shared/utils/lottie.js": "a74b0332e76eef35299d9567c052584a61383134cf03e9ea5279b11e6d4e69ea",
     "shared/utils/ograf.js": "94b88b7db9ea4fd862dc49985f1a5e46bcef6bc70837cb656b0cd1b085a40d89",
     "shared/editor-utils.js": "40263d6c074efd5efca133869dbe421439c898bbcdc73b2e8d09fd90dc4d5497",
-    "shared/editor-i18n.js": "3c560cfc5d5c9ce41507fe5e7c450e10866c44da37fd643d2f92024235be09f9",
+    "shared/editor-i18n.js": "5c0a5518914864bda0c2c7c538ad685d628fa675bb62c987f3f3b9c1f8545a96",
     "shared/tooltip.js": "e800623864ea73a6ecbbb225c1d283573b81c055f6191a27ad7c0ed9778b4c88",
     "editor/media/waveform/constants.js": "d5bd567ad4dcbee81995e275e8bf0be571b47e28952fa944478a66aa78e079e4",
     "editor/media/waveform/labels.js": "59ed1c7b666560777b7cc30acf6fd6dc5613ce768d108a5b9fbcfff18759f685",
@@ -310,7 +310,7 @@
     "editor/cues/editor-sticker-picker.js": "2d5352b20bd5af02dd448f013a92f035ad3308a105f07b35d9f0efb88466417e",
     "editor/cues/editor-add-cue.js": "34ade55ebe9d74ea6dc89f8c3f49f000e5efaee42b46d346d2dbf2a3d55a347a",
     "editor/cues/editor-bound-drag.js": "9478e2017ffb4e665f452ba18b9e90a991c6936d8222e386dbc72d76ae97f86a",
-    "editor/ui/editor-context-menus.js": "166d7a79714ded5556e62c2879363e0ecd6844b43cc6cc96ae96b996d16bd8f8",
+    "editor/ui/editor-context-menus.js": "98ab700a1bd10ab71e44deee20ea67c13f4f8d983034ea9781091aa4d24f03c5",
     "editor/cues/editor-text-cleanup.js": "9bc96ae38c0745e45565e17eaad4ee4cfd2f486770e806ebb84e4f06f8a8c8c7",
     "editor/media/editor-waveform-init.js": "9be89de9dddf1b6208a581dee9fef7ec23924f6f0c1f36d15af0b071c280ce78",
     "editor/cues/editor-word-timing.js": "b526d9448fc2adc9dcb76bf2847ad9e4fe39177c927359671b2eb023d5a34c6b",
@@ -368,7 +368,7 @@
     "editor/styles/editor-wiring-ass-frame.js": "1a3c186069460cde01b86e0c1614b8b71d3f9fa7c4ef377988824b14adff69e5",
     "editor/media/editor-wiring-sticker-preview.js": "fa46c5d9075247e627f4fea99cd13d36d1492e4bd5ee1c7a51f046168abbbdb8",
     "editor/io/editor-wiring-export-context.js": "89ac0732b2bcb77878991af980335662d739e4d1cfff65152e4878b042545f0e",
-    "editor/io/editor-wiring-export-actions.js": "6882f8894642f27b54756a8494d2328ec414dbf39e446ea8bc86903480f74028",
+    "editor/io/editor-wiring-export-actions.js": "3ece1eaaf7b8dc86d33e7cbc2c163b0bd07c86236d965cf20d1cc1953eedef4a",
     "editor/ui/editor-wiring-toolbar-menus.js": "7b6594d2a19ced6990cdacbf1e258861467de9f40cf087e51142d1ffcc737b45",
     "editor/io/editor-wiring-project-inputs.js": "83f60f05a35b1aa96f88f9cbb50e7f361cc77072c255f148b66c1edd396b3020",
     "editor/media/editor-wiring-media-inputs.js": "9eade738d68f5873398865ee2ac3ce1380d41f0a796a73e387ea63d17a87d5aa",
@@ -427,7 +427,7 @@
         "format": "esm"
       },
       "web/shared/utils/text-processing.js": {
-        "bytes": 7317,
+        "bytes": 7862,
         "imports": [],
         "format": "esm"
       },
@@ -692,7 +692,7 @@
         "format": "esm"
       },
       "web/editor-entry.mjs": {
-        "bytes": 1807505,
+        "bytes": 1820379,
         "imports": [
           {
             "path": "web/shared/host/storage.js",
@@ -1034,7 +1034,7 @@
             "bytesInOutput": 1807
           },
           "web/shared/utils/text-processing.js": {
-            "bytesInOutput": 3317
+            "bytesInOutput": 3522
           },
           "web/shared/utils/timed-text-core.js": {
             "bytesInOutput": 7222
@@ -1193,10 +1193,10 @@
             "bytesInOutput": 4423
           },
           "web/editor-entry.mjs": {
-            "bytesInOutput": 1049314
+            "bytesInOutput": 1060552
           }
         },
-        "bytes": 1397838
+        "bytes": 1409281
       }
     }
   }

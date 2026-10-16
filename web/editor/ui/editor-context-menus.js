@@ -284,7 +284,13 @@
   function addWrapCharsSubmenu(targets, container = MaweDom.ctxmenu) {
     const wrapPresets = visibleWrapCharPresets();
     const { wrapper: row, list } = createContextSubmenu('左右添加字符');
-    wrapPresets.forEach((preset) => {
+    wrapPresets.forEach((preset, index) => {
+      if (index > 0 && wrapPresets[index - 1].ass && !preset.ass) {
+        const separator = document.createElement('div');
+        separator.className = 'sep';
+        separator.setAttribute('role', 'separator');
+        list.appendChild(separator);
+      }
       const entry = document.createElement('div');
       entry.className = 'item';
       entry.style.cssText = 'padding:5px 10px;border-radius:var(--radius-sm);';

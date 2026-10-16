@@ -56,7 +56,8 @@ from maw.ass_styles import load_ass_style_library, save_ass_style_library  # noq
 from maw.ffmpeg import resolve_ffmpeg_tools  # noqa: E402
 from maw.gui_config import DEFAULT_ENV_PATH, load_env  # noqa: E402
 from maw.gui_platform import creationflags, restore_host_library_path, startupinfo  # noqa: E402
-from maw.postprocess_ffmpeg import libass_missing_glyphs  # noqa: E402
+from maw.postprocess_ffmpeg import MediaToolError, libass_missing_glyphs  # noqa: E402
+from maw.editor_burn import burn_editor_subtitles  # noqa: E402
 from maw.project import (  # noqa: E402
     ProjectValidationFailed,
     normalize_project,
@@ -982,6 +983,9 @@ def build_server_page(
             "otiozStickerExportUrl": "/api/exports/sticker-otioz",
             "otiozTimelineExportUrl": "/api/exports/timeline-otioz",
         "gapRemovedVideoExportUrl": "/api/exports/gap-removed-video",
+            "burnVideoExportUrl": "/api/exports/burn-video",
+            "canBurnVideoExport": project.media_path is not None,
+            "burnVideoSourceName": (project.source_media_path or project.media_path).name if project.media_path else None,
         "gapRemovedVideoSourceName": gap_video_source.name if gap_video_source else None,
         "canGapRemovedVideoExport": bool(
             project.json_path is not None
@@ -1097,6 +1101,7 @@ class EditorServer(ThreadingHTTPServer):
         self.reapeaks_lock = threading.Lock()
         self.ass_frame_lock = threading.Lock()
         self.gap_removed_video_lock = threading.Lock()
+        self.burn_video_lock = threading.Lock()
         self.libass_supported: bool | None = None
         self.libass_binary_signature: tuple[object, ...] | None = None
         self.reapeaks_generation = 0
@@ -2100,6 +2105,8 @@ class EditorRequestHandler(BaseHTTPRequestHandler):
             self.export_timeline_otioz()
         elif path == "/api/exports/gap-removed-video":
             self.export_gap_removed_video()
+        elif path == "/api/exports/burn-video":
+            self.export_burn_video()
         elif path == "/api/exports/lottie":
             self.export_lottie()
         elif path == "/api/exports/ograf":
@@ -2326,6 +2333,46 @@ class EditorRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(zip_bytes)))
         self.end_headers()
         self.wfile.write(zip_bytes)
+
+    def export_burn_video(self) -> None:
+        try:
+            request = self.read_json_request(max_bytes=MAX_ASS_FRAME_TEXT_BYTES * 2)
+            self._check_request_token(request)
+            text = request.get("subtitles")
+            subtitle_format = request.get("format")
+            if subtitle_format not in ("ass", "srt") or not isinstance(text, str) or not text.strip():
+                raise ValueError("需要 ASS 或 SRT 字幕内容")
+            if len(text.encode("utf-8")) > MAX_ASS_FRAME_TEXT_BYTES:
+                raise ValueError("字幕内容超过 8 MB")
+            project = self.editor_server.project
+            source = project.source_media_path or project.media_path
+            if source is None or not source.is_file():
+                raise ValueError("当前服务器没有绑定可用媒体")
+        except PermissionError as error:
+            self.send_json(HTTPStatus.FORBIDDEN, {"ok": False, "error": str(error)})
+            return
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
+            self.send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(error)})
+            return
+        if not self.editor_server.burn_video_lock.acquire(blocking=False):
+            self.send_json(HTTPStatus.CONFLICT, {"ok": False, "error": "另一个视频烧录操作正在进行"})
+            return
+        try:
+            tools = editor_ffmpeg_tools()
+            if tools.ffmpeg is None or tools.ffprobe is None:
+                self.send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"ok": False, "error": "烧录需要可用的 FFmpeg 和 FFprobe"})
+                return
+            if not self.editor_server.ensure_libass_supported(tools.ffmpeg):
+                self.send_json(HTTPStatus.SERVICE_UNAVAILABLE, {"ok": False, "error": "当前 FFmpeg 不支持 libass 字幕烧录"})
+                return
+            with tempfile.TemporaryDirectory(prefix="maw-editor-burn-") as temp_dir:
+                output = burn_editor_subtitles(source, text, subtitle_format, Path(temp_dir),
+                                              ffmpeg_path=tools.ffmpeg, ffprobe_path=tools.ffprobe)
+                self.send_video_attachment(output, f"{source.stem}_subtitled.mp4")
+        except (MediaToolError, OSError) as error:
+            self.send_json(HTTPStatus.UNPROCESSABLE_ENTITY, {"ok": False, "error": f"视频烧录失败：{error}"})
+        finally:
+            self.editor_server.burn_video_lock.release()
 
     def export_gap_removed_video(self) -> None:
         """Rebuild the bound source video and stream it without accepting client paths."""
