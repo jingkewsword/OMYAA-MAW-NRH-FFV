@@ -83,6 +83,15 @@ jobs:
       - name: Run packaging contract tests
         run: uv run --no-sync python scripts/run_check.py --timeout 60 -- uv run --no-sync python scripts/run_tests.py --required tests/test_packaging_contract.py
 
+      - name: Preserve failed Python check evidence
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: windows-preview-python-checks
+          path: .artifacts/checks/
+          include-hidden-files: true
+          retention-days: 7
+
       - name: Download embedded Python bootstrap assets
         run: |
           mkdir -p build

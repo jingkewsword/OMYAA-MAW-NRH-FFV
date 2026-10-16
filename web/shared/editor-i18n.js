@@ -449,7 +449,7 @@
     '工程或媒体绑定已变更，请重新打开工程后导出': 'The project or source media changed; reopen the project before exporting',
     '媒体重组需要可用的 FFmpeg 和 FFprobe': 'Media reconstruction requires working FFmpeg and FFprobe tools',
     '媒体重组失败，请检查临时目录是否可用后重试': 'Media reconstruction failed; check that the temporary folder is writable and retry',
-    '另一个媒体重组任务正在进行，请完成或停止后再试': 'Another media export is running; finish or stop it before retrying',
+    '另一个媒体导出任务正在进行，请完成或停止后再试': 'Another media export is running; finish or stop it before retrying',
     '当前工程没有可重组的音频或视频，请先绑定源文件': 'No source audio or video is available; open the project with its source media first',
     '媒体重组已停止': 'Media reconstruction stopped',
     '无法读取视频信息，请检查源文件及媒体工具': 'Could not read the video; check the source file and media tools',
@@ -487,6 +487,8 @@
 
     '按保留区域精确裁切音频，导出为 WAV。': 'Cut the kept audio intervals precisely and export as WAV.',
     '按保留区域重组视频；切点可能受关键帧影响。': 'Reconstruct the kept video intervals; cuts may be affected by keyframes.',
+    '用 FFmpeg (libass) 将当前工程的 ASS 字幕烧录进源视频；输出 MP4，需已绑定源媒体。': 'Burns the current ASS subtitles into the source video with FFmpeg (libass); outputs MP4, bound source media required.',
+    '按保留区域重新编码并烧录当前 ASS 字幕；重新编码使切点帧级精确，输出 MP4。': 'Re-encodes kept intervals and burns the current ASS subtitles; re-encoding makes cuts frame-accurate, outputs MP4.',
     '请从启动器打开关联源媒体的工程，再导出重组结果': 'Open a project with its source media from the launcher, then export the reconstructed media',
     '当前浏览器或媒体格式不支持重组后音频保存': 'This browser or media format does not support saving reconstructed audio',
     '无法打开音频保存位置选择器': 'Could not choose an audio save location',
@@ -540,6 +542,26 @@
     '视频传输不完整，未保存部分文件': 'The video transfer was incomplete; the partial file was not saved',
     '去空隙视频已重组并保存': 'The gap-removed video was reconstructed and saved',
     '重组后视频导出失败': 'Reconstructed video export failed',
+    '烧录视频': 'Burn video',
+    '重组后烧录视频': 'Burn reconstructed video',
+    '请从启动器打开关联源媒体的工程，再烧录视频': 'Open a project with bound source media from the launcher before burning video',
+    '当前浏览器或环境不支持烧录视频保存': 'This browser or environment does not support saving a burned video',
+    '无法准备 ASS 字幕内容': 'Could not prepare ASS subtitle content',
+    '请检查字幕样式后重试': 'Check the subtitle styles and retry',
+    '工程或媒体绑定已变更，请重新发起视频烧录': 'The project or media binding changed; start the burn again',
+    '烧录视频请使用 .mp4 扩展名': 'Burned video output requires the .mp4 extension',
+    '视频烧录已停止': 'Video burn stopped',
+    '正在停止烧录…': 'Stopping the burn…',
+    '正在烧录字幕…': 'Burning subtitles…',
+    '停止视频烧录': 'Stop video burn',
+    '烧录视频已保存': 'The burned video was saved',
+    '重组后烧录视频已保存': 'The reconstructed burn video was saved',
+    '烧录视频导出失败': 'Burned video export failed',
+    'FFmpeg 将重新编码源视频并烧录当前 ASS 字幕；长视频可能需要较长时间。': 'FFmpeg re-encodes the source video and burns the current ASS subtitles; long videos may take a while.',
+    '按保留区域重新编码并烧录当前 ASS 字幕；切点帧级精确。': 'Re-encodes kept intervals and burns the current ASS subtitles; cuts are frame-accurate.',
+    '视频烧录需要可用的 FFmpeg 和 FFprobe': 'Video burn requires a working FFmpeg and FFprobe',
+    '当前工程绑定的是音频，烧录视频需要视频源': 'The project is bound to audio; burning video requires a video source',
+    '当前 FFmpeg 未编译 libass（ass 滤镜），无法烧录字幕；请安装完整版 FFmpeg（如 macOS 的 ffmpeg-full）或将 FFMPEG_PATH 指向带 libass 的构建。': 'The current FFmpeg build lacks libass (the ass filter) and cannot burn subtitles; install a full FFmpeg build (e.g. ffmpeg-full on macOS) or point FFMPEG_PATH at a libass-enabled build.',
       '更多导出 ▾': 'More exports ▾',
     '选择表情包 OTIO 引用原始素材，或由服务器复制素材并生成便携文件夹': 'Choose whether sticker OTIO references original media or the server copies media into a portable folder',
     '下载 Resolve JSON': 'Download Resolve JSON', 'Resolve JSON': 'Resolve JSON',
@@ -754,7 +776,7 @@
     '左右添加字符预设': 'Character wrapping presets',
     '左右添加字符': 'Wrap with characters', '自定义左右字符': 'Custom wrap characters',
     '左侧字符': 'Left characters', '右侧字符': 'Right characters', '插入': 'Insert',
-    '音符': 'Music note', '淡出淡入': 'Fade in/out', '注释文本': 'Comment text',
+    '音符': 'Music note', '淡出淡入': 'Fade in/out', '弱化文本': 'Subdued text', '整句': 'Sentence',
     '原地震动': 'Shake in place',
     'ASS 特殊文本样式': 'ASS text styles', '普通字符': 'Regular characters',
     '♪音符♪': '♪Music note♪', '♬双音符♬': '♬Double music notes♬', '[中括号]': '[Square brackets]',
@@ -1117,6 +1139,8 @@
     '结构调整（时间码已重新分配）': 'Structure change (word timings redistributed)',
     '原本没有字词码': 'No word timings originally', '字符变化': 'Character changes', '字幕行': 'Subtitle rows',
     '修改前：': 'Before: ', '修改后：': 'After: ', '前：': 'Before: ', '后：': 'After: ',
+    '时间范围：': 'Time range: ', '估算': 'Est.',
+    '修改后移除字幕前后空格': 'Trim leading and trailing spaces when applying',
     '还没有修改内容。': 'No changes yet.',
     '修改后会保持当前字幕段的开始、结束时间不变。': 'The subtitle segment start and end times stay unchanged after editing.',
     '部分字幕无法可靠映射原字词时间码；应用后只保留字幕段整体时间范围。': 'Some subtitles cannot reliably map their original word timings; applying the edit keeps only the overall subtitle segment range.',
@@ -1150,7 +1174,7 @@
     '文本处理…': 'Text processing…', '文本处理': 'Text processing', '仅处理选中的字幕': 'Process selected subtitles only', '需要先选中至少1条字幕才可启用': 'Select at least one subtitle first to enable this option',
     'Trim': 'Trim', '修剪前后空白': 'Trim surrounding whitespace', '去除字幕前方和后方的空格': 'Remove spaces before and after the subtitle text', '去除前后空白': 'Remove surrounding whitespace', '首字母大写': 'Capitalize first letter', '只作用于第一个字母': 'Only affects the first letter',
     '添加前缀': 'Add prefix', '插入到字幕开头': 'Insert at the beginning', '附加内容': 'Add suffix', '插入到字幕结尾': 'Insert at the end',
-    '去除 md 格式符号': 'Remove Markdown formatting', '移除常见 Markdown 标记': 'Remove common Markdown markers',
+    '去除 md 格式符号': 'Remove Markdown formatting', '移除常见 Markdown 标记；含特殊文本样式（MASS）符号时会一并移除，建议先清理再加样式': 'Remove common Markdown markers; special text style (MASS) markers are also removed — clean first, then add styles',
     '文本处理操作': 'Text-processing operations', '选择操作后查看预览': 'Select an operation to preview', '至少选择一项文本处理操作': 'Select at least one text-processing operation', '当前文本处理对于选中的字幕没有任何影响，未作改动': 'The current text processing has no effect on the selected subtitles; no changes were made',
     '应用处理': 'Apply processing', '处理前：': 'Before: ', '处理后：': 'After: ',
     '选择要执行的文本操作；字幕行不会被删除，处理为空时会保留空字幕行。字词时间码会按文本编辑规则尽量保留。': 'Choose text operations; subtitle rows are not deleted, and empty results remain as empty rows. Word timings are retained when possible using the text-editing rules.',
@@ -1261,7 +1285,7 @@
     '选择本地媒体文件并加载到播放器': 'Choose a local media file and load it in the player',
     '单独打开工程；浏览器无法自动读取关联媒体时会提示选择': 'Open a project by itself; the browser will prompt when it cannot read related media automatically',
     '设置表情包根目录': 'Set sticker root folder',
-    '过滤字幕…': 'Filter subtitles…', '清空': 'Clear', '正在加载…': 'Loading…',
+    '过滤字幕': 'Filter subtitles', '清空': 'Clear', '正在加载…': 'Loading…',
     '只显示超过阈值的字幕（再次点击关闭）': 'Show only subtitles over the threshold (click again to turn off)',
     '查看鼠标操作与键盘快捷键': 'View mouse and keyboard shortcuts',
     '打开全局设置窗口': 'Open the global settings window', '展开字幕、波形与导出设置': 'Open subtitle, waveform, and export settings',
@@ -1422,6 +1446,8 @@
     '黄字幕颜色十六进制值': 'Yellow subtitle color hex value', '绿字幕颜色十六进制值': 'Green subtitle color hex value',
     '红字幕颜色十六进制值': 'Red subtitle color hex value', '紫字幕颜色十六进制值': 'Purple subtitle color hex value',
     '蓝字幕颜色十六进制值': 'Blue subtitle color hex value',
+    '缺少可靠时间码，新时间范围基于字数估算。': 'No reliable timecodes available; the new time range is estimated from text length.',
+    '应用修改时去掉每条字幕文本首尾的空格': 'Remove leading and trailing spaces from every subtitle text when applying',
   };
 
   const textOriginals = new WeakMap();
@@ -1495,7 +1521,7 @@
   // 颜色名也在此映射：中文界面导出的分色 SRT 用「_红色」而非「_red」；
   // 未标记颜色的默认组用「_默认」而非「_default」。
   const EXPORT_NAME_SEGMENTS = {
-    'gap-removed': '去空隙', 'stickers': '表情包', 'default': '默认',
+    'gap-removed': '去空隙', 'stickers': '表情包', 'default': '默认', 'subtitled': '烧录字幕',
     'yellow': '黄色', 'green': '绿色', 'red': '红色', 'purple': '紫色', 'blue': '蓝色',
   };
 
@@ -1586,11 +1612,6 @@
     if (match) return `Word-timing coverage: ${match[1]}/${match[2]}`;
     match = /^原始时间码复用率：\s*(\d+)\/(\d+)$/.exec(text);
     if (match) return `Original timing reuse: ${match[1]}/${match[2]}`;
-    if (text === '时间范围为自动估算（按原字幕范围/文字长度分配）') {
-      return 'Time range estimated from the original cue range and text length';
-    }
-    match = /^时间范围：(.+?)\s*[–-]\s*(.+?)\s*→\s*(.+?)\s*[–-]\s*(.+)$/.exec(text);
-    if (match) return `Time range: ${match[1]} - ${match[2]} -> ${match[3]} - ${match[4]}`;
     match = /^版本号\s+(.+)$/.exec(text);
     if (match) return `Version ${match[1]}`;
     // 动态 title / 徽标：带变量的属性文案
@@ -1607,6 +1628,8 @@
     if (match) return `Project path is no longer valid: ${match[1]}`;
     match = /^点击复制工程文件名：(.+)$/.exec(text);
     if (match) return `Click to copy the project file name: ${match[1]}`;
+    match = /^有未保存的修改；点击复制工程文件名：(.+)$/.exec(text);
+    if (match) return `Unsaved changes; click to copy the project file name: ${match[1]}`;
     match = /^点击复制媒体名：(.+)$/.exec(text);
     if (match) return `Click to copy the media name: ${match[1]}`;
     match = /^工程关联媒体：(.+)$/.exec(text);

@@ -97,6 +97,7 @@ __WAVEFORM_CSS__
       </div>
     </span>
     <button id="download-json">导出工程</button>
+    <button type="button" id="burn-video-export-btn" hidden title="用 FFmpeg (libass) 将当前工程的 ASS 字幕烧录进源视频；输出 MP4，需已绑定源媒体。">烧录视频</button>
     <span class="dropdown gap-removed-export-dropdown" id="gap-removed-export-dropdown" hidden>
       <button id="gap-removed-export-btn" title="导出应用当前空隙移除结果的字幕、时间线或保留区域计划" aria-expanded="false" aria-controls="gap-removed-export-menu" aria-haspopup="menu">去空隙导出 ▾</button>
       <div class="dropdown-menu" id="gap-removed-export-menu" role="menu">
@@ -105,6 +106,7 @@ __WAVEFORM_CSS__
         <div class="dropdown-separator" id="gap-removed-subtitle-export-separator" role="separator" hidden></div>
         <div class="dropdown-item" id="download-gap-removed-ass" role="menuitem" tabindex="0" title="按移除静音空隙后的时间轴导出带样式的 ASS 字幕；原工程时间不变">ASS（带样式）</div>
         <div class="dropdown-item" id="download-gap-removed-video" role="menuitem" tabindex="0" title="按保留区域重组视频；切点可能受关键帧影响。">重组后视频</div>
+        <div class="dropdown-item" id="download-gap-removed-burn-video" role="menuitem" tabindex="0" hidden title="按保留区域重新编码并烧录当前 ASS 字幕；重新编码使切点帧级精确，输出 MP4。">重组后烧录视频</div>
         <div class="dropdown-submenu" role="none">
           <div class="dropdown-item dropdown-submenu-toggle" role="menuitem" tabindex="0" aria-haspopup="menu" aria-expanded="false" aria-controls="gap-removed-otio-menu">OTIO</div>
           <div class="dropdown-menu dropdown-submenu-menu" id="gap-removed-otio-menu" role="menu">
@@ -2137,10 +2139,7 @@ __WAVEFORM_CSS__
             </label><small class="settings-panel-hint">播放时列表会跟随当前字幕；手动翻看后可点击恢复跟随。</small></div>
 </div>
       </div>
-      <span class="input-clear" id="search-wrap">
-        <input type="text" id="search" placeholder="过滤字幕…" autocomplete="off">
-        <span class="clear-x" id="search-clear" title="清空">×</span>
-      </span>
+      <input type="search" id="search" placeholder="过滤字幕" autocomplete="off">
       <div class="dropdown color-filter-dropdown" id="color-filter-dropdown">
         <button type="button" id="color-filter-btn" hidden title="按颜色过滤显示的字幕" aria-expanded="false" aria-controls="color-filter-menu">🎨</button>
         <div class="dropdown-menu color-filter-menu" id="color-filter-menu" role="menu"></div>
@@ -2366,7 +2365,7 @@ __WAVEFORM_CSS__
       <label class="text-process-operation" for="text-process-strip-markdown">
         <input type="checkbox" id="text-process-strip-markdown">
         <span>去除 md 格式符号</span>
-        <span class="modal-hint">移除常见 Markdown 标记</span>
+        <span class="modal-hint">移除常见 Markdown 标记；含特殊文本样式（MASS）符号时会一并移除，建议先清理再加样式</span>
       </label>
     </div>
     <div class="text-process-wrap-presets" aria-label="左右添加字符预设">
@@ -2374,6 +2373,10 @@ __WAVEFORM_CSS__
       <div class="text-process-wrap-preset-row text-process-wrap-preset-row-ass">
         <span class="text-process-wrap-preset-row-label">ASS 特殊文本样式</span>
         <div class="text-process-wrap-preset-buttons" id="text-process-wrap-presets-ass"></div>
+      </div>
+      <div class="text-process-wrap-preset-row text-process-wrap-preset-row-ass">
+        <span class="text-process-wrap-preset-row-label text-process-wrap-sentence-badge">整句</span>
+        <div class="text-process-wrap-preset-buttons" id="text-process-wrap-presets-ass-sentence"></div>
       </div>
       <div class="text-process-wrap-preset-row">
         <span class="text-process-wrap-preset-row-label">普通字符</span>
@@ -2518,6 +2521,7 @@ __WAVEFORM_CSS__
         <div class="timed-text-edit-rows" id="timed-text-edit-rows"></div>
         <div id="timed-text-edit-single-editor" class="timed-text-edit-single-editor" hidden>
           <div id="timed-text-edit-search-mirror" class="timed-text-edit-search-mirror" aria-hidden="true"></div>
+          <div id="timed-text-edit-gutter" class="timed-text-edit-gutter" aria-hidden="true"></div>
           <textarea id="timed-text-edit-single-textarea" class="timed-text-edit-single-textarea"
                     aria-label="单文本框编辑" spellcheck="false" wrap="off"></textarea>
           <span id="timed-text-edit-single-guide" class="timed-text-edit-single-guide" aria-hidden="true"></span>
@@ -2537,6 +2541,10 @@ __WAVEFORM_CSS__
       </aside>
     </div>
     <div class="actions">
+      <label class="timed-text-edit-trim-toggle" for="timed-text-edit-trim" title="应用修改时去掉每条字幕文本首尾的空格">
+        <input type="checkbox" id="timed-text-edit-trim">
+        修改后移除字幕前后空格
+      </label>
       <button type="button" id="timed-text-edit-cancel">取消</button>
       <button type="button" id="timed-text-edit-apply" class="primary" disabled>应用修改</button>
     </div>

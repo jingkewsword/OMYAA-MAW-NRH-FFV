@@ -162,6 +162,7 @@ function applyCanonicalProject(data, filename) {
     jsonEl.classList.remove('empty');
     jsonEl.onclick = () => MaweExportTimeline.copyText(filename, `已复制：${filename}`);
   }
+  MaweProjectSave.updateProjectDirtyIndicator();
   MaweServerSave.projectCheckpointed = true;
   MaweServerSave.configureServerSaveControls();
   MaweServerSave.scheduleAutoSave();
@@ -246,6 +247,7 @@ function applyCanonicalProject(data, filename) {
       MaweBoot.SERVER_CONFIG.gapRemovedVideoSourceName = null;
       MaweBoot.SERVER_CONFIG.sourceMediaId = null;
     }
+    window.MaweBurnVideoExport?.invalidateBinding();
     window.MaweGapRemovedMediaExport?.updateButton();
     MaweServerSave.configureServerSaveControls();
     MaweDynamicExports.updateLottieExportButton();

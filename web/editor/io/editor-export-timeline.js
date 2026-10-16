@@ -251,17 +251,18 @@
 
 
   function mediaTargetUrl() {
-    const candidates = [MaweBoot.DATA.media];
-    // Stored project references can be relative. The server retains their
-    // resolved native source, until a browser-local file replaces that binding.
-    if (!window.MaweProjectMediaInputs?.currentMediaBlobUrl) {
-      candidates.push(MaweBoot.SERVER_CONFIG?.autoLoadedMediaPath);
+    // Browser-local replacements have no native path. Neither the old server
+    // binding nor a not-yet-updated currentSrc may identify the replacement.
+    if (MaweProjectMediaInputs.currentMediaBlobUrl) return '';
+    const media = String(MaweBoot.DATA.media || '').trim();
+    if (/^file:\/\//i.test(media) || /^[A-Za-z]:[\\/]/.test(media) || media.startsWith('/')) {
+      return stickerTargetUrl(media);
     }
-    for (const candidate of candidates) {
-      const media = String(candidate || '').trim();
-      if (/^file:\/\//i.test(media) || /^[A-Za-z]:[\\/]/.test(media) || media.startsWith('/')) {
-        return stickerTargetUrl(media);
-      }
+    // Portable projects keep a relative media reference. The localhost host
+    // already resolved its source; this binding is cleared on project import.
+    const boundMedia = String(MaweBoot.SERVER_CONFIG?.autoLoadedMediaPath || '').trim();
+    if (/^file:\/\//i.test(boundMedia) || /^[A-Za-z]:[\\/]/.test(boundMedia) || boundMedia.startsWith('/')) {
+      return stickerTargetUrl(boundMedia);
     }
     const current = String(MaweCoreState.player?.currentSrc || '').trim();
     if (/^file:\/\//i.test(current)) return current;

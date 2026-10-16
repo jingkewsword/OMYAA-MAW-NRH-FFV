@@ -666,6 +666,8 @@ function syncAssSymbolRule() {
 }
 assSpecialSymbolRule?.addEventListener('change', () => {
   MaweSettings.updateEditorSettings({ assSpecialSymbolRule: assSpecialSymbolRule.value });
+  // 字词块归位的 MASS 成对检测与识别规则保持同源（见 editor-wiring-initial-config）。
+  window.AsrEditorUtils.setMassSymbolRule(assSpecialSymbolRule.value);
   syncAssSymbolRule();
   MawePlaybackLoop.refreshSubtitlePreview();
 });
@@ -678,6 +680,8 @@ function syncAssModeControl() {
   }
   const quickOpen = document.getElementById('ass-style-quick-open');
   if (quickOpen) quickOpen.hidden = !enabled;
+  // 工具栏「烧录视频」按钮只在 ASS 字幕模式下显示。
+  window.MaweBurnVideoExport?.syncButton?.();
   syncAssSymbolRule();
   syncAssModeDependentControls();
   updateAssStylePreviewModeHints();
