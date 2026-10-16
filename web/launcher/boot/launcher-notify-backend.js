@@ -352,6 +352,10 @@ $("installOcrRuntime").addEventListener("click", async () => { const runtime = s
 $("localModelPath").addEventListener("input", () => { setError("localModelPath", ""); if (isLocalProvider()) { state.localModelPaths[selectedModel().id] = $("localModelPath").value.trim(); savePrefsDebounced({ localModelPaths: { ...state.localModelPaths } }); void refreshLocalModels(); } });
 $("refreshLocalRuntime").addEventListener("click", async () => { $("refreshLocalRuntime").disabled = true; try { await refreshLocalRuntime(); await refreshLocalModels(); } finally { $("refreshLocalRuntime").disabled = false; } });
 $("toggleLocalRuntimeInventory").addEventListener("click", () => { void toggleLocalRuntimeInventory(); });
+$("checkRuntimeDiagnostics").addEventListener("click", () => { void runRuntimeDiagnostics(false); });
+$("testRuntimeCuda").addEventListener("click", () => { void runRuntimeDiagnostics(true); });
+$("cancelRuntimeDiagnostics").addEventListener("click", () => { void cancelRuntimeDiagnostics(); });
+$("exportRuntimeDiagnostics").addEventListener("click", exportRuntimeDiagnostics);
 $("openLocalRuntimeSettings").addEventListener("click", () => { openSettings("localRuntimePanel"); void refreshLocalRuntime(); });
 $("openLocalModelSettings").addEventListener("click", () => { openSettings("localAsrModelSettingsSection"); void refreshLocalModels(); void refreshAlignmentModels(); });
 $("openDashscopeRegionSettings").addEventListener("click", () => openSettings("dashscopeRegionPanel"));

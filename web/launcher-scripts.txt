@@ -12,6 +12,7 @@ launcher/server/launcher-server-monitor.js
 launcher/boot/launcher-theme-bridge.js
 launcher/forms/launcher-form-sync.js
 launcher/local/launcher-local-models.js
+launcher/local/launcher-runtime-diagnostics.js
 launcher/forms/launcher-provider-language.js
 launcher/presets/launcher-presets.js
 launcher/forms/launcher-prefs-zoom.js

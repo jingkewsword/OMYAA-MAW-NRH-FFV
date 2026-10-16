@@ -908,6 +908,22 @@ label {
   background: color-mix(in srgb, var(--bg-panel) 60%, transparent);
 }
 
+.runtime-diagnostics {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+.runtime-diagnostics h4 { margin: 0; }
+.runtime-diagnostic-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.runtime-diagnostic-result { display: grid; gap: 8px; }
+.runtime-diagnostic-result:empty { display: none; }
+.runtime-diagnostic-pass { color: var(--text); }
+.runtime-diagnostic-warning, .runtime-diagnostic-error { color: var(--amber-hover); }
+
 .runtime-inventory-meta {
   display: grid;
   gap: 5px;

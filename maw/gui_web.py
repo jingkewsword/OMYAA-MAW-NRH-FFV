@@ -72,6 +72,7 @@ from maw.local_log import LocalLogSink, TeeWriter, default_log_directory, instal
 from maw.diagnostics import app_version, error_context
 from maw.file_errors import file_error_code
 from maw.local_debug import local_debug_manifest_path
+from maw.runtime_diagnostics import RuntimeDiagnostics
 from maw.alignment_models import ALIGNMENT_MODELS, alignment_model_by_id, alignment_models_payload, inspect_alignment_model, normalize_alignment_model_id
 from maw.local_runtime import (
     LocalRuntimeCancelled,
@@ -512,6 +513,7 @@ class LauncherApi:
         self.alignment_media_path: Path | None = None
         self.alignment_gap_remove: dict[str, int | float] | None = None
         self._media_tool_lock = Lock()
+        self._runtime_diagnostics = RuntimeDiagnostics()
         self.media_tool_process: subprocess.Popen[str] | None = None
         self.media_tool_cancel_event: Event | None = None
         self.result: TranscriptionResult | None = None
@@ -2904,6 +2906,37 @@ class LauncherApi:
             "inventory": local_runtime_inventory(model_cache_root),
         }
 
+    def start_runtime_diagnostics(self, payload: Mapping[str, object]) -> dict[str, object]:
+        return self._runtime_diagnostics.start(
+            str(payload.get("runtimeKey") or "local"), payload.get("testCuda") is True,
+            effective_config(self.paths.env_path).model_cache_root,
+        )
+
+    def get_runtime_diagnostics(self, payload: Mapping[str, object]) -> dict[str, object]:
+        return self._runtime_diagnostics.poll(str(payload.get("operationId") or ""))
+
+    def cancel_runtime_diagnostics(self, payload: Mapping[str, object]) -> dict[str, object]:
+        return self._runtime_diagnostics.cancel(str(payload.get("operationId") or ""))
+
+    def export_runtime_diagnostics(self, payload: Mapping[str, object]) -> dict[str, object]:
+        result = self._runtime_diagnostics.poll(str(payload.get("operationId") or ""))
+        if not result.get("ok") or result.get("running") or not result.get("report"):
+            return {"ok": False, "code": "report_unavailable"}
+        try:
+            chosen = _file_dialog(
+                open_dialog=False, save_filename="maw-runtime-diagnostics.json",
+                file_types=("JSON (*.json)",),
+            )
+            if not chosen:
+                return {"ok": True, "cancelled": True}
+            Path(chosen[0]).write_text(
+                json.dumps(result["report"], ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8", newline="\n",
+            )
+        except (OSError, ValueError):
+            return {"ok": False, "code": "export_failed"}
+        return {"ok": True}
+
     def get_ocr_runtime(self, _payload: Mapping[str, object] | None = None) -> dict[str, object]:
         status = self._ocr_runtime_status()
         return {
@@ -3175,6 +3208,7 @@ class LauncherApi:
         return _open_existing_path(directory.resolve())
 
     def shutdown(self) -> None:
+        self._runtime_diagnostics.shutdown()
         self.cancel_recording_review()
         self.cancel_transcription()
         self.cancel_batch_transcription()
