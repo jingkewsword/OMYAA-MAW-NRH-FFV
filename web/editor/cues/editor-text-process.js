@@ -319,7 +319,7 @@
     if (wrapCharsLeftInput) wrapCharsLeftInput.value = '';
     if (wrapCharsRightInput) wrapCharsRightInput.value = '';
     wrapCharsModal?.classList.add('show');
-    setTimeout(() => wrapCharsLeftInput?.focus(), 50);
+    wrapCharsLeftInput?.focus();
   }
 
 
