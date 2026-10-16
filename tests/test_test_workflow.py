@@ -104,6 +104,30 @@ class TestWorkflowTests(unittest.TestCase):
         self.assertIn("editor-e2e", renamed["packs"])
         self.assertEqual(renamed["e2e_specs"], [])
 
+    def test_checklist_source_keeps_its_real_browser_consumer(self):
+        spec = "tests/e2e/verification-checklist.spec.mjs"
+        for path in ("tools/verification-checklist/build.py",
+                     "tools/verification-checklist/templates/verification-checklist.html",
+                     "tools/verification-checklist/examples/checklist.json"):
+            with self.subTest(path=path):
+                plan = select_packs([path])
+                self.assertEqual(plan["packs"], ["docs", "e2e", "tools"])
+                self.assertEqual(plan["e2e_specs"], [spec])
+                self.assertFalse(plan["preview"])
+        mixed = select_packs(["tools/verification-checklist/build.py", "tests/e2e/shared-tooltip.spec.mjs"])
+        self.assertEqual(mixed["e2e_specs"], sorted([spec, "tests/e2e/shared-tooltip.spec.mjs"]))
+        shared = select_packs(["tools/verification-checklist/build.py", "uv.lock"])
+        self.assertTrue(ALL_MERGE.issubset(shared["packs"]))
+        self.assertEqual(shared["e2e_specs"], [])
+
+    def test_export_menu_keeps_new_focus_and_spacing_consumer(self):
+        for path in ("web/editor/ui/editor-export-menus.js", "web/editor/io/editor-export-timeline.js"):
+            with self.subTest(path=path):
+                plan = select_packs([path])
+                self.assertIn("tests/e2e/editor-menu-focus.spec.mjs", plan["e2e_specs"])
+                self.assertIn("tests/e2e/waveform-history.spec.mjs", plan["e2e_specs"])
+                self.assertNotIn("editor-e2e", plan["packs"])
+
     def test_referenced_or_exported_spec_cannot_hide_consumers(self):
         area = ROOT / ".artifacts/spec-selection-fixtures"
         area.mkdir(parents=True, exist_ok=True)

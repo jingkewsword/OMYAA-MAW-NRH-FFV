@@ -95,7 +95,7 @@ E2E_FAMILIES = (
     (("thumbnail", "filmstrip"), ("filmstrip", "waveform-view-performance", "settings-structure")),
     (("segmentation", "punctuation", "word_timing", "word-timing", "timed-text", "text-tools", "split", "merge"), ("word-timing", "timed-text", "split-", "keyboard-timing", "editor-text-tools", "launcher-resegment")),
     (("ass_", "ass-", "/ass.", "font", "subtitle-preview"), ("ass-", "subtitle-preview", "bilingual-label")),
-    (("export", "fcp7", "otio"), ("ass-export", "fcp7-export", "otio-export", "gap-", "multi-subtitle", "speaker-label", "waveform-history")),
+    (("export", "fcp7", "otio"), ("ass-export", "fcp7-export", "otio-export", "gap-", "multi-subtitle", "speaker-label", "waveform-history", "editor-menu-focus")),
     (("marker", "speaker", "overlay", "multi-subtitle", "multi_subtitle"), ("marker", "speaker-label", "overlay-track", "multi-subtitle")),
     (("cue-scroll", "cue-list", "cue-render"), ("cue-", "click-behavior", "layout-feedback")),
     (("tooltip",), ("shared-tooltip", "launcher-keycaps")),
@@ -164,7 +164,8 @@ def select_packs(paths: list[str], *, release: bool = False) -> dict:
             reasons.append(f"document tooling and its regressions are covered by docs: {path}")
             continue
         if path.startswith("tools/verification-checklist/"):
-            selected.add("tools")
+            selected.update({"tools", "e2e"})
+            e2e_specs.add("tests/e2e/verification-checklist.spec.mjs")
             continue
         if path.startswith("tests/e2e/") and path.endswith(".spec.mjs"):
             scope = spec_scope(path)

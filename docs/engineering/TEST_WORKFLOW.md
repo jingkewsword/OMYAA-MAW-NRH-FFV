@@ -48,7 +48,7 @@ uv run --no-sync python scripts/test_workflow.py --stage merge --changed maw/qua
 | 纯文档 | 文档导航、发布归档与对应回归 | Schema 文档视为共享契约，扩大所有业务组 |
 | 网站 | 文档检查、网站构建 | 业务源码同批变化时合并相关组 |
 | 文档工具 | check_docs/prepare_release_notes 及对应两个测试文件精确匹配时，仅 docs | 与生产或其他测试同批修改取并集 |
-| 其他工具 | 已知 verification-checklist 走 tools；未知工具保守扩大 | 公共测试入口/依赖锁/工作流变更扩大全部组；目录名 tools 不能证明与业务无关 |
+| 其他工具 | verification-checklist 源目录走 tools + 自身真实 E2E；未知工具保守扩大 | 公共测试入口/依赖锁/工作流变更扩大全部组；目录名 tools 不能证明与业务无关 |
 | 发布 | 所有 required 组 | 打包平台分别验证 Python/媒体/长媒体/生命周期/工具与 Node 语义；完整 Chromium 在四个独立 Linux runner 执行并汇总 |
 
 `--stage merge --plan-only` 输出选择与原因；`--pack` 可以显式选择组进行复现。`pnpm run test:dev`、`test:merge`、`test:release` 是同一入口的快捷方式。历史 `pnpm run test:unit` 仍运行全部顶层 `.mjs`，其中含真实浏览器与进程测试；无参数 `scripts/run_tests.py` 仍保留历史全量 unittest 行为，不能拿其允许 skip 的结果代替 required 门禁。
@@ -75,7 +75,9 @@ uv run --no-sync python scripts/test_workflow.py --stage merge --changed maw/qua
 
 文档检查的模式组合通过 `check_docs.main(argv)` 复用真实 parser 与完整命令体，保留 Git 读树/忽略检查；CLI 的 Unicode/JSON、默认/严格模式文本和进程退出码另有五次真实调用。这样减少解释器重复启动，不减少用例或替换业务检查。对模式增加断言时复用该入口；只有需要检验进程、编码或 CLI 边界时才追加真实子进程，避免每种组合都重新启动环境。
 
-清单工具的 HTML 与 Markdown 构建回归均属于 tools，包括 `test_verification_checklist_build` 的 16 项用例；工具源码或对应 Python 测试单独改动选择 docs/tools，不准备应用预览。归属回归同时核对模块全部 ID，防止新增模块落入 common 后被工具选择漏过。
+清单工具的 HTML 与 Markdown 构建回归均属于 tools，包括 `test_verification_checklist_build` 的 16 项用例；对应 Python 测试单独改动选择 docs/tools。工具源码、模板或示例目录还选择 `verification-checklist.spec.mjs`，保留真实 localStorage、下载/复制、布局与禁用状态消费者；只增加自身 spec，不准备应用预览。归属回归同时核对模块全部 ID，防止新增模块落入 common 后被工具选择漏过。
+
+导出菜单/时间线叶子修改除导出与混合波形消费者外，还选择 `editor-menu-focus.spec.mjs`，保留菜单实际间距及关闭后焦点/播放快捷键边界。新增测试文件进入全量集合不代表叶子选择已覆盖它；新功能引入消费者时需一并检查映射。共享输入仍扩大完整集合，多路径继续取并集。
 
 每次运行的计划、聚合结果、Python IDs/skip 原因、Node JUnit 与 Playwright JSON 写入 `.artifacts/test-workflow/<id>/`，子命令的 bounded 日志与 PID/时限证据仍走 `scripts/run_check.py`。失败后停止当前批次，后续门禁尚未运行，不能宣称通过。NumPy/soundfile/Pillow/FFmpeg/内核缺失、编码器不支持、必需 fixture 缺失、Node/Playwright skip、超时均不能得到 required 成功。Windows 的特定 symlink 权限与 OS opener、不适用的 Unix checksum，以及非 Windows 的 LOCALAPPDATA/startfile 测试单独登记为 platform_not_applicable；Linux CI 必须运行符号链接边界。
 
