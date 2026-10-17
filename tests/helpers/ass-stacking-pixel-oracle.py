@@ -98,8 +98,11 @@ def boxes(image: Image.Image, padding: int = 0) -> dict:
         box = mask.getbbox()
         bands = []
         max_row_painted = 0
-        for row in range(image.height):
-            row_mask = mask.crop((0, row, image.width, row + 1))
+        # Outside this box every mask pixel is zero. Keep every painted row
+        # and interior gap, while avoiding empty margins in row histograms.
+        rows = range(box[1], box[3]) if box else ()
+        for row in rows:
+            row_mask = mask.crop((box[0], row, box[2], row + 1))
             max_row_painted = max(max_row_painted, count(row_mask))
             present = bool(row_mask.getbbox())
             if present and (not bands or bands[-1][1] != row - padding):

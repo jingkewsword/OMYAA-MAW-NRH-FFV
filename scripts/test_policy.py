@@ -10,6 +10,12 @@ PYTHON_PACKS = ("common", "media", "long-media", "tools", "manual")
 MEDIA_MODULES = {"test_gap_removed_audio_export", "test_gap_removed_video_compatibility",
                  "test_media_cache", "test_quapeaks_generation",
                  "test_thumbnail_jobs_integration", "test_thumbnail_server"}
+MEDIA_CLASSES = {
+    ("test_burn_video_export", "BurnVideoPrecisionTests"),
+    ("test_media_keyframes", "RealKeyframeInspectorTests"),
+    ("test_gap_removed_embedded_subtitles", "EmbeddedSubtitleTimelineTests"),
+    ("test_gap_removed_video_timeline", "RealVideoTimelineTests"),
+}
 DOC_TOOL_PATHS = {"scripts/check_docs.py", "scripts/prepare_release_notes.py",
                   "tests/test_docs_check.py", "tests/test_release_notes.py"}
 TOOL_MODULES = {"test_docs_check", "test_release_notes", "test_run_check", "test_run_tests_runner",
@@ -48,6 +54,8 @@ def python_pack(test_id: str) -> str:
         return "manual"
     if "LongMediaGeneratedFixtureTests" in parts or method == "test_eleven_minute_real_audio_preserves_acoustic_offsets":
         return "long-media"
+    if any(owner == module and name in parts for owner, name in MEDIA_CLASSES):
+        return "media"
     if module == "test_thumbnails" and "ThumbnailIntegrationTests" in parts:
         return "media"
     if module in MEDIA_MODULES or (module == "test_reapeaks_fixture" and "GeneratedFixtureTests" in parts):

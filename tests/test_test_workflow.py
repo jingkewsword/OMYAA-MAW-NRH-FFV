@@ -263,6 +263,29 @@ class TestWorkflowTests(unittest.TestCase):
         for path in ("web/editor/state/editor-state.js", "web/editor/unknown-module.js"):
             self.assertIn("editor-e2e", select_packs([path])["packs"])
 
+    def test_real_codec_classes_keep_media_preparation_and_pure_contracts_stay_common(self):
+        for module, real_class in (
+            ("test_burn_video_export", "BurnVideoPrecisionTests"),
+            ("test_media_keyframes", "RealKeyframeInspectorTests"),
+            ("test_gap_removed_embedded_subtitles", "EmbeddedSubtitleTimelineTests"),
+            ("test_gap_removed_video_timeline", "RealVideoTimelineTests"),
+        ):
+            path = f"tests/{module}.py"
+            with self.subTest(module=module):
+                ids = test_policy.source_test_ids(ROOT / path)
+                real = [name for name in ids if real_class in name.split(".")]
+                pure = [name for name in ids if real_class not in name.split(".")]
+                self.assertTrue(real)
+                self.assertTrue(pure)
+                self.assertEqual({test_policy.python_pack(name) for name in real}, {"media"})
+                self.assertEqual({test_policy.python_pack(name) for name in pure}, {"common"})
+                plan = select_packs([path])
+                self.assertTrue({"common", "media", "smoke"}.issubset(plan["packs"]))
+                self.assertTrue(test_workflow.preparation(plan["packs"])["real_media"])
+        for path in ("maw/editor_burn.py", "maw/media_keyframes.py", "maw/media_export_video.py"):
+            with self.subTest(source=path):
+                self.assertIn("media", select_packs([path])["packs"])
+
     def test_export_and_gap_keep_the_mixed_waveform_consumer(self):
         consumer = "tests/e2e/waveform-history.spec.mjs"
         for path in ("web/editor/io/editor-export-timeline.js", "web/editor/ui/editor-export-menus.js", "web/shared/gap-remove-core.js"):
