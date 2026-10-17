@@ -31,7 +31,7 @@ test('readiness timeout includes a response body that never finishes', { timeout
 });
 
 test('EPERM killing a POSIX process group falls back to the leader and records probe results',
-  { skip: process.platform === 'win32', timeout: 5000 }, async () => {
+  { timeout: 5000 }, async () => {
     const pgid = 4242;
     const originalKill = process.kill;
     const originalWarn = console.warn;
@@ -53,7 +53,7 @@ test('EPERM killing a POSIX process group falls back to the leader and records p
     console.warn = message => warnings.push(message);
     try {
       await terminate({ closed: false, proc: { pid: pgid, exitCode: null, signalCode: null,
-        kill: signal => { leaderKilled = signal === 'SIGKILL'; } } });
+        kill: signal => { leaderKilled = signal === 'SIGKILL'; } } }, 'linux');
       assert.equal(leaderKilled, true);
       assert.equal(warnings.length, 2);
       assert.match(warnings[0], new RegExp(`process group kill EPERM \\(pgid=${pgid}\\), falling back to leader-only kill`));

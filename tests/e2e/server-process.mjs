@@ -6,9 +6,10 @@ import { join } from 'node:path';
 const active = new Set();
 const records = new WeakMap();
 
-export function terminate(record) {
+// The platform argument also exercises mocked POSIX errors on Windows.
+export function terminate(record, platform = process.platform) {
   if (record.closed) return;
-  if (process.platform === 'win32') {
+  if (platform === 'win32') {
     // Only the supervisor is killed; the kernel closes its Job and kills all
     // members, including grandchildren whose immediate parent already exited.
     if (record.proc.exitCode === null && record.proc.signalCode === null) record.proc.kill('SIGKILL');

@@ -2100,6 +2100,9 @@ test('nested export menus preserve pointer reachability and keyboard focus', asy
 
   await exportButton.focus();
   await page.keyboard.press('ArrowDown');
+  // Audio projects now expose green-screen export before FCP7.
+  await expect(page.locator('#download-green-screen-video')).toBeFocused();
+  await page.keyboard.press('ArrowDown');
   await expect(page.locator('#download-fcp7-export')).toBeFocused();
   await page.keyboard.press('ArrowDown');
   await expect(otioToggle).toBeFocused();

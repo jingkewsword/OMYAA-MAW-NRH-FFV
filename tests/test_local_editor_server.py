@@ -1254,7 +1254,9 @@ class LocalEditorServerTests(CompactContainerAssertions, unittest.TestCase):
         for token in ('__STICKER_URL_PREFIX_JSON__', '__NINJA_SFX_BASE_URL_JSON__', '__SERVER_CONFIG_JSON__'):
             self.assertNotIn(token, page)
         self.assertNotIn('createUrl', page)
-        self.assertIn('"requestToken": "", "stickerRootUrl": "/api/stickers/root", ', page)
+        self.assertIn('"requestToken": ""', page)
+        self.assertIn('"stickerRootUrl": "/api/stickers/root", ', page)
+        self.assertIn('"projectSwitchPageId": "', page)
         self.assertIn('"portableStickerExportUrl": "/api/exports/sticker-otio", ', page)
         self.assertIn('"otiozStickerExportUrl": "/api/exports/sticker-otioz", ', page)
         self.assertIn('"gapRemovedVideoExportUrl": "/api/exports/gap-removed-video", "gapRemovedVideoSourceName": "clip.mp3", "canGapRemovedVideoExport": false, ', page)
@@ -2312,9 +2314,11 @@ class LocalEditorServerTests(CompactContainerAssertions, unittest.TestCase):
                 base_url = f"http://127.0.0.1:{server.server_address[1]}"
 
                 def post(endpoint: str, payload: dict) -> tuple[int, dict]:
+                    intent = {"switchPageId": "http-test-page", "switchGeneration": 0}
+                    server.advance_project_switch(intent)
                     request = urllib.request.Request(
                         f"{base_url}{endpoint}",
-                        data=json.dumps(payload).encode("utf-8"),
+                        data=json.dumps({**server.project_binding_payload(), **intent, **payload}).encode("utf-8"),
                         headers={"Content-Type": "application/json"},
                         method="POST",
                     )
@@ -2766,17 +2770,20 @@ class LocalEditorServerTests(CompactContainerAssertions, unittest.TestCase):
             thread.start()
             try:
                 base_url = f"http://127.0.0.1:{server.server_address[1]}"
+                client_binding = server.project_binding_payload()
 
                 def post(payload: dict) -> tuple[int, dict]:
                     request = urllib.request.Request(
                         f"{base_url}/api/project",
-                        data=json.dumps(payload).encode("utf-8"),
+                        data=json.dumps({**client_binding, **payload}).encode("utf-8"),
                         headers={"Content-Type": "application/json"},
                         method="POST",
                     )
                     try:
                         with urllib.request.urlopen(request) as response:
-                            return response.status, json.loads(response.read())
+                            result = json.loads(response.read())
+                            client_binding.update({key: result[key] for key in ("bindingGeneration", "sourceMediaId")})
+                            return response.status, result
                     except urllib.error.HTTPError as error:
                         return error.code, json.loads(error.read())
 
@@ -2848,7 +2855,7 @@ class LocalEditorServerTests(CompactContainerAssertions, unittest.TestCase):
                 def post(payload: dict) -> tuple[int, dict]:
                     request = urllib.request.Request(
                         f"{base_url}/api/project",
-                        data=json.dumps(payload).encode("utf-8"),
+                        data=json.dumps({**server.project_binding_payload(), **payload}).encode("utf-8"),
                         headers={"Content-Type": "application/json"},
                         method="POST",
                     )
@@ -2923,7 +2930,7 @@ class LocalEditorServerTests(CompactContainerAssertions, unittest.TestCase):
                 def post(payload: dict) -> tuple[int, dict]:
                     request = urllib.request.Request(
                         f"{base_url}/api/project",
-                        data=json.dumps({"project": payload}).encode("utf-8"),
+                        data=json.dumps({**server.project_binding_payload(), "project": payload}).encode("utf-8"),
                         headers={"Content-Type": "application/json"},
                         method="POST",
                     )
@@ -2995,9 +3002,11 @@ class LocalEditorServerTests(CompactContainerAssertions, unittest.TestCase):
                 base_url = f"http://127.0.0.1:{server.server_address[1]}"
 
                 def post(endpoint: str, payload: dict) -> tuple[int, dict]:
+                    intent = {"switchPageId": "http-test-page", "switchGeneration": 0}
+                    server.advance_project_switch(intent)
                     request = urllib.request.Request(
                         f"{base_url}{endpoint}",
-                        data=json.dumps(payload).encode("utf-8"),
+                        data=json.dumps({**server.project_binding_payload(), **intent, **payload}).encode("utf-8"),
                         headers={"Content-Type": "application/json"},
                         method="POST",
                     )

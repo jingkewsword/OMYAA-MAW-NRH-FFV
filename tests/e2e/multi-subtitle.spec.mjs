@@ -4318,6 +4318,9 @@ test('ASS mode previews and exports extension cues with the shared extension sty
   const result = await page.evaluate(() => {
     MaweBoot.DATA.media_metadata = { video_width: 1920, video_height: 1080 };
     ASS_STYLE_LIBRARY = window.AsrEditorUtils.defaultAssStyleLibrary();
+    // Keep this stacking fixture explicit; built-in defaults have their own regression.
+    ASS_STYLE_LIBRARY.styles.find((style) => style.id === 'ass').marginV = 88;
+    ASS_STYLE_LIBRARY.styles.find((style) => style.id === 'ass-extension').marginV = 36;
     MaweSettings.EDITOR_SETTINGS.assMode = true;
     MaweDom.overlayToggle.checked = true;
     MawePlaybackLoop.refreshSubtitlePreview(1000, 0);
