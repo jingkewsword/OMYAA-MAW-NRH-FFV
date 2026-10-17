@@ -10,7 +10,7 @@
 | 八处冲突 | 已修复 | 保留分层 required/四片完整汇总、同步聚焦及原断言；接纳上游 Linux/macOS 校验 FFmpeg 8.1、实际包内 ESM 哈希验证、新 MASS 逐句断言及翻译。两个文档入口并存，既有人工清单状态不改 |
 | 同步回归 | 已修复 | 两个 bundle、类型、Ruff、192/18 个源哈希校验通过；相关 Node 404 项、Python 契约/归属/构建 95 项通过，原始与优化后 ASS 分别 36/36，冲突/英语/新增 Launcher 回归 63/63；相关 Node 404、Python 95 与最终归属/像素 21 项通过，actionlint、配置 Ruff、文档与隐私另验 |
 | ASS 像素扫描 | 已修复 | 222 张实际 native/guard 帧的全部字段一致，333 张真实 native/guard/viewport 帧逐像素相同；非零包围盒内扫描保留内部分隔，裁图 654,784→32,988 次。原 spec 整文件及其断言未改；整文件墙钟未证明降低 |
-| 媒体归属与假准备 | 已修复 | 四个混合模块原 46 项按真实夹具类分为 common 30 + media 16，ID 并集与原方法 AST 不变；16 项真实媒体仍完整执行。HTTP 假 MP4 不再触发无关缓存探测，common 的 14 次 FFprobe→0 |
+| 媒体归属与假准备 | 已修复 | 四个混合模块原 46 项按真实夹具类分为 common 30 + media 16，ID 并集不变，成本优化时原方法 AST 不变，后续版本适配另记；16 项真实媒体仍完整执行。HTTP 假 MP4 不再触发无关缓存探测，common 的 14 次 FFprobe→0 |
 | 当前固定提交验收 | 仅说明 | 正常推送后的完整 CI 与原始报告独立核对并更新 PR 说明；本地定向结果不替代整分支、人工或正式发布包验收 |
 
 ## 同步取舍
@@ -44,7 +44,7 @@
 
 同步检查发现 `BurnVideoPrecisionTests`、`RealKeyframeInspectorTests`、`EmbeddedSubtitleTimelineTests`、`RealVideoTimelineTests` 落入默认 common，实际上需要编码器、容器/包信息、真实音画时钟。按模块+类精确归入 media；同模块的命令、协议、字节解析等便宜契约仍留 common，不能按方法名里的 `real` 一刀切，也不把整个模块下沉。
 
-- 四模块原 46 项实际通过；新的 common 30、media 16 均通过、无 skip，ID 并集与原集合完全一致且无重叠。实际 `pack_suite` 收集也已核对；原 46 个 test 方法 AST 未变。
+- 四模块原 46 项实际通过；新的 common 30、media 16 均通过、无 skip，ID 并集与原集合完全一致且无重叠。实际 `pack_suite` 收集也已核对；成本优化提交的原 46 个 test 方法 AST 未变；后续 HEVC/TS 版本整合只调整探针输入，保留其全部结果断言，见下文。
 - media 的 16 项仍真实执行 70 次 FFmpeg、69 次 FFprobe，保留字幕、开放/长 GOP、H264/HEVC 与 MP4/MKV/TS 边界；生产路径、混合测试文件修改与发布继续选择 media 并准备依赖。新归属检查在移除四类登记的变体上真实失败。
 - 第一次 common 严禁媒体进程验证检出 6 个 HTTP 用例仍经绑定 payload 探测假 MP4 的缓存，保留该失败；不是通过放宽 guard 解决。该夹具只有 `unchanged source` 假字节，原缓存探测失败后本就返回 false。仅对服务器实例声明没有缩略图缓存；真实 HTTP、令牌、绑定代际、独立文件/线程和 job 生命周期继续执行，缓存持久化另由原专项覆盖。
 - 同一 30 项集合对照，原 setUp 实际触发 14 次无关 FFprobe，修改后严格进程 guard 下为 0；两版均 30/30，unittest 执行 6.620→3.477 秒，有界整命令 7.94→4.66 秒。都是单次样本，不承诺稳定比例；46→30+16 是分层，不把它包装成删除 16 项或同集合整套提速。
