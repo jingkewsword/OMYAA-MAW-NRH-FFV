@@ -17,7 +17,7 @@ import { createOutputTail } from './output-tail.mjs';
 const configuredPython = String(process.env.MAW_E2E_PYTHON || '').trim();
 const PYTHON_RUNNER = configuredPython
   ? { command: configuredPython, prefixArgs: [] }
-  : { command: 'uv', prefixArgs: ['run', '--frozen', 'python'] };
+  : { command: 'uv', prefixArgs: ['run', '--no-sync', 'python'] };
 
 function pythonCommandArgs(args) {
   return [...PYTHON_RUNNER.prefixArgs, ...args];
@@ -72,7 +72,8 @@ export function findFreePort() {
     srv.on('error', reject);
     srv.listen(0, '127.0.0.1', () => {
       const port = srv.address().port;
-      srv.close(() => resolve(port));
+      // Fetch and Chromium reject the X11 port even when TCP binding succeeds.
+      srv.close(() => port === 6000 ? findFreePort().then(resolve, reject) : resolve(port));
     });
   });
 }
@@ -186,9 +187,27 @@ export function testSegments() {
   ];
 }
 
-// A word-mode split must land between words rather than in the middle of an
-// item. Keep the shared identity fixture unchanged for the other tests and
-// opt into this two-word shape only in split-specific scenarios.
+// Media availability can change the filmstrip shell after document load.
+export async function waitForWaveformLayout(page) {
+  await page.waitForFunction(() => {
+    const wave = window.MaweCoreState?.waveformEditor;
+    if (!wave?.renderedRows?.length) return false;
+    const pictures = wave.thumbnailController;
+    return !window.MaweBoot?.SERVER_CONFIG?.thumbnailBinding || !pictures?.enabled
+      || ['ready', 'partial', 'unavailable', 'error', 'cancelled'].includes(pictures.state);
+  });
+  // Binding availability changes the row shell height. Finish the queued
+  // layout frame before a scenario captures pointer geometry or canvas IDs.
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+}
+
+export async function gotoWaveform(page, url, options) {
+  const response = await page.goto(url, options);
+  await waitForWaveformLayout(page);
+  return response;
+}
+
+// Keep the shared identity fixture unchanged; split scenarios opt into two words.
 export async function makeFirstCueWordSplittable(page) {
   await page.evaluate(() => {
     const segment = MaweBoot.DATA.segments[0];
@@ -251,8 +270,16 @@ export async function openSettingsPage(page, key) {
 
 export async function dragFloatingPanelAwayFrom(page, panelSelector, dragHandleSelector, targetSelector) {
   const panel = page.locator(panelSelector);
+  const handleLocator = page.locator(dragHandleSelector);
+  const openingHandle = await handleLocator.boundingBox();
+  if (!openingHandle) throw new Error('Floating panel drag handle is not visible');
+  const offsetX = Math.min(40, Math.max(12, openingHandle.width / 2));
+  const offsetY = Math.max(8, Math.min(15, openingHandle.height / 2));
+  // Actionability waits for opening animation and transient overlays. Measure
+  // after it settles; polling a point captured before animation can never hit.
+  await handleLocator.hover({ position: { x: offsetX, y: offsetY }, timeout: 10_000 });
   const panelBefore = await panel.boundingBox();
-  const handle = await page.locator(dragHandleSelector).boundingBox();
+  const handle = await handleLocator.boundingBox();
   const target = await page.locator(targetSelector).boundingBox();
   const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
   if (!panelBefore || !handle || !target) throw new Error('Floating panel drag fixture is not visible');
@@ -260,8 +287,6 @@ export async function dragFloatingPanelAwayFrom(page, panelSelector, dragHandleS
   const targetOnLeft = target.x + target.width / 2 < viewport.width / 2;
   const left = targetOnLeft ? viewport.width - panelBefore.width - 8 : 8;
   const top = Math.max(8, Math.min(24, viewport.height - panelBefore.height - 8));
-  const offsetX = Math.min(40, Math.max(12, handle.width / 2));
-  const offsetY = Math.max(8, Math.min(15, handle.height / 2));
   const start = { x: handle.x + offsetX, y: handle.y + offsetY };
   // Import/other actions may leave a transient hint card above the settings
   // header. Wait until the real drag handle owns this screen point so the
@@ -303,7 +328,7 @@ export async function toggleGlobalSettings(page) {
 }
 
 export async function setProjectTrackEnabled(page, id, enabled) {
-  await openSettingsPage(page, 'project-tracks');
+  await openSettingsPage(page, id === 'multi-subtitle-toggle' ? 'multi-subtitle' : 'project-tracks');
   await page.locator(`#${id}`).setChecked(enabled);
   await closeSettingsPanels(page);
 }
@@ -323,7 +348,8 @@ export function generateProjectJson(filePath) {
 // Returns { url, proc, stop } where stop() returns a Promise that resolves
 // when the process has fully exited.
 // ---------------------------------------------------------------------------
-async function launchServerProcess(pythonArgs, port, env, { waitForStartup = false } = {}) {
+async function launchServerProcess(pythonArgs, port, env, { waitForStartup = false, readinessTimeoutMs = 30_000 } = {}) {
+  if (!Number.isFinite(readinessTimeoutMs) || readinessTimeoutMs <= 0) throw new RangeError('readinessTimeoutMs must be finite and positive');
   const proc = spawnServerProcess(PYTHON_RUNNER.command, pythonCommandArgs(pythonArgs), {
     cwd: process.cwd(),
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -346,8 +372,8 @@ async function launchServerProcess(pythonArgs, port, env, { waitForStartup = fal
         callback();
       };
       const timeout = setTimeout(() => {
-        finish(() => reject(new Error(`Server did not respond within 30s. Output tail: ${output.text()}`)));
-      }, 30000);
+        finish(() => reject(new Error(`Server did not respond within ${readinessTimeoutMs}ms. Output tail: ${output.text()}`)));
+      }, readinessTimeoutMs);
       proc.stdout.on('data', (chunk) => output.append(chunk));
       proc.stderr.on('data', (chunk) => output.append(chunk, 'stderr'));
       proc.on('error', (err) => finish(() => reject(err)));
@@ -375,7 +401,7 @@ async function launchServerProcess(pythonArgs, port, env, { waitForStartup = fal
   }
 
   if (waitForStartup) {
-    const deadline = Date.now() + 30000;
+    const deadline = Date.now() + readinessTimeoutMs;
     while (true) {
       if (serverHasExited(proc)) {
         await stopServerProcess(proc);
@@ -396,7 +422,7 @@ async function launchServerProcess(pythonArgs, port, env, { waitForStartup = fal
       }
       if (Date.now() >= deadline) {
         await stopServerProcess(proc);
-        throw new Error('Server project startup did not become ready within 30s');
+        throw new Error(`Server project startup did not become ready within ${readinessTimeoutMs}ms`);
       }
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
@@ -411,7 +437,7 @@ async function launchServerProcess(pythonArgs, port, env, { waitForStartup = fal
   };
 }
 
-export async function startServer(projectJsonPath, mediaPath, port) {
+export async function startServer(projectJsonPath, mediaPath, port, { readinessTimeoutMs = 30_000 } = {}) {
   const settingsRoot = join(dirname(projectJsonPath), '.settings');
   mkdirSync(settingsRoot, { recursive: true });
   const pythonArgs = [
@@ -430,7 +456,7 @@ export async function startServer(projectJsonPath, mediaPath, port) {
     // MAW user-data root on every platform so local saved styles never
     // leak into assertions.
     MAW_APP_DATA_ROOT: settingsRoot,
-  }), { waitForStartup: true });
+  }), { waitForStartup: true, readinessTimeoutMs });
 }
 
 // 空白服务器（--blank）：用于「浏览器打开工程后由服务器接管」的回归测试。

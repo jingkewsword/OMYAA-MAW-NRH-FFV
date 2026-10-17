@@ -40,6 +40,7 @@ function runtime() {
     MaweBoot: { DATA: { segments: main, gap_remove: localGap(), media: 'synthetic.mp4', waveform: { duration_ms: 2000 } } },
     MaweSettings: { EDITOR_SETTINGS: {} },
     MaweCoreState: { waveformEditor: { durationMs: 2000 }, player: { duration: 2, tagName: 'VIDEO' } },
+    MaweProjectMediaInputs: { currentMediaBlobUrl: null },
     MaweGapRemoveData: { getRemovedGapRanges: () => core.getRemovedGapRanges(core.normalizeGapRemoveData(context.MaweBoot.DATA.gap_remove).gaps) },
     MaweSpeakerLabels: { speakerLabelExportOptions: () => ({}), subtitleExportText: (segment) => segment.text, getSpeakerLabelSettings: () => ({}) },
     MaweCueElements: { fmtSrtTime: (ms) => new Date(ms).toISOString().slice(11, 23).replace('.', ',') },
@@ -59,6 +60,28 @@ function runtime() {
   context.MaweExportSrt = context.window.MaweExportSrt;
   return { context, core, utils, main, extension, overlay, srt: context.window.MaweExportSrt, timeline: context.window.MaweExportTimeline };
 }
+
+test('timeline export resolves native server media without reusing a replaced binding', () => {
+  const { context, timeline } = runtime();
+  context.MaweBoot.DATA.media = '../synthetic.wav';
+  context.MaweBoot.SERVER_CONFIG = { autoLoadedMediaPath: '/recordings/synthetic.wav' };
+  assert.equal(timeline.mediaTargetUrl(), 'file:///recordings/synthetic.wav');
+  assert.equal(context.MaweBoot.DATA.media, '../synthetic.wav', 'portable project reference stays relative');
+
+  context.MaweProjectMediaInputs.currentMediaBlobUrl = 'blob:replacement';
+  assert.equal(timeline.mediaTargetUrl(), '', 'a browser-local replacement cannot export the old server source');
+  context.MaweProjectMediaInputs.currentMediaBlobUrl = null;
+  context.MaweBoot.SERVER_CONFIG.autoLoadedMediaPath = null;
+  assert.equal(timeline.mediaTargetUrl(), '', 'importing a project clears the native binding');
+  context.MaweBoot.SERVER_CONFIG.autoLoadedMediaPath = 'relative.wav';
+  assert.equal(timeline.mediaTargetUrl(), '', 'an unresolvable relative path cannot become a file URL');
+
+  context.MaweBoot.DATA.media = 'C:\\recordings\\synthetic.wav';
+  assert.equal(timeline.mediaTargetUrl(), 'file:///C:/recordings/synthetic.wav');
+  context.MaweBoot.DATA.media = '';
+  context.MaweCoreState.player.currentSrc = 'file:///recordings/portable.wav';
+  assert.equal(timeline.mediaTargetUrl(), 'file:///recordings/portable.wav');
+});
 
 test('trusted scope projects exact words/items, saves/reopens and safely restores with gap history', () => {
   const { core, main, context } = runtime();
@@ -276,6 +299,25 @@ test('dynamic caption plans use surviving items and geometry receives surviving 
   const projected = srt.cleanupMainSegments();
   assert.equal(utils.buildPlainTextPayload(projected), '我这个功能呢');
   assert.equal(context.MaweBoot.DATA.segments[0].items.length, 3);
+});
+
+test('OTIO media binding follows project media and rejects stale server paths after browser replacement', () => {
+  const { context, timeline } = runtime();
+  context.MaweBoot.SERVER_CONFIG = { autoLoadedMediaPath: '/media/original.mp4' };
+  assert.equal(timeline.mediaTargetUrl(), 'file:///media/original.mp4', 'relative project media uses the server binding');
+  context.MaweProjectMediaInputs.currentMediaBlobUrl = 'blob:replacement';
+  context.MaweCoreState.player.currentSrc = 'blob:replacement';
+  context.MaweBoot.DATA.media = 'replacement.mp4';
+  assert.equal(timeline.mediaTargetUrl(), '', 'browser replacement cannot export the old server recording');
+  context.MaweCoreState.player.currentSrc = 'file:///media/original.mp4';
+  assert.equal(timeline.mediaTargetUrl(), '', 'an outdated currentSrc cannot reintroduce the old recording');
+  context.MaweBoot.DATA.media = '/media/rebound.mp4';
+  context.MaweProjectMediaInputs.currentMediaBlobUrl = null;
+  assert.equal(timeline.mediaTargetUrl(), 'file:///media/rebound.mp4', 'explicit native media takes precedence');
+  context.MaweBoot.DATA.media = 'portable.mp4';
+  context.MaweBoot.SERVER_CONFIG.autoLoadedMediaPath = null;
+  context.MaweCoreState.player.currentSrc = 'file:///media/portable.mp4';
+  assert.equal(timeline.mediaTargetUrl(), 'file:///media/portable.mp4', 'file URL playback still provides a valid native source');
 });
 
 test('source/gap OTIO subtitle marker names and FCP/XML plans use exact retained main text', () => {

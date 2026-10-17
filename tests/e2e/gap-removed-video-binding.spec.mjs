@@ -32,6 +32,8 @@ async function withFixture(page, run) {
       window.writes = 0;
       window.outputClosed = false;
       window.MaweInlineEdit = {};
+      window.thumbnailBindingChanges = [];
+      window.MaweCoreState = { waveformEditor: { setThumbnailBinding: value => window.thumbnailBindingChanges.push(value) } };
       window.MaweBoot = { FILENAME_BASE: 'test', SERVER_CONFIG: {
         canGapRemovedVideoExport: true, gapRemovedVideoSourceName: 'source.mp4',
         gapRemovedVideoExportUrl: '/export', requestToken: 'fixture',
@@ -77,6 +79,7 @@ for (const mutation of ['detach', 'replace-config', 'generation', 'source-id', '
       }, mutation);
       await expect.poll(() => page.evaluate(() => window.hints.at(-1))).toContain('绑定已变更');
       expect(requests).toEqual([]);
+      if (mutation === 'detach') expect(await page.evaluate(() => window.thumbnailBindingChanges)).toEqual(['']);
       expect(await page.evaluate(() => window.writes)).toBe(0);
     });
   });
@@ -138,7 +141,14 @@ test(`rendered editor rejects waiting media picker after ${change}`, async ({ pa
     } else {
       // Simulate another tab reopening the same on-disk project. This page
       // retains its old IDs; the actual Python endpoint must reject its POST.
-      const response = await page.request.post(`${server.url}api/recent-projects/open`, { data: { path: project } });
+      const binding = await page.evaluate(() => ({bindingGeneration: MaweBoot.SERVER_CONFIG.bindingGeneration,
+        sourceMediaId: MaweBoot.SERVER_CONFIG.sourceMediaId}));
+      const intent = { switchPageId: 'other-tab-fixture', switchGeneration: 1 };
+      const requestToken = await page.evaluate(() => MaweBoot.SERVER_CONFIG.requestToken);
+      expect((await page.request.post(`${server.url}api/project/switch-intent`, {
+        data: { ...intent, requestToken },
+      })).status()).toBe(200);
+      const response = await page.request.post(`${server.url}api/recent-projects/open`, { data: { ...binding, ...intent, path: project } });
       expect(response.status()).toBe(200);
     }
     await page.evaluate(() => {

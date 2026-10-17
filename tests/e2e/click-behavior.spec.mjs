@@ -1,3 +1,4 @@
+import { gotoWaveform } from './helpers.mjs';
 // 「选中并跳转」单击行为回归：播放过程中点击字幕列表，
 // 播放头必须跳到该条开头并继续播放（等价于 F 键操作）。
 import { expect, test } from '@playwright/test';
@@ -45,7 +46,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test('jump target is shown for both jump behaviors and hidden for select-only', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await toggleGlobalSettings(page);
   await openSettingsPage(page, 'general');
   const behavior = page.locator('#click-behavior');
@@ -62,7 +63,7 @@ test('jump target is shown for both jump behaviors and hidden for select-only', 
 });
 
 test('media seek buttons and arrow keys use the configured seek duration', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await page.waitForFunction(() => {
     const media = document.getElementById('player');
     return media.readyState >= 1 && Number.isFinite(media.duration) && media.duration > 0;
@@ -137,7 +138,7 @@ test('media seek buttons and arrow keys use the configured seek duration', async
 });
 
 test('marks a recent project as missing after the server detects a deleted file', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await page.locator('#recent-projects-toggle').click();
   const item = page.locator('#recent-projects-list .dropdown-item').first();
   await expect(item).not.toHaveClass(/is-missing/);
@@ -154,7 +155,7 @@ test('marks a recent project as missing after the server detects a deleted file'
 });
 
 test('context menu closes on pointerdown over blank waveform', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await page.evaluate(() => {
     document.getElementById('waveform-scroll').scrollTop = 1 * (120 + 10);
   });
@@ -177,7 +178,7 @@ test('context menu closes on pointerdown over blank waveform', async ({ page }) 
 });
 
 test('list click auto-scroll can be disabled without disabling seek', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await page.locator('#cue-list-settings-toggle').click();
   const autoScroll = page.locator('#cue-list-auto-scroll-on-click');
   await expect(autoScroll).toBeChecked();
@@ -207,7 +208,7 @@ test('list click auto-scroll can be disabled without disabling seek', async ({ p
 });
 
 test('default list click keeps a cue already in the middle in place', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await page.evaluate(() => {
     MaweBoot.DATA.segments.push(...Array.from({ length: 34 }, (_, offset) => {
       const index = MaweBoot.DATA.segments.length + offset;
@@ -234,7 +235,7 @@ test('default list click keeps a cue already in the middle in place', async ({ p
 });
 
 test('default list click selects and seeks to cue start while keeping playback', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await expect(page.locator('#click-behavior')).toHaveValue('select-and-seek');
   await page.waitForFunction(() => {
     const player = document.getElementById('player');
@@ -259,7 +260,7 @@ test('default list click selects and seeks to cue start while keeping playback',
 });
 
 test('mouse-click pause setting seeks and pauses active playback', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await toggleGlobalSettings(page);
   await openSettingsPage(page, 'subtitle-preview');
   const pauseOnMouseClick = page.locator('#pause-on-mouse-click');
@@ -300,7 +301,7 @@ test('mouse-click pause setting seeks and pauses active playback', async ({ page
 });
 
 test('list cue selects on pointerdown and double-click still enters edit', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   const cue = page.locator('.cue[data-idx="4"]');
   await cue.scrollIntoViewIfNeeded();
   const box = await cue.boundingBox();
@@ -316,7 +317,7 @@ test('list cue selects on pointerdown and double-click still enters edit', async
 });
 
 test('list double-click hides the split preview while editing', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   const cue = page.locator('.cue[data-idx="0"]');
   const text = cue.locator('.text');
   await cue.click();
@@ -340,7 +341,7 @@ test('list double-click hides the split preview while editing', async ({ page })
 });
 
 test('waveform cue double-click activates its subtitle editor while blank double-click still toggles playback', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   const cue = page.locator('.waveform-cue-block[data-track="main"][data-idx="0"]').first();
   await cue.scrollIntoViewIfNeeded();
   await cue.dblclick();
@@ -356,7 +357,7 @@ test('waveform cue double-click activates its subtitle editor while blank double
 });
 
 test('the unconfigured Enter shortcut commits and exits cue-panel editing', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await toggleGlobalSettings(page);
   await openSettingsPage(page, 'split-merge');
   const splitKey = page.locator('#split-key');
@@ -380,7 +381,7 @@ test('the unconfigured Enter shortcut commits and exits cue-panel editing', asyn
 });
 
 test('Escape keeps cue-panel text edits by default and cancels when the setting is on', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   const cue = page.locator('.cue[data-idx="0"]');
   const panel = page.locator('#cue-panel-text');
 
@@ -418,7 +419,7 @@ test('Escape keeps cue-panel text edits by default and cancels when the setting 
 });
 
 test('Escape exits inline cue editing without saving the text', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   const cue = page.locator('.cue[data-idx="0"]');
   const text = cue.locator('.text');
   const original = await text.innerText();
@@ -436,7 +437,7 @@ test('Escape exits inline cue editing without saving the text', async ({ page })
 });
 
 test('cue-panel Enter split falls back to a waveform split marker', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await makeFirstCueWordSplittable(page);
   await page.locator('.cue[data-idx="0"]').click();
   const panel = page.locator('#cue-panel-text');
@@ -451,7 +452,7 @@ test('cue-panel Enter split falls back to a waveform split marker', async ({ pag
 });
 
 test('double-click places the inline caret at the pointer text position', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   const cue = page.locator('.cue[data-idx="0"]');
   const text = cue.locator('.text');
   const point = await text.evaluate((element) => {
@@ -525,7 +526,7 @@ test('current cue panel keeps the same height before and after selection', async
   // 高视口让 --layout-row-middle 的百分比下限超过面板内容高度，
   // 才能覆盖「选中后面板被拖到布局高度、空态又缩回内容高度」的跳变回归。
   await page.setViewportSize({ width: 1280, height: 1400 });
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   const panel = page.locator('#current-cue-panel');
   const before = await panel.evaluate((element) => element.getBoundingClientRect().height);
 
@@ -537,7 +538,7 @@ test('current cue panel keeps the same height before and after selection', async
 
 test('dragging the panel divider resizes the panel and stays consistent across selection', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 1400 });
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   const panel = page.locator('#current-cue-panel');
   const textarea = page.locator('#cue-panel-text');
   const measure = () => panel.evaluate((element) => element.getBoundingClientRect().height);
@@ -563,7 +564,7 @@ test('dragging the panel divider resizes the panel and stays consistent across s
 });
 
 test('list context menu leads with text-position split', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await toggleGlobalSettings(page);
   await openSettingsPage(page, 'general');
   await page.locator('#click-behavior').selectOption('select-only');
@@ -573,7 +574,7 @@ test('list context menu leads with text-position split', async ({ page }) => {
 });
 
 test('Enter focuses the current subtitle editor after list or waveform clicks', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   const cue = page.locator('.cue[data-idx="0"]');
   const panelText = page.locator('#cue-panel-text');
   await cue.click();
@@ -595,7 +596,7 @@ test('Enter focuses the current subtitle editor after list or waveform clicks', 
 });
 
 test('B splits at the pointer inside the cue list and at the playhead outside it', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await makeFirstCueWordSplittable(page);
   const cue = page.locator('.cue[data-idx="0"]');
   await cue.click();
@@ -651,7 +652,7 @@ test('B splits at the pointer inside the cue list and at the playhead outside it
 });
 
 test('B split keeps the source cue visually anchored while lazy rows relayout', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   // 关闭「点击自动滚动」，只观察拆分重绘和 content-visibility 行高回填。
   await page.evaluate(() => {
     const saved = JSON.parse(localStorage.getItem('moy.asr.editor.settings.v1') || '{}');
@@ -771,7 +772,7 @@ test('B split keeps the source cue visually anchored while lazy rows relayout', 
 });
 
 test('C merge keeps the source cue visually anchored while lazy rows relayout', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   // 关闭点击后的自动滚动，只观察 C 合并本身的列表重绘和懒布局回填。
   await page.evaluate(() => {
     const saved = JSON.parse(localStorage.getItem('moy.asr.editor.settings.v1') || '{}');
@@ -828,7 +829,7 @@ test('C merge keeps the source cue visually anchored while lazy rows relayout', 
 });
 
 test('C merge keeps the extension cue visually anchored while lazy rows relayout', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await page.evaluate(() => {
     const saved = JSON.parse(localStorage.getItem('moy.asr.editor.settings.v1') || '{}');
     saved.cueListAutoScrollOnClick = false;
@@ -896,7 +897,7 @@ test('C merge keeps the extension cue visually anchored while lazy rows relayout
 });
 
 test('B flashes a yellow marker after splitting at the waveform pointer without a selection', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   // 默认主字幕按单词模式拆分；'Alpha' 单词内无词边界，先改造成两词再测拆分闪光。
   await makeFirstCueWordSplittable(page);
   await page.evaluate(() => MaweSelection.clearSelection());
@@ -914,7 +915,7 @@ test('B flashes a yellow marker after splitting at the waveform pointer without 
 });
 
 test('waveform hover mirrors the pointer position in the row', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   const row = page.locator('.waveform-row').first();
   await row.scrollIntoViewIfNeeded();
 
@@ -935,7 +936,7 @@ test('waveform hover mirrors the pointer position in the row', async ({ page }) 
 });
 
 test('space owns playback in media controls but remains text input in the cue editor', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await page.waitForFunction(() => {
     const player = document.getElementById('player');
     return player.readyState >= 1 && Number.isFinite(player.duration) && player.duration > 0;
@@ -962,7 +963,7 @@ test('space owns playback in media controls but remains text input in the cue ed
 
 test('mouse-clicked utility buttons release focus for the space playback shortcut', async ({ page }) => {
   for (const id of ['help-toggle', 'editor-settings-toggle']) {
-    await page.goto(server.url);
+    await gotoWaveform(page, server.url);
     await page.waitForFunction(() => {
       const player = document.getElementById('player');
       return player.readyState >= 1 && Number.isFinite(player.duration) && player.duration > 0;
@@ -976,7 +977,7 @@ test('mouse-clicked utility buttons release focus for the space playback shortcu
 });
 
 test('left and right arrows seek like the media step buttons', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await page.waitForFunction(() => {
     const player = document.getElementById('player');
     return player.readyState >= 1 && Number.isFinite(player.duration) && player.duration > 0;
@@ -995,7 +996,7 @@ test('left and right arrows seek like the media step buttons', async ({ page }) 
 });
 
 test('list click with select-only selects without seeking', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await page.evaluate(() => {
     const sel = document.getElementById('click-behavior');
     sel.value = 'select-only';
@@ -1020,7 +1021,7 @@ test('list click with select-only selects without seeking', async ({ page }) => 
 });
 
 test('list click with select-and-seek seeks to cue start but stays paused', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await page.evaluate(() => {
     const sel = document.getElementById('click-behavior');
     sel.value = 'select-and-seek';
@@ -1045,7 +1046,7 @@ test('list click with select-and-seek seeks to cue start but stays paused', asyn
 });
 
 test('list click with select-and-play seeks to cue start and starts playback', async ({ page }) => {
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await page.evaluate(() => {
     const sel = document.getElementById('click-behavior');
     sel.value = 'select-and-play';

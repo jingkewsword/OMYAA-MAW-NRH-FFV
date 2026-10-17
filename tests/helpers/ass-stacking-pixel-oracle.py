@@ -5,6 +5,7 @@ import hashlib
 import json
 import re
 import subprocess
+from decimal import Decimal
 from pathlib import Path
 
 from PIL import Image, ImageChops
@@ -37,7 +38,7 @@ def translate_ass(source: str, padding: int) -> str:
                 values = match[2].split(',')
                 count = 4 if match[1] == 'move' else 2
                 for index in range(count):
-                    values[index] = f'{float(values[index]) + padding:g}'
+                    values[index] = format(Decimal(values[index]) + padding, 'f')
                 return '\\' + match[1] + '(' + ','.join(values) + ')'
 
             fields[9] = re.sub(r'\\(pos|move|org)\(([^)]+)\)', shift_position, fields[9])
@@ -97,8 +98,11 @@ def boxes(image: Image.Image, padding: int = 0) -> dict:
         box = mask.getbbox()
         bands = []
         max_row_painted = 0
-        for row in range(image.height):
-            row_mask = mask.crop((0, row, image.width, row + 1))
+        # Outside this box every mask pixel is zero. Keep every painted row
+        # and interior gap, while avoiding empty margins in row histograms.
+        rows = range(box[1], box[3]) if box else ()
+        for row in rows:
+            row_mask = mask.crop((box[0], row, box[2], row + 1))
             max_row_painted = max(max_row_painted, count(row_mask))
             present = bool(row_mask.getbbox())
             if present and (not bands or bands[-1][1] != row - padding):
@@ -124,11 +128,27 @@ def inspect(path: Path, time_ms: int, stem: Path, padding: int = 256) -> dict:
     height = int(re.search(r'^PlayResY:\s*(\d+)', source, re.M)[1])
     native, fonts = render(path, stem.with_suffix('.png'), width, height, time_ms)
     padded_ass = stem.with_name(stem.name + '-guard.ass')
-    padded_ass.write_text(translate_ass(source, padding), encoding='utf-8', newline='\n')
+    guarded_source = translate_ass(source, padding)
+    padded_ass.write_text(guarded_source, encoding='utf-8', newline='\n')
     guard, guard_fonts = render(padded_ass, stem.with_name(stem.name + '-guard.png'),
                    width + 2 * padding, height + 2 * padding, time_ms)
     full_mask = foreground(guard)
     inside = full_mask.crop((padding, padding, padding + width, padding + height))
+    # Keep the native render, and compare viewport clipping on the same raster
+    # surface: another frame size can change libass's subpixel antialiasing.
+    if re.search(r'\\i?clip\(', guarded_source):
+        raise ValueError('Viewport reference requires an ASS source without existing clip tags')
+    clipped_lines = []
+    for line in guarded_source.splitlines():
+        if line.startswith('Dialogue: '):
+            fields = line[10:].split(',', 9)
+            fields[9] = f'{{\\clip({padding},{padding},{padding + width},{padding + height})}}' + fields[9]
+            line = 'Dialogue: ' + ','.join(fields)
+        clipped_lines.append(line)
+    viewport_ass = stem.with_name(stem.name + '-viewport.ass')
+    viewport_ass.write_text('\n'.join(clipped_lines) + '\n', encoding='utf-8', newline='\n')
+    viewport, _ = render(viewport_ass, stem.with_name(stem.name + '-viewport.png'),
+                         width + 2 * padding, height + 2 * padding, time_ms)
     return {
         'width': width, 'height': height, 'tracks': boxes(guard, padding),
         'nativeTracks': boxes(native), 'outside': count(full_mask) - count(inside),
@@ -136,6 +156,8 @@ def inspect(path: Path, time_ms: int, stem: Path, padding: int = 256) -> dict:
         'fullPainted': count(foreground(native)), 'paintColours': paint_colours(native),
         'guardSize': list(guard.size), 'fontSelections': fonts, 'guardFontSelections': guard_fonts,
         'sha256': hashlib.sha256(native.tobytes()).hexdigest(),
+        'guardViewportSha256': hashlib.sha256(viewport.crop(
+            (padding, padding, padding + width, padding + height)).tobytes()).hexdigest(),
         'guardCropSha256': hashlib.sha256(guard.crop(
             (padding, padding, padding + width, padding + height)).tobytes()).hexdigest(),
     }

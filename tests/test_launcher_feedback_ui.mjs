@@ -9,6 +9,56 @@ const source = readFileSync(new URL("postprocess.js", launcherDir), "utf8");
 const strings = readFileSync(new URL("i18n/launcher-strings.js", launcherDir), "utf8");
 const stateSource = readFileSync(new URL("boot/launcher-state.js", launcherDir), "utf8");
 
+test("backend discovery preserves native fallback, ready events and late-settlement boundaries", async () => {
+  const source = readFileSync(new URL("boot/launcher-theme-bridge.js", launcherDir), "utf8");
+  const fixture = (api) => {
+    const timers = [], listeners = [];
+    const window = { pywebview: api ? { api } : undefined,
+      addEventListener: (name, callback, options) => listeners.push({ name, callback, options }) };
+    const context = vm.createContext({ window,
+      setTimeout: (callback, delay) => timers.push({ callback, delay }) });
+    vm.runInContext(source, context);
+    return { window, timers, listeners, wait: () => context.waitForBackend() };
+  };
+
+  const nativeApi = { get_config() {} };
+  const immediate = fixture(nativeApi);
+  assert.equal(await immediate.wait(), nativeApi);
+  assert.equal(immediate.timers.length, 0);
+  assert.equal(immediate.listeners.length, 0);
+
+  const fallback = fixture();
+  let resolved = false;
+  const pendingFallback = fallback.wait().then(value => { resolved = true; return value; });
+  await Promise.resolve();
+  assert.equal(resolved, false);
+  assert.equal(fallback.timers.length, 1);
+  assert.equal(fallback.timers[0].delay, 1800);
+  fallback.timers[0].callback();
+  assert.equal(await pendingFallback, null);
+  fallback.window.pywebview = { api: nativeApi };
+  fallback.listeners[0].callback();
+  assert.equal(await pendingFallback, null);
+
+  const ready = fixture();
+  const pendingReady = ready.wait();
+  assert.equal(ready.listeners[0].name, "pywebviewready");
+  assert.equal(ready.listeners[0].options.once, true);
+  ready.window.pywebview = { api: nativeApi };
+  ready.listeners[0].callback();
+  assert.equal(await pendingReady, nativeApi);
+  ready.window.pywebview = undefined;
+  ready.timers[0].callback();
+  assert.equal(await pendingReady, nativeApi);
+
+  const mock = fixture();
+  const pendingMock = mock.wait();
+  mock.listeners[0].callback();
+  assert.equal(await pendingMock, null);
+  mock.timers[0].callback();
+  assert.equal(await pendingMock, null);
+});
+
 test("the editor action uses plain labels without emoji in both languages", () => {
   assert.match(strings, /open_editor:\s*"打开编辑器"/);
   assert.match(strings, /open_editor:\s*"Open editor"/);
@@ -437,11 +487,67 @@ test("shared comparison option restores from every AI step and survives saving",
   assert.equal(ui.element("postprocessGenerateComparison").checked, false);
 });
 
-test("green-screen generation does not require or disable for missing media", () => {
+function greenScreenBurnHarness({ includeAudio = false, mediaPath = "" } = {}) {
+  const elements = new Map(Object.entries({
+    toolboxGreenScreen: { checked: true },
+    toolboxGreenScreenIncludeAudio: { checked: includeAudio },
+    toolboxUtilityMediaPath: { value: mediaPath },
+    toolboxBurnSubtitlePath: { value: "D:/Demo/captions.ass" },
+    toolboxGreenScreenSize: { value: "1080p" },
+    toolboxBurnVideoEncoder: { value: "cpu" },
+  }));
+  const runs = [], errors = new Map();
+  const context = vm.createContext({
+    $: id => elements.get(id), busy: false, mediaToolRunning: false, mediaToolCancelling: false,
+    utilityMediaManual: false,
+    t: key => key, setResult() {}, setFieldError: (id, message) => errors.set(id, message),
+    validateBurnEncoding: () => true, burnEncodingPayload: () => ({}),
+    beginMediaToolLog() {}, setBusy() {}, syncPaths() {}, refreshAudioTracks() {}, renderMediaToolAction() {},
+    bridge: async (method, payload) => {
+      runs.push({ method, payload });
+      return { ok: true, mediaPath: "D:/Demo/green-screen.mp4" };
+    },
+  });
+  const constants = ["SUBTITLE_BURN_EXTS", "MEDIA_EXTS", "VIDEO_EXTS"].map(name => {
+    const match = source.match(new RegExp(`^  const ${name} = .+;$`, "m"));
+    assert.ok(match, `missing ${name}`);
+    return match[0];
+  });
+  vm.runInContext([...constants, launcherFunction("extension"), launcherFunction("runBurnSubtitle")].join("\n"), context);
+  return { runs, errors, run: () => context.runBurnSubtitle() };
+}
+
+test("silent green-screen generation does not require or disable for missing media", async () => {
   const mediaAction = source.match(/function renderMediaToolAction\(\) \{([\s\S]*?)\n  \}/)?.[1] || "";
-  const burnAction = source.match(/async function runBurnSubtitle\(\) \{([\s\S]*?)\n  \}/)?.[1] || "";
   assert.match(mediaAction, /burn\.disabled = busy;/);
   assert.doesNotMatch(mediaAction, /utilityMediaPath|mediaPath/);
-  assert.match(burnAction, /if \(!greenScreen && !mediaPath\)/);
-  assert.match(burnAction, /mediaPath: greenScreen \? "" : mediaPath/);
+  for (const mediaPath of ["", "D:/Demo/unused.mp3"]) {
+    const ui = greenScreenBurnHarness({ mediaPath });
+    await ui.run();
+    assert.equal(ui.runs.length, 1);
+    assert.equal(ui.runs[0].method, "run_burn_subtitles");
+    assert.equal(ui.runs[0].payload.mediaPath, "");
+    assert.equal(ui.runs[0].payload.greenScreen, true);
+    assert.equal(ui.runs[0].payload.greenScreenIncludeAudio, false);
+    assert.equal(ui.errors.get("toolboxUtilityMediaPath"), "");
+  }
+});
+
+test("green-screen audio retains supported audio and video sources", async () => {
+  for (const mediaPath of ["D:/Demo/voice.mp3", "D:/Demo/video.mp4"]) {
+    const ui = greenScreenBurnHarness({ includeAudio: true, mediaPath });
+    await ui.run();
+    assert.equal(ui.runs.length, 1);
+    assert.equal(ui.runs[0].payload.mediaPath, mediaPath);
+    assert.equal(ui.runs[0].payload.greenScreenIncludeAudio, true);
+  }
+});
+
+test("green-screen audio rejects missing or unsupported sources before starting", async () => {
+  for (const mediaPath of ["", "D:/Demo/document.txt"]) {
+    const ui = greenScreenBurnHarness({ includeAudio: true, mediaPath });
+    await ui.run();
+    assert.equal(ui.runs.length, 0);
+    assert.equal(ui.errors.get("toolboxUtilityMediaPath"), "toolbox_green_screen_audio_required");
+  }
 });

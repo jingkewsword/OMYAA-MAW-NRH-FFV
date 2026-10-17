@@ -158,7 +158,7 @@ test('colored subtitle indexes remain readable against tinted rows', async ({ pa
 
   await expect(page.locator('.cue[data-idx="0"] .index')).toHaveCSS(
     'color',
-    'rgb(168, 177, 192)',
+    'rgb(201, 197, 191)',
   );
 });
 

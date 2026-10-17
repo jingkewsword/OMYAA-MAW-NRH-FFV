@@ -29,12 +29,18 @@ from __future__ import annotations
 
 import argparse
 import io
+import json
 import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
 from typing import Any, cast
+
+if __package__:
+    from .test_policy import PYTHON_PACKS, allowed_platform_skip, python_pack, source_test_ids
+else:
+    from test_policy import PYTHON_PACKS, allowed_platform_skip, python_pack, source_test_ids
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MAX_CHARS = 4000
@@ -123,6 +129,28 @@ def build_suite(targets, start_dir: str, pattern: str):
     return suite
 
 
+def cases(suite):
+    for entry in suite:
+        if isinstance(entry, unittest.TestSuite):
+            yield from cases(entry)
+        else:
+            yield entry
+
+
+def pack_suite(pack: str):
+    """Inspect source before imports; unrelated tooling probes never run here."""
+    loader = unittest.TestLoader()
+    selected = unittest.TestSuite()
+    for path in sorted((ROOT / "tests").glob("test_*.py")):
+        names = source_test_ids(path)
+        if names and not any(python_pack(name) == pack for name in names):
+            continue
+        loaded = loader.loadTestsFromName(f"tests.{path.stem}")
+        selected.addTests(case for case in cases(loaded)
+                          if python_pack(case.id()) == pack or isinstance(case, unittest.loader._FailedTest))
+    return selected
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         description="运行 unittest，并把失败输出压缩到可读规模（完整文本写入日志文件）。",
@@ -133,14 +161,23 @@ def main(argv=None) -> int:
     parser.add_argument("--max-chars", type=int, default=DEFAULT_MAX_CHARS, help="单条失败保留的总字符上限")
     parser.add_argument("--max-line", type=int, default=DEFAULT_MAX_LINE, help="单行字符上限")
     parser.add_argument("--full-log", default="", help="未截断输出的写法路径（默认写入临时目录）")
+    parser.add_argument("--pack", choices=PYTHON_PACKS, help="按成本/边界分组；不改变无参数的历史全量入口")
+    parser.add_argument("--required", action="store_true", help="依赖、编码器和夹具缺失导致的 skip 视为失败")
+    parser.add_argument("--report", type=Path, help="机器可读结果，包含每个 skip 的原因")
     parser.add_argument("-v", "--verbose", action="count", default=1, help="提高 unittest 详细度")
     args = parser.parse_args(argv)
 
     _config.update(max_chars=args.max_chars, max_line=args.max_line)
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
+    sys.path.insert(0, str(ROOT / "tests"))
+    if args.pack and args.targets:
+        parser.error("--pack 与显式 targets 不能混用")
 
-    suite = build_suite(args.targets, args.start_dir, args.pattern)
+    suite = pack_suite(args.pack) if args.pack else build_suite(args.targets, args.start_dir, args.pattern)
+    selected_ids = [case.id() for case in cases(suite)]
+    if not selected_ids:
+        parser.error("selected test suite is empty")
     runner = unittest.TextTestRunner(
         stream=sys.stdout,
         verbosity=args.verbose,
@@ -161,7 +198,22 @@ def main(argv=None) -> int:
             f"未截断文本：{log_path}"
         )
 
-    return 0 if result.wasSuccessful() else 1
+    skips = [{"id": test.id(), "reason": reason,
+              "platform_not_applicable": allowed_platform_skip(test.id(), reason)}
+             for test, reason in result.skipped]
+    required_skips = [skip for skip in skips if not skip["platform_not_applicable"]]
+    code = 0 if result.wasSuccessful() and not (args.required and (required_skips or result.expectedFailures)) else 1
+    if args.report:
+        args.report.parent.mkdir(parents=True, exist_ok=True)
+        args.report.write_text(json.dumps({"selected_ids": selected_ids, "run": result.testsRun,
+            "failures": len(result.failures), "errors": len(result.errors), "skips": skips,
+            "expected_failures": len(result.expectedFailures),
+            "exit_code": code}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    if args.required and required_skips:
+        print(f"[run_tests] required gate failed: {len(required_skips)} unsupported skips; inspect report")
+    if args.required and result.expectedFailures:
+        print("[run_tests] required gate failed: expected failures remain unverified")
+    return code
 
 
 if __name__ == "__main__":

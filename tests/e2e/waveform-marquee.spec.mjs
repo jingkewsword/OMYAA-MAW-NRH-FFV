@@ -1,3 +1,4 @@
+import { waitForWaveformLayout } from './helpers.mjs';
 // Waveform Shift+drag marquee selection regression — shared scenario suite.
 // Runs identical assertions against both localhost server and portable HTML.
 // Marquee is performed with real Shift+left-button mouse drags on blank waveform.
@@ -67,6 +68,7 @@ async function configureBasicMode(page) {
 }
 
 async function waitForWaveformCues(page) {
+  await waitForWaveformLayout(page);
   await page.waitForSelector('.waveform-cue-block', { state: 'visible', timeout: 15_000 });
 }
 

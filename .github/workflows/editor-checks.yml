@@ -13,48 +13,68 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  debug-tools:
-    name: Debug tooling (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 5
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
+  selection:
+    runs-on: ubuntu-latest
+    outputs:
+      app: ${{ steps.plan.outputs.app }}
+      application: ${{ steps.plan.outputs.application }}
+      real_media: ${{ steps.plan.outputs.real_media }}
+      tools_scope: ${{ steps.plan.outputs.tools_scope }}
+      common: ${{ steps.plan.outputs.common }}
+      browser: ${{ steps.plan.outputs.browser }}
+      smoke: ${{ steps.plan.outputs.smoke }}
+      media: ${{ steps.plan.outputs.media }}
+      long_media: ${{ steps.plan.outputs.long_media }}
+      lifecycle: ${{ steps.plan.outputs.lifecycle }}
+      tools: ${{ steps.plan.outputs.tools }}
+      editor_e2e: ${{ steps.plan.outputs.editor_e2e }}
+      e2e: ${{ steps.plan.outputs.e2e }}
+      e2e_specs: ${{ steps.plan.outputs.e2e_specs }}
+      website: ${{ steps.plan.outputs.website }}
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
         with:
-          node-version: '22'
-          package-manager-cache: false
+          fetch-depth: 0
       - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
-      # These checks need only the standard libraries: no uv/pnpm install.
-      # Separate native commands so a later success cannot mask an earlier
-      # documentation failure under the Windows PowerShell shell.
-      - name: Documentation navigation and consumers
-        run: python scripts/run_check.py --timeout 180 -- python scripts/check_docs.py
-      - name: Documentation regressions
-        run: python scripts/run_check.py --timeout 180 -- python scripts/run_tests.py tests/test_docs_check.py
-      - name: Release documents
-        run: python scripts/run_check.py --timeout 60 -- python scripts/prepare_release_notes.py --check-all
-      - name: Release pipeline contracts
-        run: python scripts/run_check.py --timeout 60 -- python scripts/run_tests.py tests/test_release_notes.py
-      - name: Runner output, exit codes and timeout cleanup
-        run: python scripts/run_check.py --timeout 60 -- python -m unittest tests.test_run_check tests.test_compact_assertions
-      - name: Server diagnostics and process lifecycle
-        run: python scripts/run_check.py --timeout 60 -- node --test tests/test_e2e_output_tail.mjs tests/test_e2e_server_lifecycle.mjs
-      - name: Preserve failed check evidence
-        if: failure()
-        uses: actions/upload-artifact@v6
+      - id: plan
+        env:
+          TEST_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [[ -z "$TEST_BASE_REF" || "$TEST_BASE_REF" =~ ^0+$ ]]; then
+            python scripts/test_workflow.py --stage release --plan-only --github-output "$GITHUB_OUTPUT"
+          else
+            python scripts/test_workflow.py --stage merge --base-ref "$TEST_BASE_REF" --plan-only --github-output "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/upload-artifact@v6
         with:
-          name: debug-tools-${{ matrix.os }}
-          path: .artifacts/checks/
+          name: test-selection
+          path: .artifacts/test-workflow/
+          include-hidden-files: true
+
+  documentation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - run: python scripts/test_workflow.py --stage merge --pack docs
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: documentation-evidence
+          path: .artifacts/
           include-hidden-files: true
           retention-days: 7
+
   editor:
+    needs: selection
+    if: needs.selection.outputs.app == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       PYTHONUTF8: '1'
       PYTHONIOENCODING: utf-8
@@ -69,30 +89,124 @@ jobs:
           node-version: '22'
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
-      # Bundles are build artifacts (not committed): build once for every later
-      # step that reads them (assembly contracts, test:unit, e2e). pnpm install
-      # already builds via postinstall; keep this explicit so it does not rely
-      # on the hook.
-      - run: pnpm run build
-      - run: pnpm run typecheck
+      # The test runner builds each bundle exactly once before its consumers.
+      - run: pnpm install --frozen-lockfile --ignore-scripts
       - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
       - uses: astral-sh/setup-uv@v7
+        if: needs.selection.outputs.application == 'true' || needs.selection.outputs.tools_scope != 'checklist'
         with:
           enable-cache: true
-      - run: uv sync --frozen
-      # Node tests also launch Chromium and compare against Python exporters.
+      - run: uv sync --frozen --group test --group dev --no-group build
+        if: needs.selection.outputs.application == 'true' || needs.selection.outputs.tools_scope != 'checklist'
       - run: pnpm exec playwright install --with-deps chromium
-      - run: pnpm run test:unit
+        if: needs.selection.outputs.browser == 'true' || needs.selection.outputs.smoke == 'true' || needs.selection.outputs.e2e == 'true' || needs.selection.outputs.editor_e2e == 'true'
+      - name: Install real media dependencies
+        if: needs.selection.outputs.real_media == 'true'
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-noto-cjk
+      - name: Required common and impacted gates
         env:
-          MAW_TEST_PYTHON: ${{ github.workspace }}/.venv/bin/python
-      - name: Python assembly contracts
+          COMMON: ${{ needs.selection.outputs.common }}
+          BROWSER: ${{ needs.selection.outputs.browser }}
+          SMOKE: ${{ needs.selection.outputs.smoke }}
+          MEDIA: ${{ needs.selection.outputs.media }}
+          LONG_MEDIA: ${{ needs.selection.outputs.long_media }}
+          LIFECYCLE: ${{ needs.selection.outputs.lifecycle }}
+          TOOLS: ${{ needs.selection.outputs.tools }}
+          E2E: ${{ needs.selection.outputs.e2e }}
+          E2E_SPECS: ${{ needs.selection.outputs.e2e_specs }}
+          TOOLS_SCOPE: ${{ needs.selection.outputs.tools_scope }}
+          APPLICATION: ${{ needs.selection.outputs.application }}
         run: |
-          uv run --no-sync python scripts/run_tests.py tests/test_editor_assets.py
-          uv run --no-sync python scripts/run_tests.py tests/test_editor_manifest.py
-      - name: Real file and HTTP editor
+          packs=()
+          [[ "$COMMON" != true ]] || packs+=(--pack common)
+          [[ "$BROWSER" != true ]] || packs+=(--pack browser)
+          [[ "$SMOKE" != true ]] || packs+=(--pack smoke)
+          [[ "$MEDIA" != true ]] || packs+=(--pack media)
+          [[ "$LONG_MEDIA" != true ]] || packs+=(--pack long-media)
+          [[ "$LIFECYCLE" != true ]] || packs+=(--pack lifecycle)
+          [[ "$TOOLS" != true ]] || packs+=(--pack tools)
+          [[ "$E2E" != true ]] || packs+=(--pack e2e)
+          runner=(uv run --no-sync python)
+          if [[ "$APPLICATION" == false && "$TOOLS_SCOPE" == checklist ]]; then runner=(python); fi
+          "${runner[@]}" scripts/test_workflow.py --stage merge --tools-scope "$TOOLS_SCOPE" --e2e-specs "$E2E_SPECS" "${packs[@]}"
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: editor-test-evidence
+          path: |
+            .artifacts/
+            test-results/
+          include-hidden-files: true
+          retention-days: 7
+
+  windows-lifecycle:
+    needs: selection
+    if: needs.selection.outputs.lifecycle == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 8
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.28.4
+          run_install: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: python scripts/test_workflow.py --stage merge --pack lifecycle
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: windows-lifecycle-evidence
+          path: .artifacts/
+          include-hidden-files: true
+          retention-days: 7
+
+  website:
+    needs: selection
+    if: needs.selection.outputs.website == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.28.4
+          run_install: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - run: pnpm --dir website install --frozen-lockfile
+      - run: python scripts/test_workflow.py --stage merge --pack website
+
+  browser-gates:
+    needs: selection
+    if: needs.selection.outputs.editor_e2e == 'true'
+    uses: ./.github/workflows/browser-gates.yml
+
+  test-gate:
+    name: Required test gate
+    if: always()
+    needs: [selection, documentation, editor, windows-lifecycle, browser-gates, website]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Reject failure, cancellation and unexpected skipped jobs
         env:
-          MAW_E2E_PYTHON: ${{ github.workspace }}/.venv/bin/python
-        run: pnpm exec playwright test --project=chromium tests/e2e/editor-bundle.spec.mjs tests/e2e/editor-transactions.spec.mjs
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python scripts/check_test_gate.py

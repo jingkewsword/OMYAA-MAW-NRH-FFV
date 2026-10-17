@@ -29,6 +29,27 @@ test.afterAll(async () => {
   cleanupTempDir(tempDir);
 });
 
+test('subtitle toolbar label returns after the pane is widened', async ({ page }, testInfo) => {
+  await page.goto(server.url);
+  const toolbar = page.locator('.cues-container > .cue-list-toolbar');
+  const label = toolbar.locator(':scope > .layout-toolbar-label');
+  await toolbar.evaluate(element => { element.style.width = '180px'; });
+  // Upstream uses CSS clipping, keeping the label in layout at narrow widths.
+  await expect(label).toBeVisible();
+  await expect(label).toHaveCSS('white-space', 'nowrap');
+  await expect(toolbar).toHaveCSS('overflow-x', 'hidden');
+  await toolbar.evaluate(element => { element.style.width = '1100px'; });
+  await expect(label).toBeVisible();
+  await toolbar.evaluate(element => { element.style.width = '180px'; });
+  // Upstream uses CSS clipping, keeping the label in layout at narrow widths.
+  await expect(label).toBeVisible();
+  await expect(label).toHaveCSS('white-space', 'nowrap');
+  await expect(toolbar).toHaveCSS('overflow-x', 'hidden');
+  await toolbar.evaluate(element => { element.style.width = '1100px'; });
+  await expect(label).toBeVisible();
+  await toolbar.screenshot({ path: testInfo.outputPath('subtitle-label-restored.png') });
+});
+
 test('checked sticker column stays collapsed until the project contains a sticker', async ({ page }) => {
   await page.addInitScript((settingsKey) => {
     localStorage.setItem(settingsKey, JSON.stringify({ cueListShowSticker: true }));

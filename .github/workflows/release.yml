@@ -14,10 +14,48 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  test-quality:
+    name: Release test quality (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.28.4
+          run_install: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - run: uv sync --frozen --group test --group dev --no-group build
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-noto-cjk
+      - run: uv run --no-sync python scripts/test_workflow.py --stage release --pack common --pack browser --pack smoke --pack media --pack long-media --pack lifecycle --pack tools --pack docs
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: release-test-evidence
+          path: |
+            .artifacts/
+            test-results/
+          include-hidden-files: true
+          retention-days: 14
+
+  browser-gates:
+    uses: ./.github/workflows/browser-gates.yml
   # Windows 是发布门禁：它失败则整个 Release 不发布；
   # macOS / Linux 失败仅提醒（publish 追加警告），不阻断。
   build-windows:
     name: Build Windows x64 bundle
+    needs: [test-quality, browser-gates]
     runs-on: windows-2022
     env:
       PYTHONUTF8: '1'
@@ -72,7 +110,7 @@ jobs:
         run: python scripts/sync_launcher_version.py --check
 
       - name: Install locked dependencies
-        run: uv sync --group build --frozen
+        run: uv sync --group build --group test --frozen --group dev
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v6
@@ -86,15 +124,31 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
       - name: Build web bundles
-        # bundle 是构建产物（不入库）：Python 全量测试与打包都会读取，在测试前
-        # 显式构建（pnpm install 的 postinstall 也会构建，这里保持显式不依赖钩子）。
-        run: pnpm install --frozen-lockfile && pnpm run build
+        # The test workflow builds once; PyInstaller consumes the same bundles.
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
-      - name: Run packaging contract tests
-        run: uv run python scripts/run_tests.py tests/test_packaging_contract.py
+      - name: Install FFmpeg for media integration tests
+        shell: pwsh
+        # Test dependency only; release binaries are downloaded and verified below.
+        run: |
+          choco install ffmpeg --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'FFmpeg installation failed.' }
+          # Launch the real binaries: killing a Chocolatey shim can orphan FFmpeg
+          # and leave the media locked during cancellation/temporary-file cleanup.
+          $FfmpegBinary = Get-ChildItem -LiteralPath "$env:ChocolateyInstall\lib\ffmpeg\tools" -Filter ffmpeg.exe -Recurse -File | Select-Object -First 1
+          if (-not $FfmpegBinary) { throw 'The FFmpeg package contains no executable.' }
+          $FfmpegBin = $FfmpegBinary.Directory.FullName
+          $FfprobeBinary = Join-Path $FfmpegBin 'ffprobe.exe'
+          if (-not (Test-Path -LiteralPath $FfprobeBinary -PathType Leaf)) { throw 'FFprobe is unavailable.' }
+          $FfmpegBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          & $FfmpegBinary.FullName -version
+          if ($LASTEXITCODE -ne 0) { throw 'FFmpeg is unavailable.' }
+          & $FfprobeBinary -version
+          if ($LASTEXITCODE -ne 0) { throw 'FFprobe is unavailable.' }
 
-      - name: Run Python tests
-        run: uv run python scripts/run_tests.py
+
+      - name: Required Python and media tests
+        run: uv run --no-sync python scripts/test_workflow.py --stage merge --pack common --pack media --pack long-media --pack tools --pack lifecycle
 
       - name: Download embedded Python bootstrap assets
         run: |
@@ -104,7 +158,10 @@ jobs:
 
       - name: Build MAW bundle
         shell: pwsh
-        run: .\scripts\build-windows.ps1 -SkipTests
+        run: .\scripts\build-windows.ps1 -SkipTests -PreparedEnvironment
+
+      - name: Verify packaged ESM bundles and source hashes
+        run: uv run python scripts/verify_web_bundle_payload.py dist/MAW/_internal/web
 
       - name: Verify bundled FAQ
         shell: pwsh
@@ -248,6 +305,7 @@ jobs:
           if-no-files-found: error
 
   build-aux:
+    needs: [test-quality, browser-gates]
     name: Build ${{ matrix.name }}
     strategy:
       fail-fast: false
@@ -317,7 +375,7 @@ jobs:
         run: python scripts/sync_launcher_version.py --check
 
       - name: Install locked dependencies
-        run: uv sync --group build --frozen
+        run: uv sync --group build --group test --frozen --group dev
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v6
@@ -331,12 +389,38 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
       - name: Build web bundles
-        # bundle 是构建产物（不入库）：Python 全量测试与打包都会读取，在测试前
-        # 显式构建（pnpm install 的 postinstall 也会构建，这里保持显式不依赖钩子）。
-        run: pnpm install --frozen-lockfile && pnpm run build
+        # The test workflow builds once; PyInstaller consumes the same bundles.
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
-      - name: Run packaging contract tests
-        run: uv run python -m unittest tests/test_packaging_contract.py
+      - name: Install FFmpeg for macOS media tests
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          set -euo pipefail
+          FfmpegVersion="8.1"
+          DownloadRoot="build/macos-ffmpeg/downloads"
+          ExtractRoot="build/macos-ffmpeg/test-tools"
+          FfmpegArchive="$DownloadRoot/ffmpeg81arm.zip"
+          FfprobeArchive="$DownloadRoot/ffprobe81arm.zip"
+          mkdir -p "$DownloadRoot" "$ExtractRoot/ffmpeg" "$ExtractRoot/ffprobe" build/ci-ffmpeg/bin
+          curl --fail --location --http1.1 --retry-all-errors --retry 5 --retry-delay 2 --silent --show-error --output "$FfmpegArchive" "https://www.osxexperts.net/ffmpeg81arm.zip"
+          curl --fail --location --http1.1 --retry-all-errors --retry 5 --retry-delay 2 --silent --show-error --output "$FfprobeArchive" "https://www.osxexperts.net/ffprobe81arm.zip"
+          printf '%s  %s\n' "ebb82529562b71170807bbc6b0e7eb4f0b13af8cbb0e085bb9e8f6fe709598ad" "$FfmpegArchive" | shasum -a 256 -c -
+          printf '%s  %s\n' "a6640a77d38a6f0527c5b597e599cb36a3427a6931444ed80bc62542421950a1" "$FfprobeArchive" | shasum -a 256 -c -
+          unzip -q -o "$FfmpegArchive" -d "$ExtractRoot/ffmpeg"
+          unzip -q -o "$FfprobeArchive" -d "$ExtractRoot/ffprobe"
+          FfmpegBinary="$(find "$ExtractRoot/ffmpeg" -type f -name ffmpeg ! -path '*/__MACOSX/*' -print -quit)"
+          FfprobeBinary="$(find "$ExtractRoot/ffprobe" -type f -name ffprobe ! -path '*/__MACOSX/*' -print -quit)"
+          test -n "$FfmpegBinary" && test -n "$FfprobeBinary"
+          chmod +x "$FfmpegBinary" "$FfprobeBinary"
+          file "$FfmpegBinary" | grep -q arm64
+          file "$FfprobeBinary" | grep -q arm64
+          printf '%s  %s\n' "9a08d61f9328e8164ba560ee7a79958e357307fcfeea6fe626b7d66cdc287028" "$FfmpegBinary" | shasum -a 256 -c -
+          printf '%s  %s\n' "aab17ac7379c1178aaf400c3ef36cdb67db0b75b1a23eeef2cb9f658be8844e6" "$FfprobeBinary" | shasum -a 256 -c -
+          cp "$FfmpegBinary" build/ci-ffmpeg/bin/ffmpeg
+          cp "$FfprobeBinary" build/ci-ffmpeg/bin/ffprobe
+          echo "$PWD/build/ci-ffmpeg/bin" >> "$GITHUB_PATH"
+          build/ci-ffmpeg/bin/ffmpeg -version | head -n 1
 
       - name: Install Linux CJK test font
         if: matrix.platform == 'linux'
@@ -344,8 +428,44 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y fonts-noto-cjk
 
+      - name: Install Linux system dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          # ffmpeg：生成 AppImage 图标；squashfs-tools：appimagetool 需要
+          # libnss3 等：PyInstaller 收集 QtWebEngine 的运行时依赖
+          sudo apt-get install -y \
+            ffmpeg squashfs-tools \
+            libnss3 libasound2 libxcomposite1 libxdamage1 libxrandr2 \
+            libxtst6 libxkbcommon0 libxkbcommon-x11-0 libpci3 libgl1 libegl1 \
+            libopengl0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-xkb1 \
+            xvfb
+          sudo apt-get clean
+
+      - name: Install verified FFmpeg 8.1 for Linux media tests
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          FfmpegBranch="8.1"
+          FfmpegAsset="ffmpeg-n${FfmpegBranch}-latest-linux64-gpl-${FfmpegBranch}.tar.xz"
+          mkdir -p build/ci-ffmpeg/download build/ci-ffmpeg/extracted
+          curl --fail --location --silent --show-error --retry 3 --retry-delay 2 \
+            -o "build/ci-ffmpeg/download/$FfmpegAsset" \
+            "https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/$FfmpegAsset"
+          curl --fail --location --silent --show-error --retry 3 --retry-delay 2 \
+            -o build/ci-ffmpeg/download/checksums.sha256 \
+            https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/checksums.sha256
+          bash scripts/verify_sha256.sh build/ci-ffmpeg/download/checksums.sha256 \
+            "$FfmpegAsset" "build/ci-ffmpeg/download/$FfmpegAsset"
+          tar -xf "build/ci-ffmpeg/download/$FfmpegAsset" -C build/ci-ffmpeg/extracted --strip-components=1
+          test -x build/ci-ffmpeg/extracted/bin/ffmpeg
+          test -x build/ci-ffmpeg/extracted/bin/ffprobe
+          build/ci-ffmpeg/extracted/bin/ffmpeg -version | head -n 1 | grep -F "$FfmpegBranch"
+          echo "$PWD/build/ci-ffmpeg/extracted/bin" >> "$GITHUB_PATH"
+
       - name: Run Python tests
-        run: uv run python -m unittest discover -s tests -p "test_*.py"
+        run: uv run --no-sync python scripts/test_workflow.py --stage merge --pack common --pack media --pack long-media --pack tools --pack lifecycle
 
       # ---------- macOS 专属 ----------
 
@@ -361,6 +481,10 @@ jobs:
           mkdir -p build
           uv run python -m maw.runtimes.freezer freeze --force
           uv run --group build pyinstaller --noconfirm --clean MAW.spec
+
+      - name: Verify packaged ESM bundles and source hashes
+        if: matrix.platform == 'macos'
+        run: uv run python scripts/verify_web_bundle_payload.py dist/MAW.app/Contents/Resources/web
 
       - name: Verify bundled FAQ
         if: matrix.platform == 'macos'
@@ -427,8 +551,8 @@ jobs:
           FfprobeArchive="$DownloadRoot/ffprobe81arm.zip"
           mkdir -p "$DownloadRoot" "$ExtractRoot/ffmpeg" "$ExtractRoot/ffprobe"
 
-          curl --fail --location --retry 3 --silent --show-error --output "$FfmpegArchive" "$FfmpegArchiveUrl"
-          curl --fail --location --retry 3 --silent --show-error --output "$FfprobeArchive" "$FfprobeArchiveUrl"
+          curl --fail --location --http1.1 --retry-all-errors --retry 5 --retry-delay 2 --silent --show-error --output "$FfmpegArchive" "$FfmpegArchiveUrl"
+          curl --fail --location --http1.1 --retry-all-errors --retry 5 --retry-delay 2 --silent --show-error --output "$FfprobeArchive" "$FfprobeArchiveUrl"
           printf '%s  %s\n' "$FfmpegArchiveSha256" "$FfmpegArchive" | shasum -a 256 -c -
           printf '%s  %s\n' "$FfprobeArchiveSha256" "$FfprobeArchive" | shasum -a 256 -c -
           unzip -q -o "$FfmpegArchive" -d "$ExtractRoot/ffmpeg"
@@ -527,23 +651,9 @@ jobs:
 
       # ---------- Linux 专属 ----------
 
-      - name: Install system dependencies
-        if: matrix.platform == 'linux'
-        run: |
-          sudo apt-get update
-          # ffmpeg：生成 AppImage 图标；squashfs-tools：appimagetool 需要
-          # libnss3 等：PyInstaller 收集 QtWebEngine 的运行时依赖
-          sudo apt-get install -y \
-            ffmpeg squashfs-tools \
-            libnss3 libasound2 libxcomposite1 libxdamage1 libxrandr2 \
-            libxtst6 libxkbcommon0 libxkbcommon-x11-0 libpci3 libgl1 libegl1 \
-            libopengl0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-xkb1 \
-            xvfb
-          sudo apt-get clean
-
       - name: Build AppImage
         if: matrix.platform == 'linux'
-        run: bash scripts/build-appimage.sh
+        run: bash scripts/build-appimage.sh --prepared-environment
 
       - name: Verify AppImage output
         if: matrix.platform == 'linux'
@@ -571,6 +681,7 @@ jobs:
           test -f squashfs-root/_internal/ocr-runtime/maw/text_conversion.py
           test -f squashfs-root/_internal/moss-runtime/requirements-moss.txt
           echo "OK: runtime requirements txt 随包分发"
+          python3 ../scripts/verify_web_bundle_payload.py squashfs-root/_internal/web
           rm -r squashfs-root
 
       - name: Diagnose AppImage libraries
@@ -639,8 +750,8 @@ jobs:
 
   publish:
     name: Publish GitHub Release
-    if: ${{ startsWith(github.ref, 'refs/tags/v') && !cancelled() && needs.build-windows.result == 'success' }}
-    needs: [build-windows, build-aux]
+    if: ${{ startsWith(github.ref, 'refs/tags/v') && !cancelled() && needs.test-quality.result == 'success' && needs.browser-gates.result == 'success' && needs.build-windows.result == 'success' }}
+    needs: [test-quality, browser-gates, build-windows, build-aux]
     runs-on: ubuntu-latest
     permissions:
       contents: write

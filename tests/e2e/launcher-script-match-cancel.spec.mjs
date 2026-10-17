@@ -75,7 +75,7 @@ for (const group of ['plain', 'timed']) {
       });
       await page.locator('#toolboxFab').click();
       await page.locator('#toolboxMatchTab').click();
-      await page.locator('#postprocessAiCleanup').uncheck();
+      await expect(page.locator('#postprocessScriptPath')).toBeVisible();
       const [large, small] = backend.fixtures[group];
       await page.locator('#toolboxInputPath').fill(large.projectPath);
       await page.locator('#postprocessScriptPath').fill(large.scriptPath);

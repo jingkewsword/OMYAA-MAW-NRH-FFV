@@ -57,6 +57,26 @@ class FakeWindow:
 
 @final
 class GuiWebBridgeTests(CompactContainerAssertions, unittest.TestCase):
+    def test_open_postprocess_folder_falls_back_after_intermediate_cleanup(self) -> None:
+        self.api.postprocess_workspace_directory = self.root / "deleted-run"
+        self.api.result = SimpleNamespace(srt_path=self.root / "final.srt")
+        with mock.patch("maw.gui_web._open_existing_path", return_value={"ok": True}) as opened:
+            self.assertEqual(self.api.open_postprocess_folder(), {"ok": True})
+        opened.assert_called_once_with(self.root)
+
+    def test_pipeline_done_logs_final_comparison_paths(self) -> None:
+        with mock.patch.object(self.api, "_emit") as emit:
+            self.api._handle_postprocess_pipeline_event({
+                "stage": "done", "skippedSteps": ["cleanup"],
+                "warnings": ["AI 整理失败并保留输入"],
+                "comparisonPaths": ["final/proofread.html", "final/translate.html"],
+            })
+        messages = [call.args[0].get("message", "") for call in emit.call_args_list]
+        self.assertTrue(any("跳过 1 个失败的 AI 步骤" in message for message in messages))
+        self.assertIn("[后处理报告] AI 整理失败并保留输入", messages)
+        self.assertIn("[后处理] 处理前后对比：final/proofread.html", messages)
+        self.assertIn("[后处理] 处理前后对比：final/translate.html", messages)
+
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
@@ -85,6 +105,10 @@ class GuiWebBridgeTests(CompactContainerAssertions, unittest.TestCase):
                                              "notes": "  保留所有数字  "})
         self.assertTrue(result["ok"])
         self.assertEqual(cleanup.call_args.args[0].notes, "保留所有数字")
+        self.assertFalse(cleanup.call_args.args[0].review_enabled)
+        with mock.patch("maw.gui_web.process_ai_cleanup", return_value=SimpleNamespace()) as cleanup:
+            self.api.run_ai_cleanup({"providerId": "deepseek", "apiKey": "fake", "reviewEnabled": True})
+        self.assertTrue(cleanup.call_args.args[0].review_enabled)
 
     def test_ai_cleanup_stream_cancel_closes_response_and_writes_no_artifact(self) -> None:
         project = self.root / "cancel-cleanup.mosp"
@@ -162,7 +186,7 @@ class GuiWebBridgeTests(CompactContainerAssertions, unittest.TestCase):
         self.assertIn('"operationId": "ai-cleanup-cancel-test"', scripts)
         self.assertEqual(
             sorted(path.name for path in self.root.iterdir()),
-            [".env.example", "cancel-cleanup.mosp", "cancel-cleanup.txt"],
+            [".env.example", "cancel-cleanup.ai-cleanup-record.md", "cancel-cleanup.mosp", "cancel-cleanup.txt"],
         )
 
     def test_ai_cleanup_streams_each_batch_and_review_with_retry_reset(self) -> None:
@@ -244,6 +268,7 @@ class GuiWebBridgeTests(CompactContainerAssertions, unittest.TestCase):
                 "baseUrl": "https://api.deepseek.com",
                 "model": "deepseek-chat",
                 "operationId": "ai-cleanup-batches-test",
+                "reviewEnabled": True,
             })
 
         self.api.pump.shutdown()
@@ -348,7 +373,7 @@ class GuiWebBridgeTests(CompactContainerAssertions, unittest.TestCase):
 
         server = QuietServer(("127.0.0.1", 0), Handler)
         server.daemon_threads = True
-        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        server_thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
         server_thread.start()
 
         original_post = requests.Session.post
@@ -430,8 +455,8 @@ class GuiWebBridgeTests(CompactContainerAssertions, unittest.TestCase):
                     )
                 self.assertEqual(
                     sorted(path.name for path in self.root.iterdir()),
-                    [".env.example", "cancel-loopback.mosp", "cancel-loopback.txt"],
-                    "cancelled streaming cleanup must not write artifacts",
+                    [".env.example", "cancel-loopback.ai-cleanup-record.md", "cancel-loopback.mosp", "cancel-loopback.txt"],
+                    "cancelled streaming cleanup keeps only its trace and source inputs",
                 )
         finally:
             release_stream.set()
@@ -2412,7 +2437,7 @@ class GuiWebBridgeTests(CompactContainerAssertions, unittest.TestCase):
 
         self.assertFalse(result["ok"])
         self.assertEqual(result["code"], "postprocess_cancelled")
-        self.assertEqual(sorted(path.name for path in self.root.iterdir()), [".env.example", "cancel-me.mosp"])
+        self.assertEqual(sorted(path.name for path in self.root.iterdir() if path.suffix != ".md"), [".env.example", "cancel-me.mosp"])
 
     def test_llm_cancel_after_first_artifact_write_begins_is_rejected(self) -> None:
         import maw.postprocess as postprocess_core
@@ -2672,6 +2697,18 @@ class GuiWebBridgeTests(CompactContainerAssertions, unittest.TestCase):
         self.assertTrue(request.embed_translations)
         self.assertFalse(request.merge_bilingual)
 
+    def test_llm_bridge_forwards_target_language_prefilter_with_enabled_default(self) -> None:
+        artifact = SimpleNamespace(source_project_path=None, source_srt_path=None,
+                                   project_path=None, srt_path=None, translated_srt_path=None, warnings=())
+        for option, expected in (({}, True), ({"skipTargetLanguage": True}, True), ({"skipTargetLanguage": False}, False)):
+            with self.subTest(option=option), mock.patch("maw.gui_web.process_llm_postprocess", return_value=artifact) as process:
+                result = self.api.run_llm_postprocess({
+                    "operation": "translate_zh", "providerId": "deepseek", "apiKey": "sk-test",
+                    "baseUrl": "https://api.deepseek.com", "model": "deepseek-chat", **option,
+                })
+                self.assertTrue(result["ok"])
+                self.assertEqual(process.call_args.args[0].skip_target_language, expected)
+
     def test_llm_bridge_classifies_provider_http_error_without_exposing_secrets(self) -> None:
         provider_error = LlmClientError(
             "LLM provider returned HTTP 400: invalid request. This is a provider response, not a network outage.",
@@ -2863,6 +2900,7 @@ class GuiWebBridgeTests(CompactContainerAssertions, unittest.TestCase):
         self.assertIsNone(burn.call_args.args[0].media_path)
         self.assertTrue(burn.call_args.args[0].green_screen)
         self.assertEqual(burn.call_args.args[0].green_screen_size, "1080p")
+        self.assertFalse(burn.call_args.args[0].green_screen_include_audio)
         self.assertEqual(result["sourceMediaPath"], "")
         self.assertEqual(result["mediaPath"], str(output))
 
@@ -2880,6 +2918,27 @@ class GuiWebBridgeTests(CompactContainerAssertions, unittest.TestCase):
         self.assertTrue(result["ok"])
         # 未选择尺寸时桥接透传空串；默认档位（4K）由后端统一裁决。
         self.assertEqual(burn.call_args.args[0].green_screen_size, "")
+
+    def test_green_screen_burn_bridge_forwards_selected_audio_media(self) -> None:
+        subtitle = self.root / "green.srt"
+        media = self.root / "voice.mp3"
+        subtitle.write_text("1\n00:00:00,000 --> 00:00:01,000\n你好\n", encoding="utf-8")
+        media.write_bytes(b"audio")
+        ffmpeg = self.root / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+        ffmpeg.write_bytes(b"exe")
+        output = self.root / "green.green-screen.mp4"
+        with mock.patch("maw.gui_web._postprocess_ffmpeg_tools", return_value=FfmpegTools(ffmpeg=ffmpeg, ffprobe=None)):
+            with mock.patch("maw.gui_web.process_burn_subtitles") as burn:
+                burn.return_value = SimpleNamespace(source_media_path=media, subtitle_path=subtitle,
+                                                    media_path=output, video_encoder="cpu")
+                result = self.api.run_burn_subtitles({
+                    "mediaPath": str(media), "subtitlePath": str(subtitle),
+                    "greenScreen": True, "greenScreenIncludeAudio": True,
+                })
+        self.assertTrue(result["ok"])
+        request = burn.call_args.args[0]
+        self.assertEqual(request.media_path, media)
+        self.assertTrue(request.green_screen_include_audio)
 
     def test_media_tool_progress_is_compact_and_latest_message_ready(self) -> None:
         self.assertEqual(
@@ -4523,7 +4582,7 @@ class GuiWebBridgeTests(CompactContainerAssertions, unittest.TestCase):
             "apiKey": "sk-test",
         }, self.env_path)
 
-        self.assertEqual(request.extra_strong_punct, "?!——，。？！；,.")
+        self.assertEqual(request.extra_strong_punct, "?!——，。？！；,.;")
         # 无 version 的旧计划会并入默认断句清单（与保留符号互不影响剥尾集合）。
         self.assertIn("，", request.strip_tail_punct)
 
@@ -5869,7 +5928,7 @@ class LauncherAssetContractTests(CompactContainerAssertions, unittest.TestCase):
         stylesheet = (ROOT / "web" / "launcher" / "launcher.css").read_text(encoding="utf-8")
 
         self.assertIn(
-            '{ id: "match", enabled: false, scriptPath: "", matchMode: "script", extraSplitPunctuation: ["，", "。", "？", "！", "；", ",", "."], preservePunctuation: ["？", "！"], cleanMarkdownSymbols: true },',
+            '{ id: "match", enabled: false, scriptPath: "", matchMode: "script", extraSplitPunctuation: ["，", "。", "？", "！", "；", ",", ".", ";"], preservePunctuation: ["？", "！"], cleanMarkdownSymbols: true },',
             script,
         )
         self.assertIn('subtitle_invalid: (detail) => `字幕或工程解析失败：', launcher_script)
@@ -6848,7 +6907,7 @@ class WaitForServerProbeTests(unittest.TestCase):
                 return
 
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        threading.Thread(target=server.serve_forever, daemon=True).start()
+        threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
         try:
             url = f"http://127.0.0.1:{server.server_address[1]}/"
             self.assertTrue(
@@ -6872,7 +6931,7 @@ class WaitForServerProbeTests(unittest.TestCase):
                 return
 
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        threading.Thread(target=server.serve_forever, daemon=True).start()
+        threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True).start()
         try:
             url = f"http://127.0.0.1:{server.server_address[1]}/"
             self.assertFalse(_wait_for_server(url, timeout=0.35, probe_timeout=0.2))

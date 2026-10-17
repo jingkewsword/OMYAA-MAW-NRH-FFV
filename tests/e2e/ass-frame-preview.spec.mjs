@@ -328,10 +328,17 @@ test('preview visibility and speaker labels remain independent from exports and 
   expect(options.exported).not.toContain('Host：');
   expect(options.exported).toContain('Dialogue:');
   expect(options.hidden).not.toContain('Dialogue:');
-  await page.evaluate(() => {
-    window.MaweCoreState.player.src = URL.createObjectURL(new Blob([], { type: 'video/mp4' }));
-    window.MaweCoreState.player.load();
+  // Use a decodable browser-only video: an empty blob now intentionally
+  // enables the upstream green-screen preview instead of representing video.
+  await page.evaluate(async () => {
+    const video = window.MaweCoreState.player;
+    const blob = await (await fetch('/media')).blob();
+    const loaded = new Promise((resolve) => video.addEventListener('loadedmetadata', resolve, { once: true }));
+    video.src = URL.createObjectURL(blob);
+    video.load();
+    await loaded;
   });
+  await expect.poll(() => page.evaluate(() => window.MaweCoreState.player.videoWidth)).toBe(640);
   await expect(page.locator('#ass-stage-frame')).toBeHidden();
   await expect(page.locator('#ass-stage-status')).toBeHidden();
 });

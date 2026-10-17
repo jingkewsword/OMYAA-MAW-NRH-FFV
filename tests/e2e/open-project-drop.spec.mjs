@@ -212,9 +212,8 @@ test('can use a dropped project subtitle as an extension and preserve optional i
     { text: '带字词时间码的副字幕', start: 100, end: 1900 },
   ]);
 
-  // 双语字幕设置已并入工程设置 → 字幕轨道页；交换按钮就在该页内。
-  await openSettingsPage(page, 'project-tracks');
-  await page.locator('#project-multi-subtitle-settings').waitFor({ state: 'visible' });
+  await openSettingsPage(page, 'multi-subtitle');
+  await expect(page.locator('#editor-settings-page-multi-subtitle')).toBeVisible();
   await page.locator('#multi-subtitle-swap').click();
   await page.locator('#multi-subtitle-swap').click();
 

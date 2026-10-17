@@ -103,7 +103,10 @@ test('dragging one gap boundary highlights only that gap', async ({ page }) => {
   await expect(gaps).toHaveCount(2);
 
   const handle = gaps.nth(0).locator('.gap-handle.right');
-  const box = await handle.boundingBox();
+  // Initialization renders the preview, then rebuilds gap nodes after resume.
+  // boundingBox itself does not retry a node detached during that rebuild.
+  let box;
+  await expect.poll(async () => (box = await handle.boundingBox())).not.toBeNull();
   expect(box).not.toBeNull();
 
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
