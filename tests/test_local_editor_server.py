@@ -703,6 +703,13 @@ class LocalEditorServerTests(CompactContainerAssertions, unittest.TestCase):
             json.dumps({"media": str(self.other_media), "segments": []}), encoding="utf-8",
         )
 
+        # These byte/routing fixtures are not decodable media and have no
+        # thumbnail cache. Keep enrichment, binding, HTTP and file operations
+        # real; media probes and real cache validation have separate tests.
+        self.enterContext(mock.patch("maw.project_io.probe_video_fps", return_value=None))
+        self.enterContext(mock.patch("maw.project_io.probe_audio_tracks", return_value=None))
+        self.enterContext(mock.patch.object(server_editor.EditorServer, "_thumbnail_base_ready", return_value=False))
+
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 

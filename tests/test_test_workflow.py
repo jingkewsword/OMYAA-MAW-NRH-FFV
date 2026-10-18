@@ -282,6 +282,12 @@ class TestWorkflowTests(unittest.TestCase):
                 plan = select_packs([path])
                 self.assertTrue({"common", "media", "smoke"}.issubset(plan["packs"]))
                 self.assertTrue(test_workflow.preparation(plan["packs"])["real_media"])
+        for method in ("test_ass_frame_render_uses_real_libass_when_available",
+                       "test_green_screen_frame_uses_playhead_time_with_real_libass"):
+            with self.subTest(method=method):
+                self.assertEqual(test_policy.python_pack(f"tests.test_local_editor_server.LocalEditorServerTests.{method}"), "media")
+        self.assertEqual(test_policy.python_pack(
+            "tests.test_local_editor_server.LocalEditorServerTests.test_ass_frame_endpoint_returns_base64_png_and_warnings"), "common")
         for path in ("maw/editor_burn.py", "maw/media_keyframes.py", "maw/media_export_video.py"):
             with self.subTest(source=path):
                 self.assertIn("media", select_packs([path])["packs"])

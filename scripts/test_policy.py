@@ -29,6 +29,7 @@ MEDIA_METHODS = {
     "test_low_volume_and_nfd_input_align_without_silence_gate",
     "test_real_preflight_never_loads_model_or_writes_artifacts",
     "test_ass_frame_render_uses_real_libass_when_available",
+    "test_green_screen_frame_uses_playhead_time_with_real_libass",
     "test_srt_filter_with_special_font_name_parses_in_real_ffmpeg",
     "test_real_ffmpeg_cancel_removes_output_without_changing_source",
     "test_real_stream_copy_mp4_mkv_ts_multitrack_and_nonzero_origin",
