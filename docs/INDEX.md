@@ -154,6 +154,11 @@
 
 [缩略图缓存测试准备与持久化边界](logs/release1.9.0-beta.2/261016_测试治理优化/缩略图缓存夹具降本.md)
 
+<a name="plan-release-pipeline"></a>
+### 正式版本归档、官网与更新检测管线
+
+[架构、内容来源、资源复用与实施阶段](plans/RELEASE_PIPELINE.md)
+
 <a name="plan-ass-cue-scale"></a>
 ### 主字幕单句缩放开发方案
 

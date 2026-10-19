@@ -72,7 +72,8 @@ def commands(packs: list[str], report_dir: Path, *, dev: bool = False, component
             yield "docs-navigation", [python, "scripts/check_docs.py"], 60
             yield "release-docs", [python, "scripts/prepare_release_notes.py", "--check-all"], 60
             if "tools" not in packs or tools_scope == "checklist":
-                yield "docs-regressions", [python, "scripts/run_tests.py", "--required", "tests.test_docs_check", "tests.test_release_notes"], 120
+                yield "docs-regressions", [python, "scripts/run_tests.py", "--required", "tests.test_docs_check", "tests.test_release_notes",
+                                           "tests.test_release_site", "tests.test_release_publication"], 120
         if pack in PYTHON_PACKS:
             targets = list(CHECKLIST_PYTHON) if pack == "tools" and tools_scope == "checklist" else ["--pack", pack]
             yield f"python-{pack}", [python, "scripts/run_tests.py", *targets, "--required",
