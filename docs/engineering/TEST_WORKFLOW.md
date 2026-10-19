@@ -68,6 +68,10 @@ uv run --no-sync python scripts/test_workflow.py --stage merge --changed maw/qua
 | manual | 依赖个人 real .mosp 示例的历史方法。显式运行并准备自有数据，不是公开仓库 required 门禁 |
 | website | 独立网站构建，需要网站目录自己的锁定依赖 |
 
+FFprobe 失败按三层验证：服务器通用假媒体夹具继续 mock “探测未知/缩略图未就绪”，让保存、备份、绑定等流程独立运行；`tests/test_media.py` 在 common 中执行真实 MAW 探测函数，仅模拟子进程异常或损坏输出，检查非零退出、超时、启动失败与 JSON 解析失败均降级为 `None`（未知，区别于已确认没有音轨的 `[]`）；`tests/test_ffprobe_failure_integration.py` 在 media 中保留两个真实坏文件测试，检查 FFprobe 确实非零退出，以及随后加载工程和通过真实 HTTP 保存、备份仍成功。真实层的 subprocess 包装只观察实际进程与错误，不提供假结果。
+
+媒体探测、工程、服务器代码以及 FFmpeg 打包配置、依赖和工作流变动会选择 media；发布也运行 required media，缺少 FFprobe 的 skip 会使门禁失败。纯文档改动不运行这两个真实测试。仓库外的 FFmpeg 安装变化不会凭空触发 GitHub 事件，应在提交版本/工作流配置变更或发布验证时使用实际目标工具执行 media；这套测试验证 MAW 与所用 FFprobe 的失败契约，不穷举 FFprobe 的所有坏容器格式。成本与故障注入证据见 [FFprobe 分层回归](../logs/release1.9.0-beta.3/261020_FFprobe分层回归/分层验证.md)。
+
 未知生产路径扩大全部组。当前业务路径规则刻意保守：`maw/` 与服务器触发媒体和相关浏览器族；涉及 waveform/reapeaks/quapeaks/project/history/script_timestamp 时再触发长媒体。`web/` 按叶子消费者族选 E2E，共享状态/host/history/boot/全局布局或未知叶子扩大完整浏览器。共享测试基础设施、依赖锁与工作流触发所有 required 组和预览打包。修改测试文件按其实际源代码内用例所属组选择。新测试默认 common；禁止通过未登记的新重测试逃避成本讨论。
 
 独立 `tests/e2e/**/*.spec.mjs` 修改选具体文件；文件缺失（包括改名旧路径）且未发现消费者时扩大完整浏览器；存在导出、其他测试 JS 引用或无法判断时扩大全组，防止遗漏读取该 spec 的 Node 消费者。helpers/fixtures/config 仍按共享基础设施处理。多路径只扩大集合，后加入 docs 或局部 spec 不得覆盖生产修改的要求。完整浏览器选择清空局部 spec 列表，禁止两种模式重复运行。该规则不自动批准测试删除，删掉独有保障仍需评审。

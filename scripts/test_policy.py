@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 
 PYTHON_PACKS = ("common", "media", "long-media", "tools", "manual")
-MEDIA_MODULES = {"test_gap_removed_audio_export", "test_gap_removed_video_compatibility",
+MEDIA_MODULES = {"test_ffprobe_failure_integration", "test_gap_removed_audio_export", "test_gap_removed_video_compatibility",
                  "test_media_cache", "test_quapeaks_generation",
                  "test_thumbnail_jobs_integration", "test_thumbnail_server"}
 MEDIA_CLASSES = {

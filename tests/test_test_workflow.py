@@ -55,6 +55,27 @@ class TestWorkflowTests(unittest.TestCase):
         plan = select_packs(["maw/quapeaks.py"])
         self.assertTrue({"common", "media", "long-media", "smoke"}.issubset(plan["packs"]))
 
+    def test_ffprobe_failure_layers_run_for_media_changes_and_release(self):
+        ids = test_policy.source_test_ids(ROOT / "tests/test_ffprobe_failure_integration.py")
+        self.assertEqual(len(ids), 2)
+        self.assertEqual({test_policy.python_pack(name) for name in ids}, {"media"})
+        for method in ("test_probe_process_failures_return_unknown_information",
+                       "test_probe_invalid_json_returns_unknown_information"):
+            self.assertEqual(test_policy.python_pack(f"test_media.MediaResolutionTests.{method}"), "common")
+        for path in ("maw/media.py", "maw/ffmpeg.py", "maw/project_io.py", "server-editor/serve.py",
+                     ".github/workflows/release.yml", "tests/test_ffprobe_failure_integration.py"):
+            with self.subTest(path=path):
+                plan = select_packs([path])
+                self.assertIn("media", plan["packs"])
+                self.assertTrue(test_workflow.preparation(plan["packs"])["real_media"])
+                command = next(cmd for gate, cmd, _ in test_workflow.commands(
+                    plan["packs"], ROOT / ".artifacts") if gate == "python-media")
+                self.assertIn("--required", command)
+        release = select_packs(["README.md"], release=True)
+        self.assertIn("media", release["packs"])
+        self.assertIn("python-media", [gate for gate, _, _ in test_workflow.commands(release["packs"], ROOT / ".artifacts")])
+        self.assertNotIn("media", select_packs(["README.md"])["packs"])
+
     def test_tool_regression_change_does_not_select_application(self):
         for path in test_policy.DOC_TOOL_PATHS:
             with self.subTest(path=path):
