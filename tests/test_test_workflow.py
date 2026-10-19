@@ -160,6 +160,8 @@ class TestWorkflowTests(unittest.TestCase):
                 plan = select_packs([path])
                 self.assertIn("tests/e2e/editor-menu-focus.spec.mjs", plan["e2e_specs"])
                 self.assertIn("tests/e2e/waveform-history.spec.mjs", plan["e2e_specs"])
+                self.assertIn("tests/e2e/burn-video-jobs.spec.mjs", plan["e2e_specs"])
+                self.assertIn("tests/e2e/editor-help-srt-burn.spec.mjs", plan["e2e_specs"])
                 self.assertNotIn("editor-e2e", plan["packs"])
 
     def test_checklist_preparation_keeps_consumers_and_omits_unrelated_builds(self):
@@ -294,6 +296,14 @@ class TestWorkflowTests(unittest.TestCase):
         self.assertIn("e2e", leaf["packs"])
         self.assertNotIn("editor-e2e", leaf["packs"])
         self.assertTrue(all(Path(path).name.startswith("launcher-") for path in leaf["e2e_specs"]))
+        for path in ("web/editor/io/editor-sticker-burn-plan.js", "web/shared/utils/sticker-placement.js",
+                     "web/editor/io/editor-wiring-burn-video.js"):
+            with self.subTest(path=path):
+                plan = select_packs([path])
+                self.assertIn("e2e", plan["packs"])
+                self.assertNotIn("editor-e2e", plan["packs"])
+                self.assertTrue({"tests/e2e/burn-video-jobs.spec.mjs", "tests/e2e/editor-help-srt-burn.spec.mjs",
+                                 "tests/e2e/ass-export.spec.mjs"}.issubset(plan["e2e_specs"]))
         for path in ("web/editor/state/editor-state.js", "web/editor/unknown-module.js"):
             self.assertIn("editor-e2e", select_packs([path])["packs"])
 

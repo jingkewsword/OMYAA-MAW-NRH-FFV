@@ -109,14 +109,15 @@ ALL_MERGE = {"common", "browser", "smoke", "media", "long-media", "lifecycle", "
 # Leaf risks select existing consumer families. Shared state/host/schema/layout
 # and an unrecognized leaf deliberately keep the full-browser fallback.
 E2E_FAMILIES = (
-    (("gap",), ("gap-", "ai-cleanup", "script-alignment", "script-timestamp", "waveform-history", "waveform-deletion")),
+    (("gap",), ("gap-", "ai-cleanup", "script-alignment", "script-timestamp", "waveform-history", "waveform-deletion", "burn-video-jobs", "editor-help-srt-burn")),
     (("ai_cleanup", "ai-cleanup", "postprocess_ai"), ("ai-cleanup", "gap-", "marker")),
     (("script_match", "script-match", "script_alignment", "script_timestamp", "server-align/"), ("script-", "server-align", "launcher-script-match", "gap-")),
     (("waveform", "reapeaks", "quapeaks", "media_cache", "playback", "seek", "audition"), ("waveform-", "playback-", "playhead-", "hover-seek", "subtitle-seek", "cue-context", "media-controls", "gap-", "filmstrip")),
     (("thumbnail", "filmstrip"), ("filmstrip", "waveform-view-performance", "settings-structure")),
     (("segmentation", "punctuation", "word_timing", "word-timing", "timed-text", "text-tools", "split", "merge"), ("word-timing", "timed-text", "split-", "keyboard-timing", "editor-text-tools", "launcher-resegment")),
-    (("ass_", "ass-", "/ass.", "font", "subtitle-preview"), ("ass-", "subtitle-preview", "bilingual-label")),
-    (("export", "fcp7", "otio"), ("ass-export", "fcp7-export", "otio-export", "gap-", "multi-subtitle", "speaker-label", "waveform-history", "editor-menu-focus")),
+    (("ass_", "ass-", "/ass.", "font", "subtitle-preview"), ("ass-", "subtitle-preview", "bilingual-label", "burn-video-jobs", "editor-help-srt-burn")),
+    (("export", "fcp7", "otio"), ("ass-export", "fcp7-export", "otio-export", "gap-", "multi-subtitle", "speaker-label", "waveform-history", "editor-menu-focus", "burn-video-jobs", "editor-help-srt-burn")),
+    (("sticker", "burn-video"), ("burn-video-jobs", "editor-help-srt-burn", "ass-export")),
     (("marker", "speaker", "overlay", "multi-subtitle", "multi_subtitle"), ("marker", "speaker-label", "overlay-track", "multi-subtitle")),
     (("cue-scroll", "cue-list", "cue-render"), ("cue-", "click-behavior", "layout-feedback")),
     (("tooltip",), ("shared-tooltip", "launcher-keycaps")),
