@@ -44,6 +44,19 @@ class TestWorkflowTests(unittest.TestCase):
     def test_docs_and_website_do_not_select_application(self):
         self.assertEqual(select_packs(["docs/user/WORKFLOW.md"])["packs"], ["docs"])
         self.assertEqual(select_packs(["website/src/pages/index.astro"])["packs"], ["docs", "website"])
+        for path in (*test_policy.SITE_TOOL_PATHS, "docs/releases/1.9.0.md", "docs/assets/1.9.0/example.webp"):
+            with self.subTest(path=path):
+                plan = select_packs([path])
+                self.assertEqual(plan["packs"], ["docs", "website"])
+                self.assertFalse(plan["preview"])
+                self.assertEqual(test_workflow.preparation(plan["packs"]),
+                                 {"application": False, "real_media": False})
+        steps = list(test_workflow.commands(["website"], ROOT / ".artifacts"))
+        self.assertEqual([name for name, _, _ in steps], ["website-docs", "website-releases", "website-build"])
+        self.assertIn("website/scripts/sync-maw-docs.mjs", steps[0][1])
+        self.assertEqual(steps[1][1][1:], ["scripts/build_release_site.py", "--preview"])
+        self.assertEqual(steps[2][1][-3:], ["--dir", "website", "build"])
+        self.assertIn("website", select_packs([], release=True)["packs"])
 
     def test_unknown_paths_and_shared_infrastructure_expand(self):
         for path in ("new-boundary.py", "uv.lock", "tests/e2e/helpers.mjs", "JSON_SCHEMA.md"):
@@ -79,13 +92,14 @@ class TestWorkflowTests(unittest.TestCase):
         for path in test_policy.DOC_TOOL_PATHS:
             with self.subTest(path=path):
                 plan = select_packs([path])
-                self.assertEqual(plan["packs"], ["docs"])
+                self.assertEqual(plan["packs"], ["docs", "website"] if path in test_policy.SITE_TOOL_PATHS else ["docs"])
                 self.assertFalse(plan["preview"])
                 commands = list(test_workflow.commands(plan["packs"], ROOT / ".artifacts"))
-                self.assertEqual([name for name, _, _ in commands],
+                self.assertEqual([name for name, _, _ in commands if not name.startswith("website-")],
                                  ["docs-navigation", "release-docs", "docs-regressions"])
-                self.assertIn("tests.test_docs_check", commands[-1][1])
-                self.assertIn("tests.test_release_notes", commands[-1][1])
+                regressions = next(command for name, command, _ in commands if name == "docs-regressions")
+                for module in ("tests.test_docs_check", "tests.test_release_notes", "tests.test_release_site", "tests.test_release_publication"):
+                    self.assertIn(module, regressions)
         tool_ids = {case.id() for case in run_tests.cases(run_tests.pack_suite("tools"))}
         for module in ("test_verification_checklist", "test_verification_checklist_build"):
             with self.subTest(checklist_module=module):

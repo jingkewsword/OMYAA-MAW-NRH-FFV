@@ -95,6 +95,8 @@ def commands(packs: list[str], report_dir: Path, *, dev: bool = False, component
             yield "browser-regressions", [*playwright, "--reporter=line,json", f"--output={report_dir / 'browser-artifacts'}",
                    *([f"--shard={shard[0]}/{shard[1]}"] if shard else []), *specs], 900
         if pack == "website":
+            yield "website-docs", [node, "website/scripts/sync-maw-docs.mjs"], 60
+            yield "website-releases", [python, "scripts/build_release_site.py", "--preview"], 180
             yield "website-build", [shutil.which("pnpm") or "pnpm", "--dir", "website", "build"], 240
 
 

@@ -17,7 +17,9 @@ MEDIA_CLASSES = {
     ("test_gap_removed_video_timeline", "RealVideoTimelineTests"),
 }
 DOC_TOOL_PATHS = {"scripts/check_docs.py", "scripts/prepare_release_notes.py",
-                  "tests/test_docs_check.py", "tests/test_release_notes.py"}
+                  "scripts/publish_release.py", "tests/test_docs_check.py", "tests/test_release_notes.py",
+                  "tests/test_release_site.py", "tests/test_release_publication.py"}
+SITE_TOOL_PATHS = {"scripts/build_release_site.py", "scripts/prepare_release_notes.py"}
 TOOL_MODULES = {"test_docs_check", "test_release_notes", "test_release_site", "test_release_publication", "test_run_check", "test_run_tests_runner",
                 "test_verification_checklist", "test_verification_checklist_build", "test_verify_sha256_script", "test_macos_icon",
                 "test_packaging_contract", "test_test_workflow", "test_browser_results"}
@@ -102,7 +104,7 @@ def allowed_platform_skip(test_id: str, reason: str) -> bool:
             or "test_local_log.DefaultLogDirectoryTests." in test_id)
 
 
-ALL_MERGE = {"common", "browser", "smoke", "media", "long-media", "lifecycle", "tools", "editor-e2e"}
+ALL_MERGE = {"common", "browser", "smoke", "media", "long-media", "lifecycle", "tools", "editor-e2e", "website"}
 
 # Leaf risks select existing consumer families. Shared state/host/schema/layout
 # and an unrecognized leaf deliberately keep the full-browser fallback.
@@ -172,6 +174,10 @@ def select_packs(paths: list[str], *, release: bool = False) -> dict:
                 "reasons": ["release or unavailable change list: expand all required packs"]}
     for original in paths:
         path = original.replace("\\", "/").removeprefix("./")
+        if path in SITE_TOOL_PATHS or path.startswith(("docs/releases/", "docs/assets/")):
+            selected.add("website")
+            reasons.append(f"release site consumes this document input: {path}")
+            continue
         if path.startswith("docs/") or path in {"README.md", "CHANGELOG.md", "CONTRIBUTING.md", "AGENTS.md", "JSON_SCHEMA.md"}:
             if path == "JSON_SCHEMA.md":
                 selected.update(ALL_MERGE)

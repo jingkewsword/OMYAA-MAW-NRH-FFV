@@ -48,13 +48,15 @@ uv run --no-sync python scripts/test_workflow.py --stage merge --changed maw/qua
 | --- | --- | --- |
 | 业务合并 | common Python/Node、构建与类型、browser 契约、两个真实文件/HTTP smoke specs、文档导航 | media、long-media、lifecycle、tools、完整浏览器回归 |
 | 纯文档 | 文档导航、发布归档与对应回归 | Schema 文档视为共享契约，扩大所有业务组 |
-| 网站 | 文档检查、网站构建 | 业务源码同批变化时合并相关组 |
-| 文档工具 | check_docs/prepare_release_notes 及对应两个测试文件精确匹配时，仅 docs | 与生产或其他测试同批修改取并集 |
+| 网站 | 文档检查、同步站点文档、生成发布预览、网站构建 | 业务源码同批变化时合并相关组 |
+| 文档/发布工具 | check_docs、publish_release 及四个文档/发布回归模块精确匹配时，仅 docs | prepare_release_notes、build_release_site、发布归档和文档图片另加 website；与生产改动取并集 |
 | 清单工具独立改动 | docs + 清单专属 tools 消费者；源目录带上自身真实 E2E | 无应用构建/类型检查/媒体依赖，混入其他消费者则恢复宽范围 |
 | 其他工具 | 完整 tools；未知工具保守扩大 | 公共测试入口/依赖锁/工作流变更扩大全部组；目录名 tools 不能证明与业务无关 |
 | 发布 | 所有 required 组 | 打包平台分别验证 Python/媒体/长媒体/生命周期/工具与 Node 语义；完整 Chromium 在四个独立 Linux runner 执行并汇总 |
 
 `--stage merge --plan-only` 输出选择与原因；`--pack` 可以显式选择组进行复现。`pnpm run test:dev`、`test:merge`、`test:release` 是同一入口的快捷方式。历史 `pnpm run test:unit` 仍运行全部顶层 `.mjs`，其中含真实浏览器与进程测试；无参数 `scripts/run_tests.py` 仍保留历史全量 unittest 行为，不能拿其允许 skip 的结果代替 required 门禁。
+
+网站检查先运行已有文档同步脚本与 `build_release_site.py --preview`，再运行 Astro；干净检出也能得到发布目录所需的 JSON 和本地图片。预览保持公共更新列表为空，不请求 GitHub 发布事实或执行发布。共享/未知路径、无可靠差异与发布也包含 website，避免遗漏这条真实消费者。标准库 docs 回归已覆盖发布构建与幂等发布逻辑，因此这些已知独立路径不必启动应用、媒体和完整浏览器。
 
 | 组 | 保障与成本 |
 | --- | --- |
