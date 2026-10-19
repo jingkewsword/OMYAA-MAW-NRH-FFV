@@ -11,10 +11,11 @@ from pathlib import Path
 from unittest import mock
 
 from maw import media
+from tests.compact_assertions import CompactContainerAssertions
 from tests.test_local_editor_server import server_editor
 
 
-class FFprobeFailureIntegrationTests(unittest.TestCase):
+class FFprobeFailureIntegrationTests(CompactContainerAssertions, unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
