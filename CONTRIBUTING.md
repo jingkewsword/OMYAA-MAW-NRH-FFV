@@ -22,6 +22,7 @@
 
 - Python：遵循现有代码风格；开发先跑 `uv run --no-sync python scripts/test_workflow.py --stage dev`，再跑修改涉及的测试。分支合并使用 `--stage merge --base-ref origin/main`；分组、环境与 required skip 规则见[测试分层](docs/INDEX.md#engineering-test-workflow)。
 - 前端（web/）：LF 换行，保持既有缩进风格
+- 并行测试：`python scripts/run_tests.py --parallel N` 按文件多进程执行。bundle 产物缺失时跨进程锁会保证多个 worker 只自动构建一次，但首个触发构建的 worker 会被同步拖慢；建议首次在新建 worktree / clone 上使用前先完成一次 `pnpm install --frozen-lockfile && pnpm run build`。
 
 所有文本使用 UTF-8 与 LF。前端装配检查、类型检查与浏览器回归见 [开发概览](docs/INDEX.md#engineering-development)。
 

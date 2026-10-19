@@ -340,6 +340,15 @@ class TestWorkflowTests(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(run_tests.main(["--required"]), 1)
                 self.assertEqual(run_tests.main([]), 0)
+                with tempfile.TemporaryDirectory() as directory, \
+                        patch.object(run_tests, "_run_parallel", side_effect=AssertionError("required must keep its gate")), \
+                        patch.object(run_tests, "pack_suite", side_effect=lambda *_: unittest.defaultTestLoader.loadTestsFromTestCase(MissingDependency)):
+                    report = Path(directory) / "required.json"
+                    for selection in ([], ["--pack", "common"]):
+                        self.assertEqual(run_tests.main(["--required", "--parallel", "2", "--report", str(report), *selection]), 1)
+                        result = json.loads(report.read_text(encoding="utf-8"))
+                        self.assertEqual(result["exit_code"], 1)
+                        self.assertFalse(result["skips"][0]["platform_not_applicable"])
 
     def test_dynamic_discovery_is_loaded_and_its_change_broadens(self):
         area = ROOT / ".artifacts/dynamic-test-fixtures"

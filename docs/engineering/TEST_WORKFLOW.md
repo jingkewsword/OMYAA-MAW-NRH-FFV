@@ -4,6 +4,8 @@
 
 ## 日常开发
 
+`scripts/run_tests.py --parallel N` 保留上游按文件并行的全量发现入口、发现错误传播和 bundle 跨进程构建锁。与 `--pack`、`--required` 或 `--report` 一起使用时会明确提示并回退串行，继续执行原分组、skip 拒绝及逐例报告。现行 required 门禁仍按下述分层入口执行；尚未为各组新增并行调度协议。
+
 准备环境一次：`uv sync --group test --group dev`、`pnpm install --frozen-lockfile`。真实媒体组需要 PATH 中的 FFmpeg/ffprobe，浏览器组需要 `pnpm exec playwright install chromium`。test 组只有 NumPy、Pillow、soundfile，不下载 ASR 模型或完整 local/OCR 运行时。
 
 ```sh
