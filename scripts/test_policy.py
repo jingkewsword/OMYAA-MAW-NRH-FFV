@@ -33,6 +33,13 @@ MEDIA_METHODS = {
     "test_srt_filter_with_special_font_name_parses_in_real_ffmpeg",
     "test_real_ffmpeg_cancel_removes_output_without_changing_source",
     "test_real_stream_copy_mp4_mkv_ts_multitrack_and_nonzero_origin",
+    "test_final_generation_uses_selected_audio_track",
+    "test_full_pipeline_preserves_extra_gap_and_original_text",
+    "test_internal_repetition_joins_only_kept_audio_and_rejects_cross_join_tokens",
+    "test_long_source_offsets_nfd_and_later_line_failure_are_transactional",
+    "test_retained_extra_inside_joined_script_envelope_refuses_finalization",
+    "test_source_items_fill_keeps_asr_text_and_publishes_only_complete_output",
+    "test_source_items_fill_uses_selected_audio_track_and_original_offsets",
 }
 NODE_BROWSER = {"test_asr_presets_browser.mjs", "test_ass_canvas_raster.mjs", "test_shared_tooltip_browser.mjs"}
 NODE_TOOLS = {"test_ns_rewrite_scope.mjs", "test_refactor_layout_tools.mjs", "test_type_gate.mjs",

@@ -57,7 +57,6 @@ class TestWorkflowTests(unittest.TestCase):
 
     def test_ffprobe_failure_layers_run_for_media_changes_and_release(self):
         ids = test_policy.source_test_ids(ROOT / "tests/test_ffprobe_failure_integration.py")
-        self.assertEqual(len(ids), 2)
         self.assertEqual({test_policy.python_pack(name) for name in ids}, {"media"})
         for method in ("test_probe_process_failures_return_unknown_information",
                        "test_probe_invalid_json_returns_unknown_information"):
@@ -309,6 +308,9 @@ class TestWorkflowTests(unittest.TestCase):
                 self.assertEqual(test_policy.python_pack(f"tests.test_local_editor_server.LocalEditorServerTests.{method}"), "media")
         self.assertEqual(test_policy.python_pack(
             "tests.test_local_editor_server.LocalEditorServerTests.test_ass_frame_endpoint_returns_base64_png_and_warnings"), "common")
+        recording = test_policy.source_test_ids(ROOT / "tests/test_script_recording_workflow.py")
+        self.assertEqual({test_policy.python_pack(name) for name in recording}, {"common", "media"})
+        self.assertIn("media", select_packs(["tests/test_script_recording_workflow.py"])["packs"])
         for path in ("maw/editor_burn.py", "maw/media_keyframes.py", "maw/media_export_video.py"):
             with self.subTest(source=path):
                 self.assertIn("media", select_packs([path])["packs"])

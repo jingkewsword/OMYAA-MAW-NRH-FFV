@@ -7,10 +7,12 @@ import tempfile
 import threading
 import unittest
 import urllib.request
+import wave
 from pathlib import Path
 from unittest import mock
 
 from maw import media
+from maw.ffmpeg import media_duration_seconds
 from tests.compact_assertions import CompactContainerAssertions
 from tests.test_local_editor_server import server_editor
 
@@ -46,13 +48,26 @@ class FFprobeFailureIntegrationTests(CompactContainerAssertions, unittest.TestCa
         for command, returncode in self.failures:
             self.assertNotEqual(returncode, 0)
             self.assertIn(str(self.source), command)
-            streams.add(command[command.index("-select_streams") + 1])
+            if "-select_streams" in command:
+                streams.add(command[command.index("-select_streams") + 1])
         self.assertTrue({"v:0", "a"}.issubset(streams))
 
     def test_real_bad_file_probes_return_unknown_information(self):
         self.assertIsNone(media.probe_video_fps(self.source, ffprobe_path=self.ffprobe))
         self.assertIsNone(media.probe_audio_tracks(self.source, ffprobe_path=self.ffprobe))
+        self.assertIsNone(media_duration_seconds(self.source, ffprobe_path=self.ffprobe))
         self.assert_failed_audio_and_video_probes()
+        self.assertTrue(any("format=duration" in command for command, _ in self.failures))
+
+        # Positive control for the known WAV metadata used by binding fixtures.
+        known = self.root / "known.wav"
+        with wave.open(str(known), "wb") as stream:
+            stream.setparams((1, 2, 8000, 0, "NONE", "not compressed"))
+            stream.writeframes(b"\0\0" * 800)
+        self.assertEqual(media.probe_audio_tracks(known, ffprobe_path=self.ffprobe), [
+            {"audio_index": 0, "stream_index": 0, "codec": "pcm_s16le", "channels": 1,
+             "sample_rate": 8000, "language": "", "title": "", "default": False}])
+        self.assertAlmostEqual(media_duration_seconds(known, ffprobe_path=self.ffprobe), 0.1, places=3)
 
     def test_real_bad_file_can_load_and_save_after_probe_failure(self):
         project_path = self.root / "project.mosp"
