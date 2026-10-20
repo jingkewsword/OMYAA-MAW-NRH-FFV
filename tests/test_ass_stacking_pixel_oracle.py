@@ -64,6 +64,24 @@ class SparsePixelMetricsTests(unittest.TestCase):
                    "maxRowPainted": 0, "peak": 0, "glyphSha256": None}
             for role in ("main", "extension", "overlay")
         })
+        # Unequal black borders expose lost crop origins independently on X/Y.
+        shifted = Image.new("RGB", (51, 37))
+        shifted.paste(image, (13, 7))
+        actual = oracle.boxes(shifted, 2)
+        self.assertEqual(actual["main"], {
+            "box": [13, 6, 16, 11], "painted": 4,
+            "bands": [[6, 8], [10, 11]], "maxRowPainted": 2,
+            "peak": 255, "glyphSha256": hashlib.sha256(main_glyph).hexdigest(),
+        })
+        self.assertEqual(actual["extension"], {
+            "box": [12, 9, 13, 11], "painted": 2, "bands": [[9, 11]],
+            "maxRowPainted": 1, "peak": 240,
+            "glyphSha256": hashlib.sha256(bytes((0, 240, 0)) * 2).hexdigest(),
+        })
+        self.assertEqual(actual["overlay"], {
+            "box": None, "painted": 0, "bands": [],
+            "maxRowPainted": 0, "peak": 60, "glyphSha256": None,
+        })
 
 
 if __name__ == "__main__":

@@ -88,6 +88,10 @@ def paint_colours(image: Image.Image) -> dict:
 
 
 def boxes(image: Image.Image, padding: int = 0) -> dict:
+    # Black pixels contribute zero to every role's mask and peak. Exclude only
+    # that empty border, retaining faint pixels below the painted threshold.
+    bounds = image.getbbox() or (0, 0, 1, 1)
+    image = image.crop(bounds)
     channels = image.split()
     output = {}
     for name, index in (('main', 0), ('extension', 1), ('overlay', 2)):
@@ -105,18 +109,19 @@ def boxes(image: Image.Image, padding: int = 0) -> dict:
             row_mask = mask.crop((box[0], row, box[2], row + 1))
             max_row_painted = max(max_row_painted, count(row_mask))
             present = bool(row_mask.getbbox())
-            if present and (not bands or bands[-1][1] != row - padding):
-                bands.append([row - padding, row + 1 - padding])
+            if present and (not bands or bands[-1][1] != row + bounds[1] - padding):
+                bands.append([row + bounds[1] - padding, row + bounds[1] + 1 - padding])
             elif present:
-                bands[-1][1] = row + 1 - padding
+                bands[-1][1] = row + bounds[1] + 1 - padding
         output[name] = {
-            'box': [value - padding for value in box] if box else None,
+            'box': [value + bounds[index % 2] - padding for index, value in enumerate(box)] if box else None,
             'painted': count(mask),
             'bands': bands,
             'maxRowPainted': max_row_painted,
             'peak': max(ImageChops.multiply(channels[index], dominance).getextrema()),
             'glyphSha256': hashlib.sha256(
-                Image.composite(image, Image.new('RGB', image.size), mask).crop(box).tobytes()
+                Image.composite(image.crop(box), Image.new('RGB', (
+                    box[2] - box[0], box[3] - box[1])), mask.crop(box)).tobytes()
             ).hexdigest() if box else None,
         }
     return output
