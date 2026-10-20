@@ -113,6 +113,8 @@ CI 有独立选择、文档、业务、Windows 生命周期、完整浏览器分
 
 `.github/workflows/browser-gates.yml` 为合并与发布复用同一完整集合。四个独立 Linux runner 各运行一片，每片 2 workers、900s 执行期限；`fullyParallel=false` 保留文件隔离。增加 CI 机器可缩短墙钟关键路径，不意味着 CPU、总计 runner 时间或内存降低；四片案例数相近也不能证明耗时平衡，需以真实运行校准。
 
+Launcher 文件页面的无原生后端或注入后端旅程，在导航后通过 `tests/e2e/launcher-ready.mjs` 完成真实 `pywebviewready` 发现，再保留各自的配置/DOM 就绪检查。它只减少重复准备，不替换时钟、桥方法或操作期限。原生 1800ms 回退仍由 `launcher-interactions.spec.mjs` 的真实浏览器旅程和 `test_launcher_feedback_ui.mjs` 的启动/晚到事件契约负责；真实 Python 匹配取消照常执行。共享准备变更扩大到完整浏览器，不能只看一个叶子 spec。
+
 ```sh
 uv run --no-sync python scripts/test_workflow.py --stage merge --pack editor-e2e --browser-shard 1/4
 uv run --no-sync python scripts/browser_results.py --reports .artifacts/browser-shards --total 4

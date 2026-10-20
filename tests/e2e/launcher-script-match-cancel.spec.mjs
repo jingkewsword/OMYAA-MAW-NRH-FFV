@@ -1,3 +1,4 @@
+import { completeStaticLauncherDiscovery } from './launcher-ready.mjs';
 import { test, expect } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
@@ -59,6 +60,7 @@ async function realMatchBridge(page) {
 for (const group of ['plain', 'timed']) {
   test(`ordinary ${group} matching stops real computation without outputs and restarts`, async ({ page }) => {
     await page.goto(`file://${path.join(root, 'web/launcher/index.html')}`);
+    await completeStaticLauncherDiscovery(page);
     await page.waitForFunction(() => window.MAWLauncher?.config?.postprocessProviders?.length > 0);
     const backend = await realMatchBridge(page);
     try {
