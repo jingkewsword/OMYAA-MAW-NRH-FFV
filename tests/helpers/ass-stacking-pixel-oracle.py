@@ -65,6 +65,26 @@ def render(path: Path, target: Path, width: int, height: int, time_ms: int) -> t
     return Image.open(target).convert('RGB'), [line for line in log.splitlines() if 'fontselect:' in line]
 
 
+def render_series(path: Path, stem: Path, width: int, height: int,
+                  times: list[int]) -> list[str]:
+    # libass sees the exact millisecond clock; only the encoded output clock
+    # is reset afterwards. Each canvas is still rendered separately.
+    clock = '+'.join(f'eq(N,{index})*{time_ms}' for index, time_ms in enumerate(times))
+    command = [
+        'ffmpeg', '-hide_banner', '-loglevel', 'info', '-f', 'lavfi', '-i',
+        f'color=black:s={width}x{height}:r=100:d={len(times) / 100}', '-vf',
+        f"format=rgb24,settb=1/1000,setpts='{clock}',ass={path.name},setpts=N*10",
+        '-fps_mode', 'passthrough', '-frames:v', str(len(times)),
+        '-threads', '1', '-start_number', '0', '-y', f'{stem.name}-%d.png',
+    ]
+    result = subprocess.run(command, cwd=path.parent, capture_output=True, timeout=30, check=False)
+    log = result.stderr.decode('utf-8', errors='replace')
+    stem.with_suffix('.ffmpeg.log').write_text(log, encoding='utf-8', newline='\n')
+    if result.returncode:
+        raise RuntimeError(log[-2000:])
+    return [line for line in log.splitlines() if 'fontselect:' in line]
+
+
 def foreground(image: Image.Image) -> Image.Image:
     return ImageChops.difference(image, Image.new('RGB', image.size)).convert('L').point(
         lambda value: 255 if value > 8 else 0
@@ -76,6 +96,8 @@ def count(mask: Image.Image) -> int:
 
 
 def paint_colours(image: Image.Image) -> dict:
+    # Black cannot match either paint colour, including the tolerance below.
+    image = image.crop(image.getbbox() or (0, 0, 1, 1))
     result = {}
     for name, rgb in (('outline', (255, 153, 0)), ('shadow', (204, 0, 204))):
         mask = Image.new('L', image.size, 255)
@@ -127,18 +149,13 @@ def boxes(image: Image.Image, padding: int = 0) -> dict:
     return output
 
 
-def inspect(path: Path, time_ms: int, stem: Path, padding: int = 256) -> dict:
+def _prepare(path: Path, stem: Path, padding: int) -> tuple:
     source = path.read_text(encoding='utf-8')
     width = int(re.search(r'^PlayResX:\s*(\d+)', source, re.M)[1])
     height = int(re.search(r'^PlayResY:\s*(\d+)', source, re.M)[1])
-    native, fonts = render(path, stem.with_suffix('.png'), width, height, time_ms)
     padded_ass = stem.with_name(stem.name + '-guard.ass')
     guarded_source = translate_ass(source, padding)
     padded_ass.write_text(guarded_source, encoding='utf-8', newline='\n')
-    guard, guard_fonts = render(padded_ass, stem.with_name(stem.name + '-guard.png'),
-                   width + 2 * padding, height + 2 * padding, time_ms)
-    full_mask = foreground(guard)
-    inside = full_mask.crop((padding, padding, padding + width, padding + height))
     # Keep the native render, and compare viewport clipping on the same raster
     # surface: another frame size can change libass's subpixel antialiasing.
     if re.search(r'\\i?clip\(', guarded_source):
@@ -152,8 +169,12 @@ def inspect(path: Path, time_ms: int, stem: Path, padding: int = 256) -> dict:
         clipped_lines.append(line)
     viewport_ass = stem.with_name(stem.name + '-viewport.ass')
     viewport_ass.write_text('\n'.join(clipped_lines) + '\n', encoding='utf-8', newline='\n')
-    viewport, _ = render(viewport_ass, stem.with_name(stem.name + '-viewport.png'),
-                         width + 2 * padding, height + 2 * padding, time_ms)
+    return width, height, padded_ass, viewport_ass
+
+
+def _measure(native, guard, viewport, width, height, padding, fonts, guard_fonts) -> dict:
+    full_mask = foreground(guard)
+    inside = full_mask.crop((padding, padding, padding + width, padding + height))
     return {
         'width': width, 'height': height, 'tracks': boxes(guard, padding),
         'nativeTracks': boxes(native), 'outside': count(full_mask) - count(inside),
@@ -168,13 +189,50 @@ def inspect(path: Path, time_ms: int, stem: Path, padding: int = 256) -> dict:
     }
 
 
+def inspect(path: Path, time_ms: int, stem: Path, padding: int = 256) -> dict:
+    width, height, padded_ass, viewport_ass = _prepare(path, stem, padding)
+    native, fonts = render(path, stem.with_suffix('.png'), width, height, time_ms)
+    guard, guard_fonts = render(padded_ass, stem.with_name(stem.name + '-guard.png'),
+                                width + 2 * padding, height + 2 * padding, time_ms)
+    viewport, _ = render(viewport_ass, stem.with_name(stem.name + '-viewport.png'),
+                         width + 2 * padding, height + 2 * padding, time_ms)
+    return _measure(native, guard, viewport, width, height, padding, fonts, guard_fonts)
+
+
+def inspect_series(path: Path, times: list[int], stem: Path, padding: int = 256) -> list[dict]:
+    width, height, padded_ass, viewport_ass = _prepare(path, stem, padding)
+    # fontselect diagnostics belong to this real ASS sequence: libass caches
+    # selected faces across frames. Pixel metrics remain per timestamp.
+    fonts = render_series(path, stem, width, height, times)
+    guard_fonts = render_series(padded_ass, stem.with_name(stem.name + '-guard'),
+                                width + 2 * padding, height + 2 * padding, times)
+    render_series(viewport_ass, stem.with_name(stem.name + '-viewport'),
+                  width + 2 * padding, height + 2 * padding, times)
+    rows = []
+    for index in range(len(times)):
+        # Keep memory bounded to one timestamp's three images.
+        images = [Image.open(stem.with_name(f'{stem.name}{suffix}-{index}.png')).convert('RGB')
+                  for suffix in ('', '-guard', '-viewport')]
+        rows.append(_measure(*images, width, height, padding, fonts, guard_fonts))
+        for image in images:
+            image.close()
+    return rows
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('ass', type=Path)
     parser.add_argument('time_ms', type=int)
     parser.add_argument('output', type=Path)
+    parser.add_argument('--times', type=int, nargs='+', help='Render an ordered sequence of exact millisecond samples')
     args = parser.parse_args()
-    print(json.dumps(inspect(args.ass.resolve(), args.time_ms, args.output.resolve())))
+    if args.times is not None:
+        if args.times != sorted(set(args.times)) or args.times[0] < 0 or args.time_ms not in args.times:
+            parser.error('--times must be unique, increasing, nonnegative and include time_ms')
+        result = inspect_series(args.ass.resolve(), args.times, args.output.resolve())
+    else:
+        result = inspect(args.ass.resolve(), args.time_ms, args.output.resolve())
+    print(json.dumps(result))
 
 
 if __name__ == '__main__':

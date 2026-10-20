@@ -82,6 +82,17 @@ class SparsePixelMetricsTests(unittest.TestCase):
             "box": None, "painted": 0, "bands": [],
             "maxRowPainted": 0, "peak": 60, "glyphSha256": None,
         })
+        # Known paint colours, including the inclusive 12 / excluded 13 edge.
+        colours = Image.new("RGB", (23, 17))
+        for point, colour in (
+            ((9, 4), (255, 153, 0)), ((10, 4), (243, 141, 12)),
+            ((11, 4), (242, 153, 0)),
+            ((9, 5), (204, 0, 204)), ((10, 5), (192, 12, 192)),
+            ((11, 5), (191, 0, 204)), ((20, 15), (1, 1, 1)),
+        ):
+            colours.putpixel(point, colour)
+        self.assertEqual(oracle.paint_colours(colours), {"outline": 2, "shadow": 2})
+        self.assertEqual(oracle.paint_colours(Image.new("RGB", (23, 17))), {"outline": 0, "shadow": 0})
 
 
 if __name__ == "__main__":
