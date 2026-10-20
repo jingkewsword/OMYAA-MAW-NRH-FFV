@@ -102,8 +102,8 @@ def local_runtime_inventory(model_cache_root: str | Path | None = None) -> dict[
 
     The inventory intentionally derives its package list from ``LOCAL.spec`` so
     that the settings UI and the runtime readiness check cannot drift apart.
-    ``runtime.json`` may be missing or stale; those values are returned as-is
-    so the UI can explain why a runtime needs repair.
+    Manifest metadata may be missing or stale; the installed Python version
+    is read from the current interpreter rather than the manifest.
     """
     root = LOCAL.resolve_root()
     manifest = read_runtime_manifest(root)
@@ -124,7 +124,7 @@ def local_runtime_inventory(model_cache_root: str | Path | None = None) -> dict[
         "runtimeVersionExpected": LOCAL.spec.runtime_version,
         "runtimeVersionInstalled": manifest.runtime_version,
         "pythonVersionExpected": LOCAL.spec.python_version,
-        "pythonVersionInstalled": manifest.python_version,
+        "pythonVersionInstalled": LOCAL.installed_python_version(root),
         "manifestStatus": manifest.status,
         "installedAt": manifest.installed_at,
         "components": components,

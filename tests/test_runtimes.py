@@ -11,6 +11,7 @@ from tests.compact_assertions import CompactContainerAssertions
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -20,7 +21,7 @@ from unittest import mock
 
 import maw.runtimes as runtimes  # noqa: F401  (intentionally imported for registry coverage)
 import maw.runtimes.base as base_mod
-from maw.runtime_manifest import STATUS_INSTALLING, STATUS_READY, write_runtime_manifest
+from maw.runtime_manifest import STATUS_INSTALLING, STATUS_READY, read_runtime_manifest, write_runtime_manifest
 from maw.runtimes import LOCAL, MOSS, OCR, get_runtime
 from maw.runtimes.base import ManagedRuntime, ManagedRuntimeError, RuntimeSpec
 from maw.runtimes.local_spec import LOCAL_SPEC, PYTORCH_INDEX, LocalRuntimeError
@@ -510,9 +511,13 @@ class VenvRuntimeInstallTests(unittest.TestCase):
             def forbid_bootstrap(_filename: str) -> Path:
                 raise AssertionError("unix venv must not touch embedded bootstrap assets")
 
-            # 版本探针（subprocess.run）直接返回成功；未 mock 任何 bootstrap 资产。
-            with mock.patch("maw.runtimes.base.shutil.which", return_value="python3"):
-                with mock.patch("maw.runtimes.base.subprocess.run", return_value=unittest.mock.MagicMock(returncode=0)):
+            # 默认 python3 是 3.14；另装的 python3.11 与冻结依赖匹配。
+            def version_probe(command, **_kwargs):
+                version = "3.14.0" if command[0] == "python3" else "3.11.9"
+                return subprocess.CompletedProcess(command, 0, stdout=version + "\n")
+
+            with mock.patch("maw.runtimes.base.shutil.which", side_effect=lambda name: name):
+                with mock.patch("maw.runtimes.base.subprocess.run", side_effect=version_probe) as probe:
                     with mock.patch("maw.runtimes.base._find_bootstrap_asset", side_effect=forbid_bootstrap):
                         with mock.patch.object(LOCAL, "requirements_path", return_value=requirements_txt):
                             with mock.patch("maw.runtimes.base._has_cuda", return_value=True):
@@ -524,8 +529,9 @@ class VenvRuntimeInstallTests(unittest.TestCase):
             install_command = calls[1]
             verify_command = calls[2]
             self.assertTrue(status.ready)
-            # venv 创建：宿主 python3 -m venv <root>（root 不存在，无 --clear）
-            self.assertEqual(create_command[:3], ["python3", "-m", "venv"])
+            self.assertEqual(create_command[:3], ["python3.11", "-m", "venv"])
+            self.assertFalse(any(call.args[0][0] == "python3" for call in probe.call_args_list))
+            self.assertEqual(read_runtime_manifest(canonical_root).python_version, "3.11.9")
             self.assertTrue(any(str(canonical_root) in str(arg) for arg in create_command))
             self.assertNotIn("--clear", create_command)
             # pip 直装 venv：bin/python -m pip install -r <主清单>，无 --target
@@ -576,7 +582,7 @@ class VenvRuntimeInstallTests(unittest.TestCase):
                 return cpu_txt if cpu else requirements_txt
 
             with mock.patch("maw.runtimes.base.shutil.which", return_value="python3"):
-                with mock.patch("maw.runtimes.base.subprocess.run", return_value=unittest.mock.MagicMock(returncode=0)):
+                with mock.patch("maw.runtimes.base.subprocess.run", return_value=subprocess.CompletedProcess([], 0, stdout="3.11.9\n")):
                     with mock.patch.object(LOCAL, "requirements_path", side_effect=fake_requirements_path):
                         with mock.patch("maw.runtimes.base._has_cuda", return_value=False):
                             with mock.patch("maw.runtimes.base.pick_fastest_mirror", return_value="https://pypi.org/simple"):
@@ -588,6 +594,151 @@ class VenvRuntimeInstallTests(unittest.TestCase):
             # venv 下同样走 CPU 清单前置：-r requirements-local-cpu.txt、无 cu130 extra index
             self.assertTrue(any(str(cpu_txt) in str(arg) for arg in install_command))
             self.assertNotIn("extra-index-url", install_command)
+
+    def test_default_python_is_used_when_its_actual_minor_matches(self) -> None:
+        with (
+            mock.patch("maw.runtimes.base.shutil.which", side_effect=lambda name: "python3" if name == "python3" else None),
+            mock.patch("maw.runtimes.base.subprocess.run", return_value=subprocess.CompletedProcess([], 0, stdout="3.11.12\n")),
+        ):
+            self.assertEqual(LOCAL._select_host_python(), "python3")
+
+    def test_wrong_default_versions_stop_all_runtimes_before_creation(self) -> None:
+        for platform in ("linux", "darwin"):
+            for runtime in (LOCAL, OCR, MOSS):
+                for version in ("3.10.9", "3.12.0", "3.14.0"):
+                    with self.subTest(platform=platform, runtime=runtime.spec.key, version=version), tempfile.TemporaryDirectory() as temp:
+                        root = Path(temp) / "runtime"
+                        with (
+                            mock.patch("maw.runtimes.base.sys.platform", platform),
+                            mock.patch("maw.runtimes.base.shutil.which", side_effect=lambda name: "python3" if name == "python3" else None),
+                            mock.patch("maw.runtimes.base.subprocess.run", return_value=subprocess.CompletedProcess([], 0, stdout=version + "\n")),
+                            mock.patch("maw.runtimes.base._run_process") as run,
+                            mock.patch("maw.runtimes.base.pick_fastest_mirror") as mirror,
+                        ):
+                            with self.assertRaises(ManagedRuntimeError) as error:
+                                runtime.install(runtime_root=root)
+                        self.assertIn(version, str(error.exception))
+                        self.assertIn("python3.11", str(error.exception))
+                        run.assert_not_called()
+                        mirror.assert_not_called()
+                        self.assertFalse(root.exists())
+
+    def test_failed_preflight_does_not_clear_existing_runtime_or_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "runtime"
+            python = root / "bin" / "python"
+            python.parent.mkdir(parents=True)
+            python.write_bytes(b"existing interpreter")
+            write_runtime_manifest(root, status=STATUS_READY,
+                                   runtime_version=LOCAL.spec.runtime_version, python_version="3.11")
+            manifest = (root / "runtime.json").read_bytes()
+            with (
+                mock.patch("maw.runtimes.base.shutil.which", return_value="python3"),
+                mock.patch("maw.runtimes.base.subprocess.run", return_value=subprocess.CompletedProcess([], 0, stdout="3.14.0\n")),
+                mock.patch("maw.runtimes.base._run_process") as run,
+            ):
+                with self.assertRaises(ManagedRuntimeError):
+                    LOCAL.install(runtime_root=root, repair=True)
+            run.assert_not_called()
+            self.assertEqual(python.read_bytes(), b"existing interpreter")
+            self.assertEqual((root / "runtime.json").read_bytes(), manifest)
+
+    def test_wrong_created_venv_stops_before_dependencies_and_records_actual_version(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = (Path(temp) / "runtime").resolve()
+
+            def create_venv(command, **_kwargs):
+                self.assertEqual(command[1:3], ["-m", "venv"])
+                python = root / "bin" / "python"
+                python.parent.mkdir(parents=True)
+                python.write_bytes(b"unexpected existing interpreter")
+                return 0
+
+            def probe(command, **_kwargs):
+                version = "3.11.9" if command[0] == "python3.11" else "3.14.0"
+                return subprocess.CompletedProcess(command, 0, stdout=version + "\n")
+
+            with (
+                mock.patch("maw.runtimes.base.shutil.which", side_effect=lambda name: name),
+                mock.patch("maw.runtimes.base.subprocess.run", side_effect=probe),
+                mock.patch("maw.runtimes.base._run_process", side_effect=create_venv) as run,
+                mock.patch("maw.runtimes.base.pick_fastest_mirror") as mirror,
+            ):
+                with self.assertRaisesRegex(ManagedRuntimeError, "实际 Python 版本为 3.14.0"):
+                    LOCAL.install(runtime_root=root)
+            self.assertEqual(run.call_count, 1)
+            mirror.assert_not_called()
+            self.assertTrue(LOCAL.mark_install_aborted(root))
+            self.assertEqual(read_runtime_manifest(root).python_version, "3.14.0")
+
+    def test_inventory_and_ready_check_ignore_legacy_fixed_python_version(self) -> None:
+        from maw.local_runtime import local_runtime_inventory
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "runtime"
+            python = root / "bin" / "python"
+            python.parent.mkdir(parents=True)
+            python.write_bytes(b"python")
+            write_runtime_manifest(root, status=STATUS_READY,
+                                   runtime_version=LOCAL.spec.runtime_version, python_version="3.11")
+            for version in ("3.14.0", ""):
+                with (
+                    self.subTest(version=version),
+                    mock.patch.dict(os.environ, {"MAW_LOCAL_RUNTIME_ROOT": str(root)}),
+                    mock.patch("maw.runtimes.base.subprocess.run", return_value=subprocess.CompletedProcess([], 0, stdout=version)),
+                ):
+                    inventory = local_runtime_inventory()
+                    self.assertEqual(inventory["pythonVersionInstalled"], version)
+                    self.assertEqual(inventory["status"], "broken")
+                    self.assertEqual(inventory["pythonVersionExpected"], "3.11")
+
+    def test_dependency_failure_keeps_measured_python_version(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "runtime"
+            requirements = Path(temp) / "requirements-local.txt"
+            requirements.write_text("jieba==0.42.1\n", encoding="utf-8")
+
+            def create_venv(*_args, **_kwargs):
+                self.assertEqual(read_runtime_manifest(root).python_version, "")
+                python = root / "bin" / "python"
+                python.parent.mkdir(parents=True)
+                python.write_bytes(b"python")
+
+            with (
+                mock.patch("maw.runtimes.base.shutil.which", return_value="python3.11"),
+                mock.patch("maw.runtimes.base.subprocess.run", return_value=subprocess.CompletedProcess([], 0, stdout="3.11.9\n")),
+                mock.patch.object(LOCAL, "_prepare_host_venv", side_effect=create_venv),
+                mock.patch.object(LOCAL, "requirements_path", return_value=requirements),
+                mock.patch("maw.runtimes.base.pick_fastest_mirror", return_value="https://pypi.org/simple"),
+                mock.patch("maw.runtimes.base.probe_index_reachable", return_value=True),
+                mock.patch("maw.runtimes.base._has_cuda", return_value=True),
+                mock.patch("maw.runtimes.base._run_process", side_effect=LocalRuntimeError("dependency failure")),
+            ):
+                with self.assertRaisesRegex(LocalRuntimeError, "dependency failure"):
+                    LOCAL.install(runtime_root=root)
+            self.assertTrue(LOCAL.mark_install_aborted(root))
+            self.assertEqual(read_runtime_manifest(root).python_version, "3.11.9")
+
+
+class RuntimePythonVersionTests(unittest.TestCase):
+    def test_real_interpreter_version_probe(self) -> None:
+        self.assertEqual(LOCAL._probe_python_version(sys.executable), ".".join(map(str, sys.version_info[:3])))
+
+    def test_version_probe_failures_are_unknown(self) -> None:
+        for failure in (OSError("unavailable"), subprocess.TimeoutExpired("python", 5)):
+            with self.subTest(failure=type(failure).__name__), mock.patch("maw.runtimes.base.subprocess.run", side_effect=failure):
+                self.assertEqual(LOCAL._probe_python_version("python"), "")
+        for code, output in ((1, "3.11.9"), (0, "not a version"), (0, "3.11.9\n3.14.0")):
+            with self.subTest(code=code, output=output), mock.patch("maw.runtimes.base.subprocess.run", return_value=subprocess.CompletedProcess([], code, stdout=output)):
+                self.assertEqual(LOCAL._probe_python_version("python"), "")
+
+    def test_aborted_install_does_not_replace_unknown_version_with_expected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            write_runtime_manifest(root, status=STATUS_INSTALLING,
+                                   runtime_version=LOCAL.spec.runtime_version, python_version="")
+            self.assertTrue(LOCAL.mark_install_aborted(root))
+            self.assertEqual(read_runtime_manifest(root).python_version, "")
 
 
 class AutoFreezeRequirementsTests(CompactContainerAssertions, unittest.TestCase):
@@ -800,6 +951,18 @@ class RuntimeHostEnvironmentTests(unittest.TestCase):
 
         self.assertNotIn("LD_LIBRARY_PATH", env)
         self.assertEqual(env["MAW_TEST"], "preserved")
+
+    def test_version_probe_uses_isolated_python_and_host_libraries(self) -> None:
+        parent_env = {"LD_LIBRARY_PATH": "/app/_internal"}
+        with (
+            mock.patch.object(sys, "platform", "linux"),
+            mock.patch.object(sys, "frozen", True, create=True),
+            mock.patch.dict(os.environ, self._home_preserving_env(parent_env), clear=True),
+            mock.patch("maw.runtimes.base.subprocess.run", return_value=subprocess.CompletedProcess([], 0, stdout="3.11.9\n")) as probe,
+        ):
+            self.assertEqual(LOCAL._probe_python_version("python3.11"), "3.11.9")
+            self.assertNotIn("LD_LIBRARY_PATH", probe.call_args.kwargs["env"])
+            self.assertEqual(probe.call_args.args[0][1:3], ["-I", "-c"])
 
     def test_frozen_linux_restores_recorded_original_library_path(self) -> None:
         parent_env = {
