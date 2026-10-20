@@ -4,7 +4,9 @@
 
 ## 日常开发
 
-`scripts/run_tests.py --parallel N` 保留上游按文件并行的全量发现入口、发现错误传播和 bundle 跨进程构建锁。与 `--pack`、`--required` 或 `--report` 一起使用时会明确提示并回退串行，继续执行原分组、skip 拒绝及逐例报告。现行 required 门禁仍按下述分层入口执行；尚未为各组新增并行调度协议。
+`scripts/run_tests.py --parallel N` 复用上游按文件并行、发现错误传播和 bundle 跨进程锁，支持 `--pack`、`--required` 与 `--report`。串并行共用结果格式和门禁判定：保留有序用例 ID、执行数、失败/错误、skip 原因及平台不适用判定、预期失败和意外成功。并行报告另含每文件执行耗时与 worker PID，便于查剩余热点；失败全文默认存到 JSON 报告旁的 `.log`，显式 `--full-log` 仍优先，终端只打印压缩文本。
+
+合并/发布的 common Python 组使用两个 worker，其余组保持既有并发，避免同时放大媒体编码成本。显式 targets 与普通发现中的测试子包继续明确回退串行，保留目标粒度、包初始化与 `load_tests`；分组仍按原源码预选和实际加载后的用例归属筛选，不按类来源丢弃导入/动态用例。依赖 skip 和 expected failure 在 required 下仍失败，既有平台不适用规则不变。
 
 准备环境一次：`uv sync --group test --group dev`、`pnpm install --frozen-lockfile`。真实媒体组需要 PATH 中的 FFmpeg/ffprobe，浏览器组需要 `pnpm exec playwright install chromium`。test 组只有 NumPy、Pillow、soundfile，不下载 ASR 模型或完整 local/OCR 运行时。
 

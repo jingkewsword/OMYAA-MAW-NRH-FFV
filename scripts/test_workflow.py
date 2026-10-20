@@ -76,7 +76,8 @@ def commands(packs: list[str], report_dir: Path, *, dev: bool = False, component
                                            "tests.test_release_site", "tests.test_release_publication"], 120
         if pack in PYTHON_PACKS:
             targets = list(CHECKLIST_PYTHON) if pack == "tools" and tools_scope == "checklist" else ["--pack", pack]
-            yield f"python-{pack}", [python, "scripts/run_tests.py", *targets, "--required",
+            parallel = ["--parallel", "2"] if pack == "common" else []
+            yield f"python-{pack}", [python, "scripts/run_tests.py", *targets, *parallel, "--required",
                    "--report", str(report_dir / f"python-{pack}.json")], 300 if pack == "long-media" else 240
         if pack in {"common", "browser", "lifecycle", "tools"}:
             targets = [str(p.relative_to(ROOT)) for p in sorted((ROOT / "tests").glob("*.mjs")) if node_pack(p.name) == pack]

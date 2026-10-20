@@ -137,23 +137,59 @@ def cases(suite):
             yield entry
 
 
-def pack_suite(pack: str):
+def pack_paths(pack: str):
     """Inspect source before imports; unrelated tooling probes never run here."""
-    loader = unittest.TestLoader()
-    selected = unittest.TestSuite()
     for path in sorted((ROOT / "tests").glob("test_*.py")):
         names = source_test_ids(path)
         if names and not any(python_pack(name) == pack for name in names):
             continue
-        loaded = loader.loadTestsFromName(f"tests.{path.stem}")
-        selected.addTests(case for case in cases(loaded)
-                          if python_pack(case.id()) == pack or isinstance(case, unittest.loader._FailedTest))
+        yield path
+
+
+def filter_pack(suite, pack):
+    return unittest.TestSuite(case for case in cases(suite)
+                              if python_pack(case.id()) == pack or isinstance(case, unittest.loader._FailedTest))
+
+
+def pack_suite(pack: str):
+    loader = unittest.TestLoader()
+    selected = unittest.TestSuite()
+    for path in pack_paths(pack):
+        selected.addTests(filter_pack(loader.loadTestsFromName(f"tests.{path.stem}"), pack))
     return selected
 
 
-def _write_full_log(full_text: str, explicit_log: str) -> Path:
+def result_report(result, selected_ids):
+    return {"selected_ids": selected_ids, "run": result.testsRun,
+            "failures": len(result.failures), "errors": len(result.errors),
+            "skips": [{"id": test.id(), "reason": reason,
+                       "platform_not_applicable": allowed_platform_skip(test.id(), reason)}
+                      for test, reason in result.skipped],
+            "expected_failures": len(result.expectedFailures),
+            "unexpected_successes": len(result.unexpectedSuccesses)}
+
+
+def report_code(report, required):
+    return int(bool(report["failures"] or report["errors"] or report["unexpected_successes"]
+                    or required and (report["expected_failures"]
+                                     or any(not skip["platform_not_applicable"] for skip in report["skips"]))))
+
+
+def write_report(args, report):
+    if args.report:
+        args.report.parent.mkdir(parents=True, exist_ok=True)
+        args.report.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    if args.required and any(not skip["platform_not_applicable"] for skip in report["skips"]):
+        print("[run_tests] required gate failed: unsupported skips; inspect report")
+    if args.required and report["expected_failures"]:
+        print("[run_tests] required gate failed: expected failures remain unverified")
+
+
+def _write_full_log(full_text: str, explicit_log: str, report: Path | None = None) -> Path:
     if explicit_log:
         log_path = Path(explicit_log)
+    elif report:
+        log_path = report.with_suffix('.log')
     else:
         stamp = time.strftime("%Y%m%d-%H%M%S")
         log_path = Path(tempfile.gettempdir()) / f"maw-tests-{stamp}.log"
@@ -200,7 +236,9 @@ def _run_one_file_worker(payload: dict) -> dict:
         top_level = discovery_root
     else:
         top_level = target_path.parent
-    module_name = ".".join(target_path.relative_to(top_level).with_suffix("").parts)
+    if payload.get("module"):
+        top_level = ROOT
+    module_name = payload.get("module") or ".".join(target_path.relative_to(top_level).with_suffix("").parts)
     loaded = sys.modules.get(module_name)
     if Path(getattr(loaded, "__file__", "")).resolve() != target_path:
         sys.modules.pop(module_name, None)
@@ -214,11 +252,14 @@ def _run_one_file_worker(payload: dict) -> dict:
     try:
         module = importlib.import_module(module_name)
         suite = loader.loadTestsFromModule(module, pattern=payload.get("pattern", target_path.name))
+        if payload.get("pack"):
+            suite = filter_pack(suite, payload["pack"])
     except unittest.SkipTest as error:
         suite = unittest.loader._make_skipped_test(module_name, error, unittest.TestSuite)
     except BaseException as error:  # import-time SystemExit(0) must not exit the parent successfully
         suite = unittest.TestSuite([unittest.loader._FailedTest(module_name, error)])
     buffer = _CapturedStream()
+    selected_ids = [case.id() for case in cases(suite)]
     runner = unittest.TextTestRunner(
         stream=buffer,
         verbosity=0,
@@ -245,7 +286,9 @@ def _run_one_file_worker(payload: dict) -> dict:
             fd_output = fd_capture.read().decode("utf-8", errors="replace")
     elapsed = time.perf_counter() - started
     return {
+        **result_report(result, selected_ids),
         "file": payload["file"],
+        "pid": os.getpid(),
         "tests": result.testsRun,
         "errors": len(result.errors),
         "failures": len(result.failures),
@@ -261,14 +304,14 @@ def _run_parallel(args) -> int:
     from concurrent.futures import ProcessPoolExecutor, as_completed
 
     # 相对路径在 worker 里 os.chdir(ROOT) 后语义会变：主进程先解析为绝对路径
-    start_dir = str(Path(args.start_dir).resolve())
+    start_dir = str(ROOT / "tests" if args.pack else Path(args.start_dir).resolve())
     # Package __init__ and load_tests hooks control standard discovery, including
     # errors in packages without test_*.py files. File sharding cannot preserve
     # those hooks, so use the unchanged serial path whenever subpackages exist.
-    if any(path.parent != Path(start_dir) for path in Path(start_dir).rglob("__init__.py")):
+    if not args.pack and any(path.parent != Path(start_dir) for path in Path(start_dir).rglob("__init__.py")):
         print("[run_tests] 发现测试子包，为保留包初始化与 load_tests 语义，本次回退串行。")
         return _run_serial(args)
-    files = sorted(
+    files = [path.name for path in pack_paths(args.pack)] if args.pack else sorted(
         str(path.relative_to(start_dir))
         for path in Path(start_dir).glob(args.pattern)
         if path.is_file()
@@ -286,6 +329,7 @@ def _run_parallel(args) -> int:
             "pattern": args.pattern,
             "max_chars": args.max_chars,
             "max_line": args.max_line,
+            **({"pack": args.pack, "module": f"tests.{Path(name).stem}"} if args.pack else {}),
         }
         for name in files
     ]
@@ -313,6 +357,7 @@ def _run_parallel(args) -> int:
     wall_start = time.perf_counter()
     total_tests = total_skipped = 0
     failures: list[dict] = []
+    outcomes = {}
     completed = 0
     with ProcessPoolExecutor(max_workers=workers) as pool:
         futures = {pool.submit(_run_one_file_worker, payload): payload for payload in payloads}
@@ -327,16 +372,19 @@ def _run_parallel(args) -> int:
                     "skipped": 0, "seconds": 0.0,
                     "full_text": f"worker crashed: {error!r}",
                     "test_output": "", "success": False,
+                    "selected_ids": [], "run": 0, "skips": [],
+                    "expected_failures": 0, "unexpected_successes": 0,
                 }
+            outcomes[payload["file"]] = outcome
             total_tests += outcome["tests"]
             total_skipped += outcome["skipped"]
             status = "OK"
             # 与串行 TextTestResult.wasSuccessful() 保持一致；包含 unexpectedSuccesses
-            if not outcome["success"]:
+            if not outcome["success"] or report_code(outcome, args.required):
                 if outcome["failures"] or outcome["errors"]:
                     status = f"FAIL(f={outcome['failures']} e={outcome['errors']})"
                 else:
-                    status = "FAIL(unexpected success)"
+                    status = "FAIL(required or unexpected success)"
                 failures.append(outcome)
             print(
                 f"[{completed:>3}/{len(payloads)}] {outcome['file']:<44}"
@@ -345,6 +393,16 @@ def _run_parallel(args) -> int:
             )
 
     wall = time.perf_counter() - wall_start
+    ordered = [outcomes[payload["file"]] for payload in payloads]
+    report = {"selected_ids": [identity for item in ordered for identity in item["selected_ids"]],
+              **{key: sum(item[key] for item in ordered) for key in
+                 ("run", "failures", "errors", "expected_failures", "unexpected_successes")},
+              "skips": [skip for item in ordered for skip in item["skips"]],
+              "mode": "parallel", "workers": workers, "wall_seconds": wall,
+              "files": [{key: value for key, value in item.items()
+                         if key not in {"full_text", "test_output"}} for item in ordered]}
+    report["exit_code"] = int(bool(failures or not total_tests))
+    write_report(args, report)
     print(
         f"\n[run_tests] 并行完成：{total_tests} tests"
         f"（skipped {total_skipped}），wall {wall:.1f}s，workers {workers}"
@@ -360,16 +418,18 @@ def _run_parallel(args) -> int:
             )
             for item in failures
         )
-        log_path = _write_full_log(combined, args.full_log)
+        log_path = _write_full_log(combined, args.full_log, args.report)
+        print(compact_text(combined))
         print(
             f"[run_tests] {len(failures)} 个文件失败；失败输出已压缩，"
             f"未截断文本：{log_path}"
         )
         return 1
-    return 0
+    return report["exit_code"]
 
 
 def _run_serial(args) -> int:
+    started = time.perf_counter()
     suite = pack_suite(args.pack) if args.pack else build_suite(args.targets, args.start_dir, args.pattern)
     selected_ids = [case.id() for case in cases(suite)]
     if not selected_ids:
@@ -383,27 +443,16 @@ def _run_serial(args) -> int:
     result = cast(CompactTextTestResult, runner.run(suite))
 
     if result.full_text.strip():
-        log_path = _write_full_log(result.full_text, args.full_log)
+        log_path = _write_full_log(result.full_text, args.full_log, args.report)
         print(
             f"[run_tests] 失败输出已压缩（上限 {args.max_chars} 字符 / 单行 {args.max_line}）；"
             f"未截断文本：{log_path}"
         )
 
-    skips = [{"id": test.id(), "reason": reason,
-              "platform_not_applicable": allowed_platform_skip(test.id(), reason)}
-             for test, reason in result.skipped]
-    required_skips = [skip for skip in skips if not skip["platform_not_applicable"]]
-    code = 0 if result.wasSuccessful() and not (args.required and (required_skips or result.expectedFailures)) else 1
-    if args.report:
-        args.report.parent.mkdir(parents=True, exist_ok=True)
-        args.report.write_text(json.dumps({"selected_ids": selected_ids, "run": result.testsRun,
-            "failures": len(result.failures), "errors": len(result.errors), "skips": skips,
-            "expected_failures": len(result.expectedFailures),
-            "exit_code": code}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    if args.required and required_skips:
-        print(f"[run_tests] required gate failed: {len(required_skips)} unsupported skips; inspect report")
-    if args.required and result.expectedFailures:
-        print("[run_tests] required gate failed: expected failures remain unverified")
+    report = result_report(result, selected_ids)
+    code = report_code(report, args.required)
+    report.update(exit_code=code, mode="serial", workers=1, wall_seconds=time.perf_counter() - started)
+    write_report(args, report)
     return code
 
 
@@ -427,8 +476,8 @@ def main(argv=None) -> int:
         default=0,
         metavar="N",
         help=(
-            "按文件并行跑（N 个 worker 进程）；仅在无 targets 的平铺发现模式下生效，"
-            "含测试子包时回退串行以保留包初始化与 load_tests；分组/required/报告模式保持串行。"
+            "按文件并行跑（N 个 worker 进程），不拆分显式 targets；"
+            "支持分组/required/报告；普通发现含测试子包时回退串行以保留包初始化与 load_tests。"
             "bundle 产物缺失时跨进程锁保证只自动构建一次，但首个触发构建的 worker"
             "会被同步拖慢；新建 worktree/clone 建议先 pnpm install --frozen-lockfile"
             " && pnpm run build"
@@ -444,13 +493,11 @@ def main(argv=None) -> int:
         parser.error("--pack 与显式 targets 不能混用")
 
     if args.parallel > 1:
-        if args.pack or args.required or args.report:
-            print("[run_tests] 分组、required 或报告模式本次回退串行，保留原门禁与报告语义。")
-        elif not args.targets:
+        if not args.targets:
             return _run_parallel(args)
 
-    if args.parallel > 1 and args.targets and not (args.pack or args.required or args.report):
-        print("[run_tests] --parallel 仅支持无 targets 的全量发现模式，本次回退串行。")
+    if args.parallel > 1 and args.targets:
+        print("[run_tests] --parallel 不拆分显式 targets，本次回退串行。")
 
     return _run_serial(args)
 

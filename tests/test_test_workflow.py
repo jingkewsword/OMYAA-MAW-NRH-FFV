@@ -357,6 +357,11 @@ class TestWorkflowTests(unittest.TestCase):
         self.assertEqual(set(discovered), set(assigned), "pack routing must not drop inherited/dynamic tests")
 
     def test_required_skip_fails_instead_of_green(self):
+        command = next(cmd for name, cmd, _ in test_workflow.commands(['common'], ROOT / '.artifacts')
+                       if name == 'python-common')
+        self.assertEqual(command[command.index('--parallel') + 1], '2')
+        self.assertIn('--required', command)
+        self.assertIn('--report', command)
         class MissingDependency(unittest.TestCase):
             def test_dependency(self):
                 self.skipTest("numpy is required")
@@ -365,11 +370,10 @@ class TestWorkflowTests(unittest.TestCase):
                 self.assertEqual(run_tests.main(["--required"]), 1)
                 self.assertEqual(run_tests.main([]), 0)
                 with tempfile.TemporaryDirectory() as directory, \
-                        patch.object(run_tests, "_run_parallel", side_effect=AssertionError("required must keep its gate")), \
                         patch.object(run_tests, "pack_suite", side_effect=lambda *_: unittest.defaultTestLoader.loadTestsFromTestCase(MissingDependency)):
                     report = Path(directory) / "required.json"
                     for selection in ([], ["--pack", "common"]):
-                        self.assertEqual(run_tests.main(["--required", "--parallel", "2", "--report", str(report), *selection]), 1)
+                        self.assertEqual(run_tests.main(["--required", "--report", str(report), *selection]), 1)
                         result = json.loads(report.read_text(encoding="utf-8"))
                         self.assertEqual(result["exit_code"], 1)
                         self.assertFalse(result["skips"][0]["platform_not_applicable"])
