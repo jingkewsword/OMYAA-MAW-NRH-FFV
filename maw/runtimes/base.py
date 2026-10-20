@@ -255,6 +255,58 @@ class ManagedRuntime:
             return Path(sys.executable).resolve()
         return self.python_path(root)
 
+    def installed_python_version(self, root: str | Path | None = None) -> str:
+        """Read the interpreter's actual version; an absent/unreadable one is unknown."""
+        target = self.resolve_root(root)
+        if not target.is_dir():
+            return ""
+        python = self.interpreter(target)
+        if not python.is_file():
+            return ""
+        if not getattr(sys, "frozen", False):
+            return ".".join(map(str, sys.version_info[:3]))
+        return self._probe_python_version(str(python))
+
+    def _probe_python_version(self, python: str) -> str:
+        try:
+            probe = subprocess.run(
+                [python, "-I", "-c", "import sys; print('.'.join(map(str, sys.version_info[:3])))"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=5,
+                env=restore_host_library_path(dict(os.environ)),
+                **process_group_kwargs(),
+            )
+        except (OSError, subprocess.SubprocessError):
+            return ""
+        version = probe.stdout.strip()
+        return version if probe.returncode == 0 and re.fullmatch(r"\d+\.\d+\.\d+", version) else ""
+
+    def _python_version_matches(self, version: str) -> bool:
+        return version.rsplit(".", 1)[0] == self.spec.python_version
+
+    def _select_host_python(self) -> str:
+        """Use the declared minor version for the bundled frozen requirements."""
+        expected = self.spec.python_version
+        detected: list[str] = []
+        seen: set[str] = set()
+        for name in (f"python{expected}", "python3"):
+            host = shutil.which(name)
+            if host is None or host in seen:
+                continue
+            seen.add(host)
+            version = self._probe_python_version(host)
+            if self._python_version_matches(version):
+                return host
+            detected.append(f"{name}: {version or '无法检测'}")
+        detail = f"检测到 {'；'.join(detected)}。" if detected else ""
+        raise self._error(
+            f"未找到匹配的宿主 python3。{self.spec.message_prefix}的冻结依赖需要 Python {expected}.x。"
+            f"{detail}请安装 python{expected}（含 venv 支持）后重试；无需更改系统默认 Python。"
+        )
+
     def site_packages(self, root: str | Path | None = None) -> Path:
         target = self.resolve_root(root) if root is None else Path(root)
         if _uses_host_venv():
@@ -365,6 +417,15 @@ class ManagedRuntime:
                 manifest.runtime_version or self.spec.runtime_version,
                 model_cache=model_cache,
             )
+        if _uses_host_venv():
+            version = self.installed_python_version(root)
+            if not self._python_version_matches(version):
+                return self._status(
+                    "broken", False, root, python,
+                    f"{self.spec.message_prefix}实际 Python 版本为 {version or '未知'}，"
+                    f"冻结依赖需要 Python {self.spec.python_version}.x，请点击“{self.spec.fix_action_label}”。",
+                    model_cache=model_cache,
+                )
         if not self.package_dirs_ok(root):
             return self._status(
                 "broken",
@@ -388,7 +449,7 @@ class ManagedRuntime:
                 root,
                 status=STATUS_BROKEN,
                 runtime_version=manifest.runtime_version or self.spec.runtime_version,
-                python_version=manifest.python_version or self.spec.python_version,
+                python_version=manifest.python_version,
                 extra=extra,
             )
         except OSError:
@@ -475,6 +536,11 @@ class ManagedRuntime:
             return self.status(runtime_root=runtime_root, model_cache_root=model_cache_root)
 
         _may_cancel(cancel, spec)
+        # Preflight before writing the manifest or clearing an existing venv.
+        host = self._select_host_python() if host_venv else ""
+        python_version = "" if host_venv else (
+            spec.python_version if frozen else ".".join(map(str, sys.version_info[:3]))
+        )
         python = self.interpreter(root)
         if root.exists() and not python.exists() and any(root.iterdir()) and not repair:
             raise self._error(f"{spec.message_prefix}目录已存在但不完整，请更换路径或手动清理后重试。")
@@ -483,7 +549,7 @@ class ManagedRuntime:
             root,
             status=STATUS_INSTALLING,
             runtime_version=spec.runtime_version,
-            python_version=spec.python_version,
+            python_version=python_version,
         )
 
         emit(f"正在准备{spec.feature_label}运行环境……", 5, "bootstrap")
@@ -491,6 +557,7 @@ class ManagedRuntime:
             self._prepare_host_venv(
                 root,
                 python,
+                host=host,
                 repair=repair,
                 emit=emit,
                 cancel=cancel,
@@ -515,6 +582,17 @@ class ManagedRuntime:
             _may_cancel(cancel, spec)
         if frozen and not python.exists():
             raise self._error(f"{spec.message_prefix}Python 环境创建失败：未找到 {python}")
+        if host_venv:
+            python_version = self.installed_python_version(root)
+            write_runtime_manifest(
+                root, status=STATUS_INSTALLING,
+                runtime_version=spec.runtime_version, python_version=python_version,
+            )
+            if not self._python_version_matches(python_version):
+                raise self._error(
+                    f"{spec.message_prefix}创建后的实际 Python 版本为 {python_version or '未知'}，"
+                    f"冻结依赖需要 Python {spec.python_version}.x，已停止安装。"
+                )
 
         emit(spec.requirements_emit, 25, "dependencies")
         # CUDA 兜底判定需先于清单获取：决定补齐/读取哪份 frozen txt。
@@ -612,7 +690,7 @@ class ManagedRuntime:
             root,
             status=STATUS_READY,
             runtime_version=spec.runtime_version,
-            python_version=spec.python_version,
+            python_version=python_version,
             extra=extra,
         )
         if spec.has_model_cache:
@@ -631,6 +709,7 @@ class ManagedRuntime:
         root: Path,
         python: Path,
         *,
+        host: str,
         repair: bool,
         emit: RuntimeEvent,
         cancel: Event,
@@ -638,23 +717,7 @@ class ManagedRuntime:
     ) -> None:
         """unix 打包版：用宿主 python3 创建 venv（bundle 不携带内嵌资产）。"""
         spec = self.spec
-        host = shutil.which("python3")
-        if host is None:
-            raise self._error(
-                f"未找到宿主 python3。{spec.message_prefix}依赖系统安装的 Python 3.11+"
-                "（unix 平台不再内嵌解释器）；请安装后重试。"
-            )
-        probe = subprocess.run(
-            [host, "-c", "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=30,
-        )
-        if probe.returncode != 0:
-            raise self._error(f"宿主 python3 版本过低：{spec.message_prefix}需要 Python 3.11+。")
-        emit(f"正在创建 {spec.feature_label} Python 虚拟环境（宿主 python3）……", 5, "bootstrap")
+        emit(f"正在创建 {spec.feature_label} Python 虚拟环境（Python {spec.python_version}）……", 5, "bootstrap")
         venv_args = [host, "-m", "venv"]
         if repair:
             # 修复时重建：root 已在安装开始写 installing manifest 时创建，

@@ -27,6 +27,12 @@
 
 Windows 打包版提供独立运行环境安装入口；不将 Torch 和权重放进基础冻结包。普通模型共用 `local-runtime`，MOSS 使用 `local-runtime-moss`，OCR 使用自己的环境。当前普通 runtime 版本为 7，MOSS 为 2；旧环境出现需要修复时应补齐依赖。
 
+Linux/macOS 打包版的本地、MOSS 与 OCR 冻结运行环境需要系统提供 **Python 3.11.x**
+及其 venv 支持。安装器优先使用 `python3.11`，也接受实际版本为 3.11 的 `python3`；
+系统默认 Python 可以继续使用 3.14 等其他版本。缺少匹配版本时会在创建环境和下载
+依赖前给出提示。设置中的「已安装 Python 版本」来自当前解释器实测，检测不到时
+显示未知。已有环境使用其他 Python 版本时，安装 3.11 后点击修复运行环境。
+
 运行环境与权重分开保存，默认位于 MAW 用户数据目录；可在设置修改目录，模型根目录对应 `MAW_MODEL_CACHE_ROOT`。路径和配置读取见 [PROVIDERS](PROVIDERS.md)。
 
 ### 下载、扫描与中断
