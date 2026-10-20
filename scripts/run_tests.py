@@ -251,7 +251,8 @@ def _run_one_file_worker(payload: dict) -> dict:
     # Pass the discovery pattern through to load_tests just as discover does.
     try:
         module = importlib.import_module(module_name)
-        suite = loader.loadTestsFromModule(module, pattern=payload.get("pattern", target_path.name))
+        pattern = None if payload.get("pack") else payload.get("pattern", target_path.name)
+        suite = loader.loadTestsFromModule(module, pattern=pattern)
         if payload.get("pack"):
             suite = filter_pack(suite, payload["pack"])
     except unittest.SkipTest as error:

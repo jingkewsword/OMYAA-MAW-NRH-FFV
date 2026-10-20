@@ -67,13 +67,14 @@ class ParallelWorkerTests(unittest.TestCase):
                     def test_real_preflight_never_loads_model_or_writes_artifacts(self): pass
                 def generated(): pass
                 def load_tests(loader, tests, pattern):
+                    assert pattern in (None, 'test_mixed.py'), repr(pattern)
                     tests.addTest(unittest.FunctionTestCase(generated))
                     return tests
             '''), encoding='utf-8')
             payload = {'file': target.name, 'path': str(target), 'max_chars': 4000, 'max_line': 400}
             whole = _run_one_file_worker(payload)
-            common = _run_one_file_worker({**payload, 'pack': 'common'})
-            media = _run_one_file_worker({**payload, 'pack': 'media'})
+            common = _run_one_file_worker({**payload, 'pack': 'common', 'pattern': 'test_*.py'})
+            media = _run_one_file_worker({**payload, 'pack': 'media', 'pattern': 'test_*.py'})
         self.assertEqual(whole['tests'], 3)
         self.assertEqual(common['tests'], 2)
         self.assertEqual(media['tests'], 1)
