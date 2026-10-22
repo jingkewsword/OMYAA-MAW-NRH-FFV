@@ -391,7 +391,7 @@ class BurnVideoJobHttpTests(unittest.TestCase):
         # real without launching an unrelated FFprobe for each HTTP request.
         self.enterContext(mock.patch.object(self.server, "_thumbnail_base_ready", return_value=False))
         self.server.media_jobs.temp_root = self.root
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread = threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
         self.thread.start()
         self.origin = f"http://127.0.0.1:{self.server.server_address[1]}"
         self.base = "/api/exports/burned-video/jobs"
