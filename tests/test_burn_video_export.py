@@ -130,7 +130,10 @@ class BurnAssVideoTests(CompactContainerAssertions, unittest.TestCase):
 
     def test_editor_burn_normalizes_ass_and_converted_srt_without_client_aliases(self) -> None:
         from maw import ass_fonts
+        from maw import postprocess_ffmpeg
 
+        # SRT conversion reads the selected style; isolate that known input
+        # from the user's saved style library while preserving burn assertions.
         ass = ASS_TEXT.replace("[Events]", "[V4+ Styles]\nStyle: Default,Microsoft YaHei,86\n[Events]")
         ass = ass.replace("你好", r"{\i1}你好{\i0}")
         entries = ({"canonical": "Example Local", "names": ["Microsoft YaHei"]},)
@@ -156,6 +159,9 @@ class BurnAssVideoTests(CompactContainerAssertions, unittest.TestCase):
         for subtitle_format in ("ass", "srt"):
             with self.subTest(subtitle_format=subtitle_format), \
                     mock.patch.object(ass_fonts, "font_alias_entries", return_value=entries), \
+                    mock.patch.object(postprocess_ffmpeg, "load_ass_style_library",
+                                      return_value={"styles": [{"id": "default", "fontName": "Microsoft YaHei"}],
+                                                    "assignments": {"srtBurnStyleId": "default"}}), \
                     mock.patch.object(server_editor.subprocess, "run", side_effect=run):
                 server_editor.burn_ass_video(self.source, [],
                     ass if subtitle_format == "ass" else "1\n00:00:00,000 --> 00:00:01,000\n你好\n",
