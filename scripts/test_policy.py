@@ -7,10 +7,15 @@ import re
 from pathlib import Path
 
 PYTHON_PACKS = ("common", "media", "long-media", "tools", "manual")
+WINDOWS_FFMPEG_TESTS = (
+    "tests.test_ffmpeg.FfmpegResolverTests.test_windows_python_module_does_not_shadow_path_executables",
+    "tests.test_ffmpeg.FfmpegResolverTests.test_windows_scripts_are_not_accepted_as_ffmpeg_executables",
+)
 MEDIA_MODULES = {"test_ffprobe_failure_integration", "test_gap_removed_audio_export", "test_gap_removed_video_compatibility",
                  "test_media_cache", "test_quapeaks_generation",
                  "test_thumbnail_jobs_integration", "test_thumbnail_server"}
 MEDIA_CLASSES = {
+    ("test_audio_loudness", "RealLoudnessTests"),
     ("test_burn_video_export", "BurnVideoPrecisionTests"),
     ("test_media_keyframes", "RealKeyframeInspectorTests"),
     ("test_gap_removed_embedded_subtitles", "EmbeddedSubtitleTimelineTests"),
@@ -100,7 +105,8 @@ def allowed_platform_skip(test_id: str, reason: str) -> bool:
                 and "需要能读取仓库路径且带 sha256sum/awk/grep 的 bash" in reason
                 or ("symbolic links unavailable:" in reason or "Symlink creation is unavailable:" in reason)
                 and any(name in test_id for name in ("test_editor_manifest.", "test_asr_presets.")))
-    return (test_id.endswith("test_open_output_folder_uses_startfile_on_windows")
+    return (test_id in WINDOWS_FFMPEG_TESTS and reason == "Windows PATHEXT resolution"
+            or test_id.endswith("test_open_output_folder_uses_startfile_on_windows")
             or "test_local_log.DefaultLogDirectoryTests." in test_id)
 
 
@@ -175,6 +181,8 @@ def select_packs(paths: list[str], *, release: bool = False) -> dict:
                 "reasons": ["release or unavailable change list: expand all required packs"]}
     for original in paths:
         path = original.replace("\\", "/").removeprefix("./")
+        if path in {"maw/ffmpeg.py", "tests/test_ffmpeg.py"}:
+            selected.add("lifecycle")
         if path in SITE_TOOL_PATHS or path.startswith(("docs/releases/", "docs/assets/")):
             selected.add("website")
             reasons.append(f"release site consumes this document input: {path}")
@@ -207,7 +215,7 @@ def select_packs(paths: list[str], *, release: bool = False) -> dict:
                 reasons.append(f"shared or unrecognized spec consumers: {path}")
             continue
         # Shared test infrastructure/locks/workflows can invalidate every gate.
-        if path.startswith(("scripts/test_", "scripts/run_", "scripts/browser_results", "scripts/check_test_gate", ".github/workflows/", "tests/e2e/", "tests/fixtures/")) or path in {"pyproject.toml", "uv.lock", "package.json", "pnpm-lock.yaml", "playwright.config.mjs"}:
+        if path.startswith(("scripts/test_", "scripts/run_", "scripts/browser_results", "scripts/check_test_gate", ".github/workflows/", "tests/e2e/", "tests/fixtures/", "tests/config/")) or path in {"pyproject.toml", "uv.lock", "package.json", "pnpm-lock.yaml", "playwright.config.mjs"}:
             selected.update(ALL_MERGE)
             preview = True
             reasons.append(f"shared infrastructure: {path}")
@@ -243,7 +251,7 @@ def select_packs(paths: list[str], *, release: bool = False) -> dict:
             e2e_specs.update(specs or [])
             if any(token in path for token in ("waveform", "reapeaks", "quapeaks", "script_timestamp", "project", "history")):
                 selected.add("long-media")
-        elif path.startswith(("resources/", "scripts/build-", "scripts/verify_", "runtime/", "local-runtime/", "ocr-runtime/", "moss-runtime/")) or path in {"MAW.spec", "requirements.txt"}:
+        elif path.startswith(("resources/", "scripts/build-", "scripts/verify_", "scripts/packaging/", "runtime/", "local-runtime/", "ocr-runtime/", "moss-runtime/")) or path in {"MAW.spec", "requirements.txt"}:
             preview = True
             selected.update({"tools", "media"})
         else:

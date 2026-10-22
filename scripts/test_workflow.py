@@ -17,11 +17,11 @@ import xml.etree.ElementTree as ET
 if __package__:
     from .run_check import run
     from .browser_results import SCHEMA, browser_config, discovery, verify_run
-    from .test_policy import CHECKLIST_NODE, CHECKLIST_PYTHON, CHECKLIST_SPEC, DEV_NODE, DEV_PYTHON, PYTHON_PACKS, node_pack, select_packs
+    from .test_policy import CHECKLIST_NODE, CHECKLIST_PYTHON, CHECKLIST_SPEC, DEV_NODE, DEV_PYTHON, PYTHON_PACKS, WINDOWS_FFMPEG_TESTS, node_pack, select_packs
 else:
     from run_check import run
     from browser_results import SCHEMA, browser_config, discovery, verify_run
-    from test_policy import CHECKLIST_NODE, CHECKLIST_PYTHON, CHECKLIST_SPEC, DEV_NODE, DEV_PYTHON, PYTHON_PACKS, node_pack, select_packs
+    from test_policy import CHECKLIST_NODE, CHECKLIST_PYTHON, CHECKLIST_SPEC, DEV_NODE, DEV_PYTHON, PYTHON_PACKS, WINDOWS_FFMPEG_TESTS, node_pack, select_packs
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKS = ("docs", "common", "browser", "smoke", "media", "long-media", "lifecycle", "tools", "e2e", "editor-e2e", "website", "manual")
@@ -51,7 +51,7 @@ def preparation(packs, specs=(), tools_scope="all"):
 def commands(packs: list[str], report_dir: Path, *, dev: bool = False, component: str = "all", specs=(), shard=None, tools_scope="all"):
     python = sys.executable
     node = shutil.which("node") or "node"
-    playwright = [node, "node_modules/@playwright/test/cli.js", "test", "--project=chromium",
+    playwright = [node, "node_modules/@playwright/test/cli.js", "test", "--config=tests/config/playwright.config.mjs", "--project=chromium",
                   "--forbid-only", "--workers=2", "--retries=0"]
     if dev:
         if component in {"python", "all"}:
@@ -66,8 +66,11 @@ def commands(packs: list[str], report_dir: Path, *, dev: bool = False, component
     if preparation(packs, specs, tools_scope)["application"]:
         yield "build", [node, "scripts/build-editor.mjs", "--write"], 60
         yield "build-launcher", [node, "scripts/build-launcher.mjs", "--write"], 60
-        yield "typecheck", [node, "node_modules/typescript/bin/tsc", "-p", "tsconfig.typecheck.json"], 120
+        yield "typecheck", [node, "node_modules/typescript/bin/tsc", "-p", "web/tsconfig.typecheck.json"], 120
     for pack in packs:
+        if pack == "lifecycle" and os.name == "nt":
+            yield "python-windows-ffmpeg", [python, "scripts/run_tests.py", "--required",
+                   "--report", str(report_dir / "python-windows-ffmpeg.json"), *WINDOWS_FFMPEG_TESTS], 60
         if pack == "docs":
             yield "docs-navigation", [python, "scripts/check_docs.py"], 60
             yield "release-docs", [python, "scripts/prepare_release_notes.py", "--check-all"], 60

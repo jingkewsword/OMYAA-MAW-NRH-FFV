@@ -15,7 +15,7 @@ mkdir -p "$BUILD_DIR"
 # bundle 是构建产物（不入库）：打包前显式构建；MAW.spec 会在缺失时 fail fast。
 echo "==> 0/6 构建 web bundle（esbuild 产物，不入库）"
 command -v pnpm >/dev/null 2>&1 || {
-    echo "错误：构建 web bundle 需要 pnpm（先安装 Node.js >=22.13 与 pnpm）。" >&2
+    echo "错误：构建 web bundle 需要 pnpm（先安装 Node.js 22.23.4+ (22.x), 24.22.1+ (24.x) or 26.12.1+ 与 pnpm）。" >&2
     exit 1
 }
 if [[ $# -eq 1 && "${1:-}" == "--prepared-environment" ]]; then
@@ -38,10 +38,10 @@ echo "==> 1/6 PyInstaller 构建 dist/MAW"
 # release.yml / 源码模式自动补齐完全同源）。
 mkdir -p build
 "${UV_RUN[@]}" python -m maw.runtimes.freezer freeze --force
-"${UV_RUN[@]}" --group build pyinstaller --noconfirm --clean MAW.spec
+"${UV_RUN[@]}" --group build pyinstaller --noconfirm --clean scripts/packaging/MAW.spec
 # PyInstaller 6 places datas under _internal in an onedir bundle. Keep the
 # user-facing FAQ at the AppImage root as well, where users can find it easily.
-cp "FAQ-常见问题.txt" "dist/MAW/FAQ-常见问题.txt"
+cp "docs/user/FAQ-常见问题.txt" "dist/MAW/FAQ-常见问题.txt"
 
 echo "==> 2/6 准备静态 ffmpeg（BtbN FFmpeg-Builds，latest release 的稳定分支资产）"
 FFMPEG_BRANCH="8.1"

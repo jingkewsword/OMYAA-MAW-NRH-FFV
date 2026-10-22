@@ -6,7 +6,9 @@
 
 `scripts/run_tests.py --parallel N` 复用上游按文件并行、发现错误传播和 bundle 跨进程锁，支持 `--pack`、`--required` 与 `--report`。串并行共用结果格式和门禁判定：保留有序用例 ID、执行数、失败/错误、skip 原因及平台不适用判定、预期失败和意外成功。并行报告另含每文件执行耗时与 worker PID，便于查剩余热点；失败全文默认存到 JSON 报告旁的 `.log`，显式 `--full-log` 仍优先，终端只打印压缩文本。
 
-合并/发布的 common Python 组使用两个 worker，其余组保持既有并发，避免同时放大媒体编码成本。显式 targets 与普通发现中的测试子包继续明确回退串行，保留目标粒度、包初始化与 `load_tests`；分组仍按原源码预选和实际加载后的用例归属筛选，不按类来源丢弃导入/动态用例。依赖 skip 和 expected failure 在 required 下仍失败，既有平台不适用规则不变。
+合并/发布的 common Python 组使用两个 worker，其余组保持既有并发，避免同时放大媒体编码成本。显式 targets 与普通发现中的测试子包继续明确回退串行，保留目标粒度、包初始化与 `load_tests`；分组仍按原源码预选和实际加载后的用例归属筛选，不按类来源丢弃导入/动态用例。依赖 skip 和 expected failure 在 required 下仍失败。
+
+真实响度测量归 `media`，缓存、取消和解析契约留在 `common`。两项 Windows PATHEXT 解析测试在其他平台按精确 ID 与原因记录为不适用，在 Windows lifecycle 门禁实际执行并保存报告；修改 FFmpeg 解析器或其测试时选择该门禁，发布也包含它。浏览器统一使用 `tests/config/playwright.config.mjs`，类型检查使用 `web/tsconfig.typecheck.json`。
 
 准备环境一次：`uv sync --group test --group dev`、`pnpm install --frozen-lockfile`。真实媒体组需要 PATH 中的 FFmpeg/ffprobe，浏览器组需要 `pnpm exec playwright install chromium`。test 组只有 NumPy、Pillow、soundfile，不下载 ASR 模型或完整 local/OCR 运行时。
 

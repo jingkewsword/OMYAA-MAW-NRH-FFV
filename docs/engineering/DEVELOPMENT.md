@@ -7,8 +7,9 @@
 | 位置 | 职责 |
 | --- | --- |
 | `maw_gui.py`、`maw/cli.py` | Launcher 启动、公开转写 CLI 与 Server 管理。 |
-| `generate_subtitle_*_api.py` | 六个云端/接口生成器；Qwen 入口也处理 Fun-ASR。 |
-| `generate_subtitle_local.py`、`maw/local_asr.py` | 实验本地模型与统一字幕输出。 |
+| `maw/asr/{qwen,soniox,doubao,bcut,tencent,openai,local}.py` | 七个高级 ASR 模块入口；Qwen 入口也处理 Fun-ASR。 |
+| `maw/asr/common.py`、`maw/asr/segmentation.py` | 服务商共享的媒体、SRT、断句与时间码修复，不依赖云端入口。 |
+| `maw/local_asr.py` | 实验本地模型与统一字幕输出。 |
 | `maw/gui_web.py`、`maw/gui_workflow.py`、`web/launcher/` | 图形桥接、任务快照、单文件及批量任务。 |
 | `maw/runtimes/`、`maw/local_models.py` | 独立运行环境与模型准备；MOSS 依赖单独声明。 |
 | `edit.py`、`web/` | 唯一编辑器前端源码及便携 HTML 渲染。 |
@@ -35,7 +36,7 @@
 
 覆盖工程先保留 `.mosp.bak` / `.json.bak`；多版本备份使用 `.mosp-bak`。两者与 `.workspace.json`、交换 JSON 的用途不同，恢复操作见 [编辑器指南](../user/EDITOR_GUIDE.md)。
 
-正式字段与迁移契约集中在 [JSON_SCHEMA](../../JSON_SCHEMA.md)，不在本页维护另一份 JSON 示例。修改字段必须同步契约、测试和 changelog。
+正式字段与迁移契约集中在 [JSON_SCHEMA](JSON_SCHEMA.md)，不在本页维护另一份 JSON 示例。修改字段必须同步契约、测试和 changelog。
 
 ## 工作区维护
 
@@ -45,9 +46,9 @@ Server 的内置预设覆盖、命名工作区和活动名称保存在本机设�
 
 ## 编辑器源码地图
 
-`web/editor-scripts.txt` 是 esbuild 的源码执行顺序，也是 Server、便携 HTML 与 Electron 桌面壳共用的编辑器装配清单；当前构建含 188 个输入，`web/editor-modules.json` 标出 61 个真正的 ESM 工厂与外部桥，其余 127 个输入保留 classic 共享作用域，目录不决定顺序。构建器拒绝路径穿越、重复输入及符号链接越界。便携 HTML 与 localhost 都内联同一份 esbuild 产物 `web/editor/boot/editor-bundle.js`；产物不进 Git，发布包内自带，用户运行编辑器不需要 Node，从源码运行则由 Server 在每次渲染前自动构建（需要 Node 22.13+ 与 `pnpm install`）。
+`web/editor-scripts.txt` 是 esbuild 的源码执行顺序，也是 Server、便携 HTML 与 Electron 桌面壳共用的编辑器装配清单；当前构建含 188 个输入，`web/editor-modules.json` 标出 61 个真正的 ESM 工厂与外部桥，其余 127 个输入保留 classic 共享作用域，目录不决定顺序。构建器拒绝路径穿越、重复输入及符号链接越界。便携 HTML 与 localhost 都内联同一份 esbuild 产物 `web/editor/boot/editor-bundle.js`；产物不进 Git，发布包内自带，用户运行编辑器不需要 Node，从源码运行则由 Server 在每次渲染前自动构建（需要 Node 22.23.4+（22.x）、24.22.1+（24.x）或 26.12.1+ 与 `pnpm install`）。
 
-编辑器 JS、清单或构建配置变化后执行 `pnpm run build:editor`（产物不入库；Server 渲染前也会自动重建）；`pnpm run check:editor` 只读检查新鲜度，不会自动修复。Server 调试时另开 `pnpm run watch:editor`，CSS 和模板仍按请求读取。构建和 Node 测试要求 Node 22.13+；源码目录显式声明 `type: module`，不依赖语法自动检测。类型检查包括迁移的全部工厂与既有六文件范围。实施、实验及上游合并经验见 [ESM 迁移台账](../logs/unversioned/undated/ESM_MIGRATION.md)。
+编辑器 JS、清单或构建配置变化后执行 `pnpm run build:editor`（产物不入库；Server 渲染前也会自动重建）；`pnpm run check:editor` 只读检查新鲜度，不会自动修复。Server 调试时另开 `pnpm run watch:editor`，CSS 和模板仍按请求读取。构建和 Node 测试要求 Node 22.23.4+（22.x）、24.22.1+（24.x）或 26.12.1+；源码目录显式声明 `type: module`，不依赖语法自动检测。类型检查包括迁移的全部工厂与既有六文件范围。实施、实验及上游合并经验见 [ESM 迁移台账](../logs/unversioned/undated/ESM_MIGRATION.md)。
 
 | 位置 | 职责 |
 | --- | --- |
@@ -114,7 +115,7 @@ Windows 使用 `scripts/run-e2e.ps1`，脚本检查 quapeaks，并在需要时�
 
 ## 文档与发布
 
-README 只保留入口；主线放 WORKFLOW，高级操作放专题，字段放 JSON_SCHEMA。反馈和开发进度写任务账本。官网文档由 [同步脚本](../../website/docs/CONTENT_SYNC.md) 生成，不手改副本。
+README 只保留入口；主线放 WORKFLOW，高级操作放专题，字段放 [JSON_SCHEMA](JSON_SCHEMA.md)。反馈和开发进度写任务账本。官网文档由 [同步脚本](../../website/docs/CONTENT_SYNC.md) 生成，不手改副本。
 
 日常改编辑器 JS 要重建 esbuild 产物，但不重生成 `blank-editor.html`。在 PR 描述注明“内联副本待发布前统一重生成”；发布前或维护者明确要求时才执行：
 

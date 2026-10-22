@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -20,6 +21,39 @@ from scripts.test_policy import ALL_MERGE, PYTHON_PACKS, select_packs
 
 
 class TestWorkflowTests(unittest.TestCase):
+    def test_moved_configs_are_used_by_actual_gate_commands(self):
+        package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
+        steps = list(test_workflow.commands(["common", "smoke", "e2e", "editor-e2e"], ROOT / ".artifacts"))
+        typecheck = next(cmd for name, cmd, _ in steps if name == "typecheck")
+        self.assertEqual(typecheck[-1], package["scripts"]["typecheck"].split()[-1])
+        self.assertTrue((ROOT / typecheck[-1]).is_file())
+        browser = [cmd for name, cmd, _ in steps if name in {"editor-http-smoke", "browser-regressions"}]
+        self.assertEqual(len(browser), 3)
+        for command in browser:
+            config = next(arg for arg in command if arg.startswith("--config="))
+            self.assertIn(config, package["scripts"]["test"].split())
+            self.assertTrue((ROOT / config.split("=", 1)[1]).is_file())
+
+    def test_windows_ffmpeg_skips_have_a_real_windows_gate(self):
+        targets = test_policy.WINDOWS_FFMPEG_TESTS
+        for path in ("maw/ffmpeg.py", "tests/test_ffmpeg.py"):
+            self.assertIn("lifecycle", select_packs([path])["packs"])
+        loaded = list(run_tests.cases(run_tests.build_suite(list(targets), str(ROOT / "tests"), "test_*.py")))
+        self.assertEqual(tuple(case.id() for case in loaded), targets)
+        for platform in ("posix", "nt"):
+            with self.subTest(platform=platform), patch.object(test_policy, "os", SimpleNamespace(name=platform)), \
+                 patch.object(test_workflow, "os", SimpleNamespace(name=platform)):
+                for identity in targets:
+                    self.assertEqual(test_policy.allowed_platform_skip(identity, "Windows PATHEXT resolution"), platform != "nt")
+                    self.assertFalse(test_policy.allowed_platform_skip(identity, "FFmpeg unavailable"))
+                steps = list(test_workflow.commands(["lifecycle"], ROOT / ".artifacts"))
+                windows = [cmd for name, cmd, _ in steps if name == "python-windows-ffmpeg"]
+                self.assertEqual(len(windows), int(platform == "nt"))
+                if windows:
+                    self.assertEqual(tuple(windows[0][-len(targets):]), targets)
+                    self.assertIn("--required", windows[0])
+                    self.assertIn("--report", windows[0])
+
     def test_failed_gate_on_legacy_console_still_saves_summary(self):
         area = ROOT / '.artifacts/console-fixtures'
         area.mkdir(parents=True, exist_ok=True)
@@ -59,7 +93,8 @@ class TestWorkflowTests(unittest.TestCase):
         self.assertIn("website", select_packs([], release=True)["packs"])
 
     def test_unknown_paths_and_shared_infrastructure_expand(self):
-        for path in ("new-boundary.py", "uv.lock", "tests/e2e/helpers.mjs", "JSON_SCHEMA.md"):
+        for path in ("new-boundary.py", "uv.lock", "tests/e2e/helpers.mjs", "JSON_SCHEMA.md",
+                     "tests/config/playwright.config.mjs", "tests/config/playwright.scroll.config.mjs"):
             with self.subTest(path=path):
                 self.assertTrue(ALL_MERGE.issubset(select_packs([path])["packs"]))
         self.assertTrue(ALL_MERGE.issubset(select_packs([])["packs"]))
@@ -309,6 +344,7 @@ class TestWorkflowTests(unittest.TestCase):
 
     def test_real_codec_classes_keep_media_preparation_and_pure_contracts_stay_common(self):
         for module, real_class in (
+            ("test_audio_loudness", "RealLoudnessTests"),
             ("test_burn_video_export", "BurnVideoPrecisionTests"),
             ("test_media_keyframes", "RealKeyframeInspectorTests"),
             ("test_gap_removed_embedded_subtitles", "EmbeddedSubtitleTimelineTests"),

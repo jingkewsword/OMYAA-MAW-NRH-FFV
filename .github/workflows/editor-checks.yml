@@ -86,7 +86,7 @@ jobs:
           run_install: false
       - uses: actions/setup-node@v5
         with:
-          node-version: '22'
+          node-version: '22.23.4'
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
       # The test runner builds each bundle exactly once before its consumers.
@@ -97,6 +97,7 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         if: needs.selection.outputs.application == 'true' || needs.selection.outputs.tools_scope != 'checklist'
         with:
+          version: "0.13.4"
           enable-cache: true
       - run: uv sync --frozen --group test --group dev --no-group build
         if: needs.selection.outputs.application == 'true' || needs.selection.outputs.tools_scope != 'checklist'
@@ -160,7 +161,7 @@ jobs:
           run_install: false
       - uses: actions/setup-node@v5
         with:
-          node-version: '22'
+          node-version: '22.23.4'
           package-manager-cache: false
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: python scripts/test_workflow.py --stage merge --pack lifecycle
@@ -185,7 +186,7 @@ jobs:
           run_install: false
       - uses: actions/setup-node@v5
         with:
-          node-version: '22'
+          node-version: '22.23.4'
           package-manager-cache: false
       - run: pnpm --dir website install --frozen-lockfile
       - run: python scripts/test_workflow.py --stage merge --pack website

@@ -1,11 +1,13 @@
 [project]
 name = "moys-asr-workflow"
-version = "1.9.0"
+version = "1.10.0-beta.1"
 description = "A small cloud ASR API to local subtitle-editor workflow."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "AGPL-3.0-only" }
 dependencies = [
+    "certifi>=2026.10.19",
+    "urllib3>=2.8.0",
     "fonttools>=4.55",
     "jieba>=0.42",
     "opencc-python-reimplemented>=0.1.7",
@@ -22,7 +24,7 @@ dependencies = [
 
 # maw：MOSS runtime 依赖（Transformers 5.x）与 local dependency group 的 qwen-asr
 # （Transformers==4.57.6）互斥，无法承载于同一个 uv.lock 的同一依赖组，
-# 故独立声明在 moss-requirements.in 并由
+# 故独立声明在 scripts/packaging/moss-requirements.in 并由
 # `uv pip compile` 冻结（与 local/ocr dependency-group 的 uv export 管线并行）。
 
 [[tool.uv.index]]
@@ -66,6 +68,8 @@ dev = [
     "ruff>=0.16.3",
 ]
 local = [
+    "certifi>=2026.10.19",
+    "urllib3>=2.8.0",
     "accelerate>=1.12",
     # faster-whisper（CTranslate2 后端）不依赖 transformers，不会与
     # qwen-asr 锁定的 Transformers 4.x 冲突；onnxruntime 是其硬依赖
@@ -95,6 +99,8 @@ local = [
     "quapeaks>=2026.0.0",
 ]
 ocr = [
+    "certifi>=2026.10.19",
+    "urllib3>=2.8.0",
     # OCR worker 使用的最小直接依赖；RapidOCR / ONNX Runtime 的传递依赖
     # 由 uv export --only-group 自动闭包解析。
     "numpy>=2.2,<2.5",

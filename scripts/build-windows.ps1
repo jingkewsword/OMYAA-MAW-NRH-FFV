@@ -7,10 +7,10 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
-$SpecPath = Join-Path $RepoRoot 'MAW.spec'
+$SpecPath = Join-Path $RepoRoot 'scripts/packaging/MAW.spec'
 $EntryPoint = Join-Path $RepoRoot 'maw_gui.py'
 $ExePath = Join-Path $RepoRoot 'dist\MAW\MAW.exe'
-$FaqSource = Join-Path $RepoRoot 'FAQ-常见问题.txt'
+$FaqSource = Join-Path $RepoRoot 'docs/user/FAQ-常见问题.txt'
 $FaqBundlePath = Join-Path $RepoRoot 'dist\MAW\FAQ-常见问题.txt'
 
 if (-not (Test-Path -LiteralPath $EntryPoint -PathType Leaf)) {
@@ -26,7 +26,7 @@ try {
 
     # bundle 是构建产物（不入库）：打包前显式构建；MAW.spec 会在缺失时 fail fast。
     if (-not (Get-Command pnpm -ErrorAction SilentlyContinue)) {
-        throw "pnpm is required to build web bundles. Install Node.js (>=22.13) and pnpm, then re-run."
+        throw "pnpm is required to build web bundles. Install Node.js (22.23.4+, 24.22.1+ or 26.12.1+) and pnpm, then re-run."
     }
     if ($PreparedEnvironment) {
         # CI already built/tested these exact bundles. Verify freshness before
