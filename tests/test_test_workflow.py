@@ -93,7 +93,7 @@ class TestWorkflowTests(unittest.TestCase):
         self.assertIn("website", select_packs([], release=True)["packs"])
 
     def test_unknown_paths_and_shared_infrastructure_expand(self):
-        for path in ("new-boundary.py", "uv.lock", "tests/e2e/helpers.mjs", "JSON_SCHEMA.md",
+        for path in ("new-boundary.py", "uv.lock", "tests/e2e/helpers.mjs", "JSON_SCHEMA.md", "docs/engineering/JSON_SCHEMA.md",
                      "tests/config/playwright.config.mjs", "tests/config/playwright.scroll.config.mjs"):
             with self.subTest(path=path):
                 self.assertTrue(ALL_MERGE.issubset(select_packs([path])["packs"]))
@@ -228,7 +228,8 @@ class TestWorkflowTests(unittest.TestCase):
     def test_checklist_mixed_unknown_and_release_scopes_broaden(self):
         source = "tools/verification-checklist/build.py"
         for path in ("tests/test_type_gate.mjs", "tests/e2e/shared-tooltip.spec.mjs", "uv.lock",
-                     "AGENTS.md", "JSON_SCHEMA.md", "tools/verification-checklist/../unknown.py", "unknown.py"):
+                     "AGENTS.md", "JSON_SCHEMA.md", "docs/engineering/JSON_SCHEMA.md",
+                     "tools/verification-checklist/../unknown.py", "unknown.py"):
             with self.subTest(path=path):
                 plan = select_packs([source, path])
                 # An unrelated browser consumer also restores the full tools pack.

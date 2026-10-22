@@ -21,6 +21,7 @@ MEDIA_CLASSES = {
     ("test_gap_removed_embedded_subtitles", "EmbeddedSubtitleTimelineTests"),
     ("test_gap_removed_video_timeline", "RealVideoTimelineTests"),
 }
+SCHEMA_PATHS = {"JSON_SCHEMA.md", "docs/engineering/JSON_SCHEMA.md"}
 DOC_TOOL_PATHS = {"scripts/check_docs.py", "scripts/prepare_release_notes.py",
                   "scripts/publish_release.py", "tests/test_docs_check.py", "tests/test_release_notes.py",
                   "tests/test_release_site.py", "tests/test_release_publication.py"}
@@ -188,7 +189,7 @@ def select_packs(paths: list[str], *, release: bool = False) -> dict:
             reasons.append(f"release site consumes this document input: {path}")
             continue
         if path.startswith("docs/") or path in {"README.md", "CHANGELOG.md", "CONTRIBUTING.md", "AGENTS.md", "JSON_SCHEMA.md"}:
-            if path == "JSON_SCHEMA.md":
+            if path in SCHEMA_PATHS:
                 selected.update(ALL_MERGE)
             continue
         if path.startswith("website/"):
@@ -272,7 +273,7 @@ def checklist_tools_scope(paths: list[str]) -> str:
     def owned(path):
         return ".." not in Path(path).parts and (path.startswith("tools/verification-checklist/") or path in checklist)
     def docs(path):
-        return (path.startswith("docs/") or path in {"README.md", "CHANGELOG.md", "CONTRIBUTING.md"}
-                or path in DOC_TOOL_PATHS)
+        return path not in SCHEMA_PATHS and (path.startswith("docs/")
+                or path in {"README.md", "CHANGELOG.md", "CONTRIBUTING.md"} or path in DOC_TOOL_PATHS)
     return "checklist" if normalized and any(owned(path) for path in normalized) and all(
         owned(path) or docs(path) for path in normalized) else "all"
