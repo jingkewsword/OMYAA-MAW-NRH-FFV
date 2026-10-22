@@ -377,5 +377,29 @@ class RegistryFontPathTests(unittest.TestCase):
             )
 
 
+class ReadFontFileNamesTests(unittest.TestCase):
+    def test_reads_every_ttc_face_before_closing_shared_stream(self) -> None:
+        from fontTools.ttLib import TTCollection, TTFont, newTable
+
+        # The metadata scan needs only name tables. A real lazy-loaded TTC
+        # reproduces the shared-stream lifetime of Noto CJK and system fonts.
+        families = ["Example CJK JP", "Example CJK SC"]
+        collection = TTCollection()
+        for family in families:
+            font = TTFont()
+            names = newTable("name")
+            names.names = []
+            names.setName(family, 1, 3, 1, 0x409)
+            font["name"] = names
+            collection.fonts.append(font)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "example.ttc"
+            collection.save(path)
+            collection.close()
+            found = ass_fonts._read_font_file_names(path)
+        self.assertEqual([[record.value for record in face.family] for face in found],
+                         [[family] for family in families])
+
+
 if __name__ == "__main__":
     unittest.main()

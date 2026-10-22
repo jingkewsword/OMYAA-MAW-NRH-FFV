@@ -306,6 +306,9 @@ def _read_font_file_names(path: Path) -> list[FontFileNames]:
         except Exception:  # noqa: BLE001 - 坏 name 表静默跳过
             continue
         results.append(names)
+    # Lazy TTC faces share a stream. Read all name tables before closing any
+    # face, otherwise later families disappear from the alias table (#295).
+    for font in faces:
         close = getattr(font, "close", None)
         if close:
             close()
