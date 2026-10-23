@@ -793,6 +793,18 @@ class PackagingContractTests(CompactContainerAssertions, unittest.TestCase):
         self.assertIn("dist\\MAW\\MAW.exe", workflow)
         self.assertNotIn("MOSE", workflow)
         self.assertIn("Verify no FFmpeg is bundled", workflow)
+        steps = re.split(r"(?m)^      - ", workflow)[1:]
+        compatibility = next(index for index, step in enumerate(steps)
+                             if step.startswith("name: Required media failure compatibility\n"))
+        installs = [(index, step) for index, step in enumerate(steps)
+                    if re.search(r"(?m)^\s+choco install ffmpeg\b", step)]
+        self.assertEqual(len(installs), 1, "real bad-file checks need their test-only media tools")
+        index, install = installs[0]
+        self.assertLess(index, compatibility, "dependencies must be ready before required media tests")
+        self.assertIn("GITHUB_PATH", install, "later steps must resolve the real tool directory")
+        self.assertIn("ffprobe.exe", install)
+        self.assertEqual(len(re.findall(r"(?m)^\s*& .+ -version\s*$", install)), 2,
+                         "both real media executables must be checked")
         self.assertIn("Compress-Archive", workflow)
         self.assertIn("actions/upload-artifact@v6", workflow)
         self.assertIn("retention-days: 14", workflow)

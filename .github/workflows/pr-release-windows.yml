@@ -93,6 +93,23 @@ jobs:
           include-hidden-files: true
           retention-days: 7
 
+      - name: Install test-only real media dependencies
+        # Test tools stay outside the MAW-lite artifact.
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          choco install ffmpeg --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'FFmpeg installation failed.' }
+          $binary = Get-ChildItem -LiteralPath "$env:ChocolateyInstall\lib\ffmpeg\tools" -Filter ffmpeg.exe -Recurse -File | Select-Object -First 1
+          if (-not $binary) { throw 'The FFmpeg package contains no executable.' }
+          $ffprobe = Join-Path $binary.Directory.FullName 'ffprobe.exe'
+          if (-not (Test-Path -LiteralPath $ffprobe -PathType Leaf)) { throw 'FFprobe is unavailable.' }
+          $binary.Directory.FullName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          & $binary.FullName -version
+          if ($LASTEXITCODE -ne 0) { throw 'FFmpeg is unavailable.' }
+          & $ffprobe -version
+          if ($LASTEXITCODE -ne 0) { throw 'FFprobe is unavailable.' }
+
       - name: Required media failure compatibility
         run: uv run --no-sync python scripts/run_check.py --timeout 180 -- uv run --no-sync python scripts/run_tests.py tests/test_media.py tests/test_ffmpeg.py tests/test_ffprobe_failure_integration.py --required --report .artifacts/media-required.json
       - name: Preserve media required report

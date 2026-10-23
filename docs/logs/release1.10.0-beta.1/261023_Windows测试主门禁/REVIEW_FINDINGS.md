@@ -19,3 +19,11 @@ Windows 主 job 保留原选择和报告；依赖、symlink 权限或 Bash 工�
 本地证据：runner 19 项零失败/skip；burn 52 项、local server 95 项零失败/skip；fonts 与 batch 54 项零业务失败，首次因上述实机目录 skip 拒绝 required，未重跑掩盖。真实 Chromium 的工程打开及原文本输入回归 10 项通过，零 skip/retry。构建、新鲜度和类型检查通过。脚本语法和本地契约不等于新 Windows CI 的实际能力或完整浏览器验收。
 
 同一干净 `a5f1316b`、同一 Windows 环境完整串并单次对照：2746 个 selected ID 与 run 数一致，零失败/错误，12 个 skip 保留；382.125→209.458 秒。11 项 skip 不能满足 required；这些数据仅证明该树完整无 targets 引擎的样本收益，不证明 pack 并行等价或新门禁通过，不作为扩大 skip、提高期限或增加 retry 的依据。
+
+## 首个新提交的真实 CI 反馈
+
+`9dee8af9` 的 Windows 主业务 job 已成功。独立读取原报告：common 2476 项，仅 2 项精确平台 N/A；media 116、long-media 2、tools 187、Windows FFmpeg 2 均零 skip/失败/错误。实际 symlink 能力与 Bash 准备通过，不能用本机权限不足推断 CI 也未执行。
+
+同提交 Preview 原媒体报告 42 项、零失败/错误，但两项真实坏文件用例因缺 FFprobe skip，required 正确失败。原因是轻量 Preview 的原重复业务准备已移除，合入 main 的媒体兼容门禁需要单独准备工具。修订在原兼容测试前安装并检查真实 FFmpeg/FFprobe，向后续步骤公开真实 bin 目录；保留 MAW-lite 不含 FFmpeg 的产物检查，不恢复重复全业务测试。
+
+既有 Preview 打包契约增加准备先于消费者的检查，原 workflow 旧红、修订后新绿；PowerShell 语法检查通过，独立审查核对原 42 项和严格 skip 未改。首次失败收据保留。新提交实际安装、两项真实坏文件执行及完整 CI 仍须按新 head 核验，不能继承 `9dee8af9` 的部分绿色。
