@@ -29,9 +29,13 @@ def check_gate(jobs: dict) -> list[str]:
     if ((outputs["app"] == "false" and any(outputs[flag] == "true" for flag in FLAGS if flag not in ("app", "website")))
             or outputs["e2e"] == outputs["editor_e2e"] == "true"):
         raise ValueError("Contradictory required selector flags")
-    for name, flag in (("editor", "app"), ("windows-lifecycle", "lifecycle"), ("website", "website")):
+    for name, flag in (("editor", "app"), ("website", "website")):
         if outputs[flag] == "true":
             required.append(name)
+    if (outputs["common"] == "true" or outputs["lifecycle"] == "true"
+            or outputs["media"] == "true"
+            or outputs["tools"] == "true" and outputs["tools_scope"] != "checklist"):
+        required.append("posix-contracts")
     if outputs["editor_e2e"] == "true":
         required.append("browser-gates")
     return [name for name in required if jobs.get(name, {}).get("result") != "success"]

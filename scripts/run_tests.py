@@ -38,9 +38,9 @@ from pathlib import Path
 from typing import Any, cast
 
 if __package__:
-    from .test_policy import PYTHON_PACKS, allowed_platform_skip, python_pack, source_test_ids
+    from .test_policy import PYTHON_PACKS, allowed_platform_skip, python_pack
 else:
-    from test_policy import PYTHON_PACKS, allowed_platform_skip, python_pack, source_test_ids
+    from test_policy import PYTHON_PACKS, allowed_platform_skip, python_pack
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MAX_CHARS = 4000
@@ -137,26 +137,16 @@ def cases(suite):
             yield entry
 
 
-def pack_paths(pack: str):
-    """Inspect source before imports; unrelated tooling probes never run here."""
-    for path in sorted((ROOT / "tests").glob("test_*.py")):
-        names = source_test_ids(path)
-        if names and not any(python_pack(name) == pack for name in names):
-            continue
-        yield path
-
-
 def filter_pack(suite, pack):
     return unittest.TestSuite(case for case in cases(suite)
-                              if python_pack(case.id()) == pack or isinstance(case, unittest.loader._FailedTest))
+                              if python_pack(case.id()) == pack or isinstance(case, unittest.loader._FailedTest)
+                              or type(case).__name__ == "ModuleSkipped")
 
 
-def pack_suite(pack: str):
-    loader = unittest.TestLoader()
-    selected = unittest.TestSuite()
-    for path in pack_paths(pack):
-        selected.addTests(filter_pack(loader.loadTestsFromName(f"tests.{path.stem}"), pack))
-    return selected
+def pack_suite(pack: str, start_dir: str, pattern: str):
+    # Let unittest execute package hooks, imported cases and dynamically created
+    # suites before selecting ownership. Source inspection cannot predict them.
+    return filter_pack(build_suite([], start_dir, pattern), pack)
 
 
 def result_report(result, selected_ids):
@@ -236,9 +226,7 @@ def _run_one_file_worker(payload: dict) -> dict:
         top_level = discovery_root
     else:
         top_level = target_path.parent
-    if payload.get("module"):
-        top_level = ROOT
-    module_name = payload.get("module") or ".".join(target_path.relative_to(top_level).with_suffix("").parts)
+    module_name = ".".join(target_path.relative_to(top_level).with_suffix("").parts)
     loaded = sys.modules.get(module_name)
     if Path(getattr(loaded, "__file__", "")).resolve() != target_path:
         sys.modules.pop(module_name, None)
@@ -249,23 +237,7 @@ def _run_one_file_worker(payload: dict) -> dict:
     # its complete suite: imported TestCases and load_tests-created tests (e.g.
     # FunctionTestCase) need not have this module as their class's origin.
     # Pass the discovery pattern through to load_tests just as discover does.
-    try:
-        module = importlib.import_module(module_name)
-        pattern = None if payload.get("pack") else payload.get("pattern", target_path.name)
-        suite = loader.loadTestsFromModule(module, pattern=pattern)
-        if payload.get("pack"):
-            suite = filter_pack(suite, payload["pack"])
-    except unittest.SkipTest as error:
-        suite = unittest.loader._make_skipped_test(module_name, error, unittest.TestSuite)
-    except BaseException as error:  # import-time SystemExit(0) must not exit the parent successfully
-        suite = unittest.TestSuite([unittest.loader._FailedTest(module_name, error)])
     buffer = _CapturedStream()
-    selected_ids = [case.id() for case in cases(suite)]
-    runner = unittest.TextTestRunner(
-        stream=buffer,
-        verbosity=0,
-        resultclass=CompactTextTestResult,
-    )
     started = time.perf_counter()
     fd_output = ""
     # 测试与被测代码的 print / subprocess 直通 fd 1/2 一律重定向到临时
@@ -277,6 +249,19 @@ def _run_one_file_worker(payload: dict) -> dict:
             os.dup2(fd_capture.fileno(), 1)
             os.dup2(fd_capture.fileno(), 2)
             with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(buffer):
+                try:
+                    module = importlib.import_module(module_name)
+                    suite = loader.loadTestsFromModule(module, pattern=payload.get("pattern", target_path.name))
+                except unittest.SkipTest as error:
+                    suite = unittest.loader._make_skipped_test(module_name, error, unittest.TestSuite)
+                except BaseException as error:  # import-time SystemExit(0) must not exit the parent successfully
+                    suite = unittest.TestSuite([unittest.loader._FailedTest(module_name, error)])
+                selected_ids = [case.id() for case in cases(suite)]
+                runner = unittest.TextTestRunner(
+                    stream=buffer,
+                    verbosity=0,
+                    resultclass=CompactTextTestResult,
+                )
                 result = cast(CompactTextTestResult, runner.run(suite))
         finally:
             os.dup2(saved_stdout, 1)
@@ -305,14 +290,14 @@ def _run_parallel(args) -> int:
     from concurrent.futures import ProcessPoolExecutor, as_completed
 
     # 相对路径在 worker 里 os.chdir(ROOT) 后语义会变：主进程先解析为绝对路径
-    start_dir = str(ROOT / "tests" if args.pack else Path(args.start_dir).resolve())
+    start_dir = str(Path(args.start_dir).resolve())
     # Package __init__ and load_tests hooks control standard discovery, including
     # errors in packages without test_*.py files. File sharding cannot preserve
     # those hooks, so use the unchanged serial path whenever subpackages exist.
-    if not args.pack and any(path.parent != Path(start_dir) for path in Path(start_dir).rglob("__init__.py")):
+    if any(path.parent != Path(start_dir) for path in Path(start_dir).rglob("__init__.py")):
         print("[run_tests] 发现测试子包，为保留包初始化与 load_tests 语义，本次回退串行。")
         return _run_serial(args)
-    files = [path.name for path in pack_paths(args.pack)] if args.pack else sorted(
+    files = sorted(
         str(path.relative_to(start_dir))
         for path in Path(start_dir).glob(args.pattern)
         if path.is_file()
@@ -330,7 +315,6 @@ def _run_parallel(args) -> int:
             "pattern": args.pattern,
             "max_chars": args.max_chars,
             "max_line": args.max_line,
-            **({"pack": args.pack, "module": f"tests.{Path(name).stem}"} if args.pack else {}),
         }
         for name in files
     ]
@@ -402,7 +386,12 @@ def _run_parallel(args) -> int:
               "mode": "parallel", "workers": workers, "wall_seconds": wall,
               "files": [{key: value for key, value in item.items()
                          if key not in {"full_text", "test_output"}} for item in ordered]}
-    report["exit_code"] = int(bool(failures or not total_tests))
+    complete_log = "\n\n".join(
+        f"=== {item['file']} ===\n{item['test_output']}\n{item['full_text']}"
+        for item in ordered)
+    log_path = _write_full_log(complete_log, args.full_log, args.report)
+    report["full_log"] = str(log_path.resolve())
+    report["exit_code"] = int(bool(failures or not report["selected_ids"]))
     write_report(args, report)
     print(
         f"\n[run_tests] 并行完成：{total_tests} tests"
@@ -419,7 +408,6 @@ def _run_parallel(args) -> int:
             )
             for item in failures
         )
-        log_path = _write_full_log(combined, args.full_log, args.report)
         print(compact_text(combined))
         print(
             f"[run_tests] {len(failures)} 个文件失败；失败输出已压缩，"
@@ -431,28 +419,38 @@ def _run_parallel(args) -> int:
 
 def _run_serial(args) -> int:
     started = time.perf_counter()
-    suite = pack_suite(args.pack) if args.pack else build_suite(args.targets, args.start_dir, args.pattern)
-    selected_ids = [case.id() for case in cases(suite)]
-    if not selected_ids:
-        print("[run_tests] selected test suite is empty", file=sys.stderr)
-        return 1
-    runner = unittest.TextTestRunner(
-        stream=sys.stdout,
-        verbosity=args.verbose,
-        resultclass=CompactTextTestResult,
-    )
-    result = cast(CompactTextTestResult, runner.run(suite))
+    import contextlib
+    import os
 
-    if result.full_text.strip():
-        log_path = _write_full_log(result.full_text, args.full_log, args.report)
-        print(
-            f"[run_tests] 失败输出已压缩（上限 {args.max_chars} 字符 / 单行 {args.max_line}）；"
-            f"未截断文本：{log_path}"
-        )
+    buffer = _CapturedStream()
+    runner = unittest.TextTestRunner(stream=buffer, verbosity=args.verbose,
+                                    resultclass=CompactTextTestResult)
+    with tempfile.TemporaryFile() as capture:
+        saved_stdout, saved_stderr = os.dup(1), os.dup(2)
+        try:
+            sys.stdout.flush()
+            sys.stderr.flush()
+            os.dup2(capture.fileno(), 1)
+            os.dup2(capture.fileno(), 2)
+            with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(buffer):
+                suite = pack_suite(args.pack, args.start_dir, args.pattern) if args.pack else build_suite(args.targets, args.start_dir, args.pattern)
+                selected_ids = [case.id() for case in cases(suite)]
+                result = cast(CompactTextTestResult, runner.run(suite))
+        finally:
+            os.dup2(saved_stdout, 1)
+            os.dup2(saved_stderr, 2)
+            os.close(saved_stdout)
+            os.close(saved_stderr)
+        capture.seek(0)
+        complete_log = buffer.getvalue() + capture.read().decode("utf-8", errors="replace")
+    print(compact_text(buffer.getvalue()))
+    log_path = _write_full_log(complete_log + result.full_text, args.full_log, args.report)
+    print(f"[run_tests] 完整输出：{log_path}")
 
     report = result_report(result, selected_ids)
-    code = report_code(report, args.required)
-    report.update(exit_code=code, mode="serial", workers=1, wall_seconds=time.perf_counter() - started)
+    code = report_code(report, args.required) or int(not selected_ids)
+    report.update(exit_code=code, mode="serial", workers=1, wall_seconds=time.perf_counter() - started,
+                  full_log=str(log_path.resolve()))
     write_report(args, report)
     return code
 
@@ -478,7 +476,7 @@ def main(argv=None) -> int:
         metavar="N",
         help=(
             "按文件并行跑（N 个 worker 进程），不拆分显式 targets；"
-            "支持分组/required/报告；普通发现含测试子包时回退串行以保留包初始化与 load_tests。"
+            "required/报告保留；分组及含测试子包时回退串行以保留包初始化与 load_tests。"
             "bundle 产物缺失时跨进程锁保证只自动构建一次，但首个触发构建的 worker"
             "会被同步拖慢；新建 worktree/clone 建议先 pnpm install --frozen-lockfile"
             " && pnpm run build"
@@ -494,8 +492,11 @@ def main(argv=None) -> int:
         parser.error("--pack 与显式 targets 不能混用")
 
     if args.parallel > 1:
-        if not args.targets:
+        if not args.targets and not args.pack:
             return _run_parallel(args)
+
+    if args.parallel > 1 and args.pack:
+        print("[run_tests] 分组发现保留 unittest hooks，本次串行执行。")
 
     if args.parallel > 1 and args.targets:
         print("[run_tests] --parallel 不拆分显式 targets，本次回退串行。")

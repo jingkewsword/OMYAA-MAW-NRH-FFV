@@ -212,6 +212,7 @@ test('can use a dropped project subtitle as an extension and preserve optional i
     { text: '带字词时间码的副字幕', start: 100, end: 1900 },
   ]);
 
+  // 双语字幕设置自 #218 起是工程设置里独立的「双语字幕」页；交换按钮在该页的「字幕管理」区。
   await openSettingsPage(page, 'multi-subtitle');
   await expect(page.locator('#editor-settings-page-multi-subtitle')).toBeVisible();
   await page.locator('#multi-subtitle-swap').click();

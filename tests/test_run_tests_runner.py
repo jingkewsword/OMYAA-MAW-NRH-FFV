@@ -25,6 +25,8 @@ from scripts.run_tests import (  # noqa: E402
     CompactTextTestResult,
     _run_one_file_worker,
     _to_module_name,
+    pack_suite,
+    cases,
     compact_text,
 )
 
@@ -57,7 +59,7 @@ class CompactTextTests(unittest.TestCase):
 
 
 class ParallelWorkerTests(unittest.TestCase):
-    def test_pack_worker_keeps_dynamic_cases_and_filters_only_other_packs(self):
+    def test_pack_keeps_dynamic_cases_and_filters_only_other_packs(self):
         with tempfile.TemporaryDirectory() as temporary:
             target = pathlib.Path(temporary) / 'test_mixed.py'
             target.write_text(textwrap.dedent('''
@@ -73,13 +75,13 @@ class ParallelWorkerTests(unittest.TestCase):
             '''), encoding='utf-8')
             payload = {'file': target.name, 'path': str(target), 'max_chars': 4000, 'max_line': 400}
             whole = _run_one_file_worker(payload)
-            common = _run_one_file_worker({**payload, 'pack': 'common', 'pattern': 'test_*.py'})
-            media = _run_one_file_worker({**payload, 'pack': 'media', 'pattern': 'test_*.py'})
+            common = [case.id() for case in cases(pack_suite('common', str(target.parent), target.name))]
+            media = [case.id() for case in cases(pack_suite('media', str(target.parent), target.name))]
         self.assertEqual(whole['tests'], 3)
-        self.assertEqual(common['tests'], 2)
-        self.assertEqual(media['tests'], 1)
-        self.assertEqual(sorted(common['selected_ids'] + media['selected_ids']), sorted(whole['selected_ids']))
-        self.assertTrue(all(item['success'] for item in (whole, common, media)))
+        self.assertEqual(len(common), 2)
+        self.assertEqual(len(media), 1)
+        self.assertEqual(sorted(common + media), sorted(whole['selected_ids']))
+        self.assertTrue(whole['success'])
 
     def test_worker_runs_only_the_requested_nested_file(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -271,6 +273,34 @@ class ParallelCommandTests(CompactContainerAssertions, unittest.TestCase):
             self.assertEqual(report['run'], len(report['selected_ids']))
             self.assertTrue(all(item['pid'] for item in report['files']))
 
+    def test_class_setup_skip_matches_serial_and_parallel(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            self.write_source(root, 'test_class_skip.py', """
+                import unittest
+                class Case(unittest.TestCase):
+                    @classmethod
+                    def setUpClass(cls):
+                        raise unittest.SkipTest('optional class capability unavailable')
+                    def test_never_runs(self):
+                        self.fail('class setup must skip this case')
+            """)
+            for required, expected_code in ((False, 0), (True, 1)):
+                with self.subTest(required=required):
+                    reports = []
+                    for workers in (0, 2):
+                        result = self.run_discovery(root, parallel=workers, required=required)
+                        self.assertEqual(result.returncode, expected_code, result.stdout)
+                        report = json.loads((root / f'report-{workers}.json').read_text(encoding='utf-8'))
+                        self.assertEqual(len(report['selected_ids']), 1)
+                        self.assertEqual(report['run'], 0)
+                        self.assertEqual(len(report['skips']), 1)
+                        self.assertFalse(report['skips'][0]['platform_not_applicable'])
+                        reports.append(report)
+                    for key in ('selected_ids', 'run', 'errors', 'failures', 'skips',
+                                'expected_failures', 'unexpected_successes', 'exit_code'):
+                        self.assertEqual(reports[0][key], reports[1][key], key)
+
     def test_module_import_skip_stays_skipped(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
@@ -298,7 +328,7 @@ class ParallelCommandTests(CompactContainerAssertions, unittest.TestCase):
         for source, exit_code in (
             ("@unittest.expectedFailure\ndef test_expected(self): self.fail('known failure')", 1),
             ("@unittest.expectedFailure\ndef test_unexpected(self): pass", 1),
-            (f"def {platform_method}(self): self.skipTest('other platform')", 0),
+            (f"def {platform_method}(self): self.skipTest('other platform')", 1),
         ):
             with self.subTest(source=source), tempfile.TemporaryDirectory() as temporary:
                 root = pathlib.Path(temporary)
@@ -311,6 +341,64 @@ class ParallelCommandTests(CompactContainerAssertions, unittest.TestCase):
                     reports.append(json.loads((root / f'report-{workers}.json').read_text(encoding='utf-8')))
                 for key in ('selected_ids', 'run', 'errors', 'failures', 'skips', 'expected_failures', 'unexpected_successes', 'exit_code'):
                     self.assertEqual(reports[0][key], reports[1][key], key)
+
+    def test_complete_log_keeps_successful_worker_output(self):
+        for workers in (0, 2):
+            with self.subTest(workers=workers), tempfile.TemporaryDirectory() as temporary:
+                root = pathlib.Path(temporary)
+                self.write_source(root, "test_output.py", """
+                    import subprocess
+                    import sys
+                    import unittest
+                    print('import success marker')
+                    class Case(unittest.TestCase):
+                        def test_output(self):
+                            print('python success marker')
+                            subprocess.run([sys.executable, '-c', "print('child success marker')"], check=True)
+                """)
+                result = self.run_discovery(root, parallel=workers)
+                self.assertEqual(result.returncode, 0, result.stdout)
+                report = json.loads((root / f'report-{workers}.json').read_text(encoding='utf-8'))
+                full = pathlib.Path(report['full_log']).read_text(encoding='utf-8')
+                self.assertIn('import success marker', full)
+                self.assertIn('python success marker', full)
+                self.assertIn('child success marker', full)
+
+    def test_platform_exemptions_require_exact_owner_and_reason(self):
+        from scripts.test_policy import allowed_platform_skip
+        import os
+        identity, reason = (
+            ('tests.test_gui_web.GuiWebBridgeTests.test_open_existing_path_uses_external_opener_for_file_and_folder',
+             'Non-Windows paths use the external opener') if os.name == 'nt' else
+            ('tests.test_gui_web.GuiWebBridgeTests.test_open_output_folder_uses_startfile_on_windows',
+             'os.startfile 仅 Windows 可用；os.name 补丁会让 pathlib 选择 WindowsPath'))
+        self.assertTrue(allowed_platform_skip(identity, reason))
+        self.assertFalse(allowed_platform_skip(identity, 'dependency missing'))
+        self.assertFalse(allowed_platform_skip(identity.replace('GuiWebBridgeTests', 'OtherTests'), reason))
+
+    def test_pack_keeps_dynamic_imported_hooks_and_load_errors(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            self.write_source(root, 'helper.py', 'import unittest\nclass Imported(unittest.TestCase):\n    def test_imported(self): pass\n')
+            self.write_source(root, 'test_dynamic.py', """
+                import unittest
+                from helper import Imported
+                def hook(): pass
+                def load_tests(loader, suite, pattern):
+                    suite.addTest(unittest.FunctionTestCase(hook))
+                    return suite
+            """)
+            command = [sys.executable, str(ROOT / 'scripts/run_tests.py'), '--pack', 'common', '--start-dir', str(root),
+                       '--report', str(root / 'pack.json')]
+            result = subprocess.run(command, capture_output=True, text=True, cwd=ROOT)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            report = json.loads((root / 'pack.json').read_text(encoding='utf-8'))
+            self.assertEqual(report['run'], 2)
+            self.write_source(root, 'test_broken.py', "raise RuntimeError('load marker')")
+            result = subprocess.run(command, capture_output=True, text=True, cwd=ROOT)
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            report = json.loads((root / 'pack.json').read_text(encoding='utf-8'))
+            self.assertEqual(report['errors'], 1)
 
     def test_module_import_system_exit_cannot_report_success(self):
         with tempfile.TemporaryDirectory() as temporary:

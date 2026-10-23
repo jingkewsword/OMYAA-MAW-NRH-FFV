@@ -132,8 +132,10 @@ class BurnAssVideoTests(CompactContainerAssertions, unittest.TestCase):
         from maw import ass_fonts
         from maw import postprocess_ffmpeg
 
-        # SRT conversion reads the selected style; isolate that known input
-        # from the user's saved style library while preserving burn assertions.
+        # SRT 转换产物会按「样式库 srtBurnStyleId 指向的样式」重写 Default
+        # 样式；样式库读取用户级真实配置，空缺时又回退到按操作系统选择的
+        # 默认字体，断言会随机器漂移。这里把样式库隔离为仅含雅黑字体的
+        # default 样式，让「别名表改写字体名」的断言在所有平台走同一路径。
         ass = ASS_TEXT.replace("[Events]", "[V4+ Styles]\nStyle: Default,Microsoft YaHei,86\n[Events]")
         ass = ass.replace("你好", r"{\i1}你好{\i0}")
         entries = ({"canonical": "Example Local", "names": ["Microsoft YaHei"]},)

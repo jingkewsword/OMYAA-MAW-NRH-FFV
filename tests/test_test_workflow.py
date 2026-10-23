@@ -21,6 +21,68 @@ from scripts.test_policy import ALL_MERGE, PYTHON_PACKS, select_packs
 
 
 class TestWorkflowTests(unittest.TestCase):
+    def test_mobile_asset_skip_is_exact_on_supported_non_darwin_platforms(self):
+        identity = "test_ass_fonts.FontRootsTests.test_darwin_roots_include_mobile_asset_font_directories"
+        reason = "本机没有 MobileAsset 字体资产目录"
+        for platform, os_name, test_id, skip_reason, allowed in (
+            ("win32", "nt", identity, reason, True),
+            ("win32", "nt", "tests." + identity, reason, True),
+            ("linux", "posix", identity, reason, True),
+            ("linux", "posix", "tests." + identity, reason, True),
+            ("win32", "nt", identity.replace("FontRootsTests", "OtherTests"), reason, False),
+            ("linux", "posix", identity.replace("FontRootsTests", "OtherTests"), reason, False),
+            ("win32", "nt", identity, reason + "（依赖缺失）", False),
+            ("linux", "posix", identity, reason + "（依赖缺失）", False),
+            ("darwin", "posix", identity, reason, False),
+            ("unknown", "posix", identity, reason, False),
+        ):
+            with self.subTest(platform=platform, test_id=test_id, reason=skip_reason), \
+                    patch.object(test_policy, "os", SimpleNamespace(name=os_name)), \
+                    patch.object(sys, "platform", platform):
+                self.assertEqual(test_policy.allowed_platform_skip(test_id, skip_reason), allowed)
+
+    def test_windows_primary_gate_requires_selected_posix_contracts(self):
+        from scripts.check_test_gate import FLAGS, check_gate
+        for pack, scope in (("common", "all"), ("lifecycle", "all"),
+                            ("media", "all"), ("tools", "all")):
+            with self.subTest(pack=pack):
+                outputs = {flag: "false" for flag in FLAGS}
+                outputs.update(app="true", tools_scope=scope, e2e_specs="[]")
+                outputs[pack] = "true"
+                outputs.update({key: str(value).lower() for key, value in
+                                test_workflow.preparation([pack], tools_scope=scope).items()})
+                jobs = {"selection": {"result": "success", "outputs": outputs},
+                        "documentation": {"result": "success"}, "editor": {"result": "success"}}
+                self.assertEqual(check_gate(jobs), ["posix-contracts"])
+                for result in ("failure", "cancelled", "skipped"):
+                    self.assertEqual(check_gate({**jobs, "posix-contracts": {"result": result}}),
+                                     ["posix-contracts"])
+                self.assertEqual(check_gate({**jobs, "posix-contracts": {"result": "success"}}), [])
+
+    def test_posix_workflow_condition_matches_actual_required_gate(self):
+        import re
+        from scripts.check_test_gate import FLAGS, check_gate
+        workflow = (ROOT / ".github/workflows/editor-checks.yml").read_text(encoding="utf-8")
+        block = workflow.split("\n  posix-contracts:\n", 1)[1].split("\n  website:\n", 1)[0]
+        expression = next(line.strip()[4:] for line in block.splitlines() if line.startswith("    if: "))
+        expression = re.sub(r"needs\.selection\.outputs\.(\w+)", r"outputs['\1']", expression)
+        expression = expression.replace("&&", " and ").replace("||", " or ")
+        for packs, scope in (([], "all"), (["website"], "all"), (["tools"], "checklist"),
+                             (["long-media"], "all"), (["common"], "all"),
+                             (["media"], "all"), (["lifecycle"], "all"), (["tools"], "all")):
+            with self.subTest(packs=packs, scope=scope):
+                outputs = {flag: "false" for flag in FLAGS}
+                outputs.update({pack.replace("-", "_"): "true" for pack in packs})
+                outputs.update(app=str(bool(set(packs) - {"website"})).lower(),
+                               tools_scope=scope, e2e_specs="[]")
+                outputs.update({key: str(value).lower() for key, value in
+                                test_workflow.preparation(packs, tools_scope=scope).items()})
+                jobs = {"selection": {"result": "success", "outputs": outputs},
+                        "documentation": {"result": "success"}, "editor": {"result": "success"},
+                        "website": {"result": "success"}}
+                expected = bool(eval(expression, {"__builtins__": {}}, {"outputs": outputs}))
+                self.assertEqual("posix-contracts" in check_gate(jobs), expected)
+
     def test_moved_configs_are_used_by_actual_gate_commands(self):
         package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
         steps = list(test_workflow.commands(["common", "smoke", "e2e", "editor-e2e"], ROOT / ".artifacts"))
@@ -99,6 +161,17 @@ class TestWorkflowTests(unittest.TestCase):
                 self.assertTrue(ALL_MERGE.issubset(select_packs([path])["packs"]))
         self.assertTrue(ALL_MERGE.issubset(select_packs([])["packs"]))
 
+    def test_core_builders_require_complete_browser_collection(self):
+        leaf = "tests/e2e/verification-checklist.spec.mjs"
+        for builder in ("scripts/build-editor.mjs", "scripts/build-launcher.mjs"):
+            for paths in ([builder], [leaf, builder]):
+                with self.subTest(paths=paths):
+                    plan = select_packs(paths)
+                    self.assertEqual(set(plan["packs"]),
+                                     {"docs", "common", "browser", "smoke", "media", "tools", "editor-e2e"})
+                    self.assertTrue(plan["preview"])
+                    self.assertEqual(plan["e2e_specs"], [], "full collection supersedes leaf-only scope")
+
     def test_media_changes_preserve_real_long_fixture(self):
         plan = select_packs(["maw/quapeaks.py"])
         self.assertTrue({"common", "media", "long-media", "smoke"}.issubset(plan["packs"]))
@@ -135,10 +208,11 @@ class TestWorkflowTests(unittest.TestCase):
                 regressions = next(command for name, command, _ in commands if name == "docs-regressions")
                 for module in ("tests.test_docs_check", "tests.test_release_notes", "tests.test_release_site", "tests.test_release_publication"):
                     self.assertIn(module, regressions)
-        tool_ids = {case.id() for case in run_tests.cases(run_tests.pack_suite("tools"))}
+        tool_ids = {case.id().removeprefix("tests.") for case in run_tests.cases(
+            run_tests.pack_suite("tools", str(ROOT / "tests"), "test_*.py"))}
         for module in ("test_verification_checklist", "test_verification_checklist_build"):
             with self.subTest(checklist_module=module):
-                expected = {case.id() for case in run_tests.cases(
+                expected = {case.id().removeprefix("tests.") for case in run_tests.cases(
                     run_tests.build_suite([f"tests.{module}"], str(ROOT / "tests"), "test_*.py"))}
                 self.assertTrue(expected)
                 self.assertTrue(expected.issubset(tool_ids), "tool-only changes must run Markdown/HTML regressions")
@@ -389,14 +463,14 @@ class TestWorkflowTests(unittest.TestCase):
         discovered = [normalize(case.id()) for case in run_tests.cases(
             run_tests.build_suite([], str(ROOT / "tests"), "test_*.py"))]
         assigned = [normalize(case.id()) for pack in PYTHON_PACKS
-                    for case in run_tests.cases(run_tests.pack_suite(pack))]
+                    for case in run_tests.cases(run_tests.pack_suite(pack, str(ROOT / "tests"), "test_*.py"))]
         self.assertEqual(len(assigned), len(set(assigned)), "packs must not duplicate cases")
         self.assertEqual(set(discovered), set(assigned), "pack routing must not drop inherited/dynamic tests")
 
     def test_required_skip_fails_instead_of_green(self):
         command = next(cmd for name, cmd, _ in test_workflow.commands(['common'], ROOT / '.artifacts')
                        if name == 'python-common')
-        self.assertEqual(command[command.index('--parallel') + 1], '2')
+        self.assertNotIn('--parallel', command, 'packs retain standard discovery and serial execution')
         self.assertIn('--required', command)
         self.assertIn('--report', command)
         class MissingDependency(unittest.TestCase):
@@ -406,7 +480,9 @@ class TestWorkflowTests(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(run_tests.main(["--required"]), 1)
                 self.assertEqual(run_tests.main([]), 0)
-                with tempfile.TemporaryDirectory() as directory, \
+                area = ROOT / '.artifacts/required-skip-fixtures'
+                area.mkdir(parents=True, exist_ok=True)
+                with tempfile.TemporaryDirectory(dir=area) as directory, \
                         patch.object(run_tests, "pack_suite", side_effect=lambda *_: unittest.defaultTestLoader.loadTestsFromTestCase(MissingDependency)):
                     report = Path(directory) / "required.json"
                     for selection in ([], ["--pack", "common"]):
@@ -426,9 +502,11 @@ class TestWorkflowTests(unittest.TestCase):
             case = type("DynamicCase", (unittest.TestCase,), {
                 "__module__": "tests.test_dynamic", "test_boundary": lambda self: None})
             loaded = unittest.defaultTestLoader.loadTestsFromTestCase(case)
-            with patch.object(run_tests, "ROOT", root), patch.object(unittest.TestLoader, "loadTestsFromName", return_value=loaded):
-                self.assertEqual([test.id() for test in run_tests.cases(run_tests.pack_suite("common"))],
+            with patch.object(unittest.TestLoader, "discover", return_value=loaded) as discover:
+                self.assertEqual([test.id() for test in run_tests.cases(
+                    run_tests.pack_suite("common", str(root / "tests"), "test_*.py"))],
                                  ["tests.test_dynamic.DynamicCase.test_boundary"])
+                discover.assert_called_once_with(str(root / "tests"), pattern="test_*.py")
             with patch.object(test_policy, "__file__", str(root / "scripts/test_policy.py")):
                 self.assertTrue(ALL_MERGE.issubset(select_packs(["tests/test_dynamic.py"])["packs"]))
 

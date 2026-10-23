@@ -4,11 +4,11 @@
 
 ## 日常开发
 
-`scripts/run_tests.py --parallel N` 复用上游按文件并行、发现错误传播和 bundle 跨进程锁，支持 `--pack`、`--required` 与 `--report`。串并行共用结果格式和门禁判定：保留有序用例 ID、执行数、失败/错误、skip 原因及平台不适用判定、预期失败和意外成功。并行报告另含每文件执行耗时与 worker PID，便于查剩余热点；失败全文默认存到 JSON 报告旁的 `.log`，显式 `--full-log` 仍优先，终端只打印压缩文本。
+`scripts/run_tests.py --parallel N` 复用上游完整默认发现的按文件并行、发现错误传播和 bundle 跨进程锁。`--pack`、`--required` 与 `--report` 保留原分组和报告语义。串并行共用结果格式和门禁判定：保留有序用例 ID、执行数、失败/错误、skip 原因及平台不适用判定、预期失败和意外成功。并行报告另含每文件执行耗时与 worker PID，便于查剩余热点；失败全文默认存到 JSON 报告旁的 `.log`，显式 `--full-log` 仍优先，终端只打印压缩文本。
 
-合并/发布的 common Python 组使用两个 worker，其余组保持既有并发，避免同时放大媒体编码成本。显式 targets 与普通发现中的测试子包继续明确回退串行，保留目标粒度、包初始化与 `load_tests`；分组仍按原源码预选和实际加载后的用例归属筛选，不按类来源丢弃导入/动态用例。依赖 skip 和 expected failure 在 required 下仍失败。
+合并/发布的 Python packs 保持标准 discover 后按实际用例归属筛选并串行执行；不以 AST 预删模块或把完整默认发现的并行收益外推到 packs。显式 targets 与发现中的测试子包保留目标粒度、包初始化与 `load_tests`。依赖 skip 和 expected failure 在 required 下仍失败。
 
-真实响度测量归 `media`，缓存、取消和解析契约留在 `common`。两项 Windows PATHEXT 解析测试在其他平台按精确 ID 与原因记录为不适用，在 Windows lifecycle 门禁实际执行并保存报告；修改 FFmpeg 解析器或其测试时选择该门禁，发布也包含它。浏览器统一使用 `tests/config/playwright.config.mjs`，类型检查使用 `web/tsconfig.typecheck.json`。
+真实响度测量归 `media`，缓存、取消和解析契约留在 `common`。两项 Windows PATHEXT 解析测试在其他平台按精确 ID 与原因记录为不适用，在 Windows 主门禁的 common/lifecycle 实际执行并保存报告；修改 FFmpeg 解析器或其测试时选择该门禁，发布也包含它。浏览器统一使用 `tests/config/playwright.config.mjs`，类型检查使用 `web/tsconfig.typecheck.json`。
 
 准备环境一次：`uv sync --group test --group dev`、`pnpm install --frozen-lockfile`。真实媒体组需要 PATH 中的 FFmpeg/ffprobe，浏览器组需要 `pnpm exec playwright install chromium`。test 组只有 NumPy、Pillow、soundfile，不下载 ASR 模型或完整 local/OCR 运行时。
 
@@ -48,6 +48,10 @@ uv run --no-sync python scripts/test_workflow.py --stage merge --changed maw/qua
 
 ## 合并与发布
 
+PR 的 `editor` 主门禁在 Windows 2022 按选择器运行原 Python/Node/common/media/long-media/tools/lifecycle、构建、类型及所需 Chromium smoke/定向用例。它验证真实临时 symlink 能力与 Git Bash 工具；FFmpeg 使用包内真实二进制目录，避免取消操作只杀 Chocolatey shim 而遗留进程。没有全量 macOS/Linux 业务矩阵。
+
+Linux `posix-contracts` 仅按条件保留平台差异：common 的 manifest 两项 symlink、ASR preset symlink、thumbnail namespace symlink与外部 opener；完整 tools 的 Unix checksum 小模块（checklist 专属 tools 不扩）；lifecycle 的真实 POSIX 进程/信号回收；media 的两个真实坏文件探测/加载保存。job 条件为 common、lifecycle、media 或非 checklist 的 tools 任一选中，汇总门禁使用同一条件拒绝失败、取消、缺失与 unexpected skipped。完整浏览器四片仍独立在 Ubuntu 实际发现、执行与汇总，不把 Windows 主门禁替代为 Linux 镜像全量。
+
 | 阶段/范围 | 必跑 | 按影响追加 |
 | --- | --- | --- |
 | 业务合并 | common Python/Node、构建与类型、browser 契约、两个真实文件/HTTP smoke specs、文档导航 | media、long-media、lifecycle、tools、完整浏览器回归 |
@@ -70,7 +74,7 @@ uv run --no-sync python scripts/test_workflow.py --stage merge --changed maw/qua
 | media | 真 FFmpeg/ffprobe、容器与缓存生成；混合文件只按方法或类分流，其他方法仍在 common |
 | long-media | 30 分钟 tone30 内核兼容与 11 分钟声学对齐；不能由短音频代替粗 mip/长时偏移保障 |
 | lifecycle | 真实进程树、异常退出、信号、失活、端口再绑定、无关进程隔离；合成失活期限可缩短，真实应用默认期限保留 |
-| tools | 文档/发布/打包/执行器/重构工具；Unix checksum 在 Linux required，Windows 明示不适用 |
+| tools | 文档/发布/打包/执行器/重构工具；Unix checksum 在 Windows Git Bash 与 Linux 定向 required 中实际运行 |
 | e2e | 叶子功能按现有消费者族选择具体 spec；Launcher、断句/词时间、Gap/AI/文稿、波形/播放、ASS/导出、多轨/markers/overlay、cue 列表、tooltip 与 onboarding 有明确族映射 |
 | editor-e2e | 当前完整 Chromium spec 集，含 Launcher；共享 host/state/history/schema/boot/全局布局或未识别路径扩大到全量 |
 | manual | 依赖个人 real .mosp 示例的历史方法。显式运行并准备自有数据，不是公开仓库 required 门禁 |
@@ -103,11 +107,11 @@ python scripts/test_workflow.py --stage merge --changed tools/verification-check
 
 清单设计需求、全部 56 项用例的用户后果、准备边界与实际隔离验收见[清单工具准备优化](../logs/release1.9.0-beta.2/261016_测试治理优化/清单工具准备优化.md)。低层表驱动失败组合与浏览器接线保障各自保留；页面不启动应用，仍必须实际启动 Chromium，不能用发现结果冒充执行。
 
-导出菜单/时间线叶子修改除导出与混合波形消费者外，还选择 `editor-menu-focus.spec.mjs`，保留菜单实际间距及关闭后焦点/播放快捷键边界。新增测试文件进入全量集合不代表叶子选择已覆盖它；新功能引入消费者时需一并检查映射。共享输入仍扩大完整集合，多路径继续取并集。
+导出菜单/时间线叶子修改除导出与混合波形消费者外，还选择 `editor-menu-focus.spec.mjs`，保留菜单实际间距及关闭后焦点/播放快捷键边界。新增测试文件进入全量集合不代表叶子选择已覆盖它；新功能引入消费者时需一并检查映射。共享输入仍扩大完整集合，多路径继续取并集。`scripts/build-editor.mjs` 与 `scripts/build-launcher.mjs` 单独变更也选择现有完整浏览器集合，覆盖真实 Editor/Launcher 装配，不能只靠源码 VM、smoke 或构建新鲜度。
 
-每次运行的计划、聚合结果、Python IDs/skip 原因、Node JUnit 与 Playwright JSON 写入 `.artifacts/test-workflow/<id>/`，子命令的 bounded 日志与 PID/时限证据仍走 `scripts/run_check.py`。失败后停止当前批次，后续门禁尚未运行，不能宣称通过。NumPy/soundfile/Pillow/FFmpeg/内核缺失、编码器不支持、必需 fixture 缺失、Node/Playwright skip、超时均不能得到 required 成功。Windows 的特定 symlink 权限与 OS opener、不适用的 Unix checksum，以及非 Windows 的 LOCALAPPDATA/startfile 测试单独登记为 platform_not_applicable；Linux CI 必须运行符号链接边界。
+每次运行的计划、聚合结果、Python IDs/skip 原因、Node JUnit 与 Playwright JSON 写入 `.artifacts/test-workflow/<id>/`，子命令的 bounded 日志与 PID/时限证据仍走 `scripts/run_check.py`。失败后停止当前批次，后续门禁尚未运行，不能宣称通过。NumPy/soundfile/Pillow/FFmpeg/内核缺失、编码器不支持、必需 fixture 缺失、Node/Playwright skip、超时均不能得到 required 成功。Windows 的非 Windows external opener 按完整用例 ID 和原因记为平台不适用。macOS 实机 MobileAsset 字体目录观测仅在 Windows/Linux 按精确 ID 和原原因记不适用，保留既有 Linux 发布质量入口；跨平台合成目录测试仍执行，macOS 缺实机资产仍失败。symlink 权限不足或 Unix checksum 的 Bash 工具链缺失仍失败，不能因 Linux 也跑过而豁免。非 Windows 的精确 PATHEXT、LOCALAPPDATA/startfile 语义继续按既有策略记录平台不适用。
 
-CI 有独立选择、文档、业务、Windows 生命周期、完整浏览器分片与网站任务，最后由 `Required test gate` 汇总实际必需 job 的成功。选择器必须输出全部 13 个布尔 flag（含 application/real_media 准备需求）及 tools_scope；缺失、非法值、准备需求与消费者矛盾的输出直接失败，不能当作未选择。选中的 job 失败、取消或跳过也不能通过。`app` 继续表示需执行的业务/工具 job，不等于需要构建应用。
+CI 有独立选择、文档、Windows 业务、POSIX 差异、完整浏览器分片与网站任务，最后由 `Required test gate` 汇总实际必需 job 的成功。选择器必须输出全部 13 个布尔 flag（含 application/real_media 准备需求）及 tools_scope；缺失、非法值、准备需求与消费者矛盾的输出直接失败，不能当作未选择。选中的 job 失败、取消或跳过也不能通过。`app` 继续表示需执行的业务/工具 job，不等于需要构建应用。
 
 预览打包只在打包/资源/依赖/共享基础设施或未知路径触发，避免每个文案改动生成 Windows 包。正式发布先完成 Linux 质量组和完整浏览器汇总，再开始各平台打包；`publish` 的条件显式要求质量、完整浏览器和 Windows 打包成功。各平台发布验证包含 lifecycle，不依赖 PR 阶段曾跑过另一个 SHA。仓库外的 branch protection 要将汇总 `Required test gate` 设为 required，改源码不会自动修改 GitHub 的保护设置；既有 required job 名称需维护者迁移。
 

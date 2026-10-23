@@ -73,7 +73,7 @@ jobs:
   editor:
     needs: selection
     if: needs.selection.outputs.app == 'true'
-    runs-on: ubuntu-latest
+    runs-on: windows-2022
     timeout-minutes: 30
     env:
       PYTHONUTF8: '1'
@@ -101,11 +101,50 @@ jobs:
           enable-cache: true
       - run: uv sync --frozen --group test --group dev --no-group build
         if: needs.selection.outputs.application == 'true' || needs.selection.outputs.tools_scope != 'checklist'
-      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm exec playwright install chromium
         if: needs.selection.outputs.browser == 'true' || needs.selection.outputs.smoke == 'true' || needs.selection.outputs.e2e == 'true' || needs.selection.outputs.editor_e2e == 'true'
+      - name: Verify Windows symlink capability
+        if: needs.selection.outputs.common == 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $probe = Join-Path $env:RUNNER_TEMP ("maw-symlink-" + [guid]::NewGuid())
+          New-Item -ItemType Directory -Path $probe | Out-Null
+          try {
+            Set-Content -LiteralPath (Join-Path $probe 'target') -Value 'symlink-capable'
+            New-Item -ItemType SymbolicLink -Path (Join-Path $probe 'alias') -Target (Join-Path $probe 'target') | Out-Null
+            if ((Get-Content -LiteralPath (Join-Path $probe 'alias')) -ne 'symlink-capable') { throw 'Symlink target is unreadable.' }
+          } finally {
+            Remove-Item -LiteralPath (Join-Path $probe 'alias') -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath (Join-Path $probe 'target') -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $probe -Force
+          }
+      - name: Select real Git Bash checksum tools
+        if: needs.selection.outputs.tools == 'true' && needs.selection.outputs.tools_scope != 'checklist'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $gitBash = Join-Path $env:ProgramFiles 'Git\bin\bash.exe'
+          if (-not (Test-Path -LiteralPath $gitBash -PathType Leaf)) { throw 'Git Bash is unavailable.' }
+          & $gitBash -c 'command -v sha256sum && command -v awk && command -v grep'
+          if ($LASTEXITCODE -ne 0) { throw 'Git Bash checksum tools are unavailable.' }
+          (Split-Path $gitBash) | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
       - name: Install real media dependencies
         if: needs.selection.outputs.real_media == 'true'
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-noto-cjk
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          choco install ffmpeg --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'FFmpeg installation failed.' }
+          $binary = Get-ChildItem -LiteralPath "$env:ChocolateyInstall\lib\ffmpeg\tools" -Filter ffmpeg.exe -Recurse -File | Select-Object -First 1
+          if (-not $binary) { throw 'The FFmpeg package contains no executable.' }
+          $ffprobe = Join-Path $binary.Directory.FullName 'ffprobe.exe'
+          if (-not (Test-Path -LiteralPath $ffprobe -PathType Leaf)) { throw 'FFprobe is unavailable.' }
+          $binary.Directory.FullName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          & $binary.FullName -version
+          if ($LASTEXITCODE -ne 0) { throw 'FFmpeg is unavailable.' }
+          & $ffprobe -version
+          if ($LASTEXITCODE -ne 0) { throw 'FFprobe is unavailable.' }
       - name: Required common and impacted gates
         env:
           COMMON: ${{ needs.selection.outputs.common }}
@@ -119,19 +158,21 @@ jobs:
           E2E_SPECS: ${{ needs.selection.outputs.e2e_specs }}
           TOOLS_SCOPE: ${{ needs.selection.outputs.tools_scope }}
           APPLICATION: ${{ needs.selection.outputs.application }}
+        shell: pwsh
         run: |
-          packs=()
-          [[ "$COMMON" != true ]] || packs+=(--pack common)
-          [[ "$BROWSER" != true ]] || packs+=(--pack browser)
-          [[ "$SMOKE" != true ]] || packs+=(--pack smoke)
-          [[ "$MEDIA" != true ]] || packs+=(--pack media)
-          [[ "$LONG_MEDIA" != true ]] || packs+=(--pack long-media)
-          [[ "$LIFECYCLE" != true ]] || packs+=(--pack lifecycle)
-          [[ "$TOOLS" != true ]] || packs+=(--pack tools)
-          [[ "$E2E" != true ]] || packs+=(--pack e2e)
-          runner=(uv run --no-sync python)
-          if [[ "$APPLICATION" == false && "$TOOLS_SCOPE" == checklist ]]; then runner=(python); fi
-          "${runner[@]}" scripts/test_workflow.py --stage merge --tools-scope "$TOOLS_SCOPE" --e2e-specs "$E2E_SPECS" "${packs[@]}"
+          $ErrorActionPreference = 'Stop'
+          $packs = @()
+          foreach ($name in @('common', 'browser', 'smoke', 'media', 'long-media', 'lifecycle', 'tools', 'e2e')) {
+            $flag = [Environment]::GetEnvironmentVariable($name.Replace('-', '_').ToUpperInvariant())
+            if ($flag -eq 'true') { $packs += @('--pack', $name) }
+          }
+          $arguments = @('scripts/test_workflow.py', '--stage', 'merge', '--tools-scope', $env:TOOLS_SCOPE, '--e2e-specs', $env:E2E_SPECS) + $packs
+          if ($env:APPLICATION -eq 'false' -and $env:TOOLS_SCOPE -eq 'checklist') {
+            python @arguments
+          } else {
+            uv run --no-sync python @arguments
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v6
         if: always()
         with:
@@ -142,11 +183,11 @@ jobs:
           include-hidden-files: true
           retention-days: 7
 
-  windows-lifecycle:
+  posix-contracts:
     needs: selection
-    if: needs.selection.outputs.lifecycle == 'true'
-    runs-on: windows-latest
-    timeout-minutes: 8
+    if: needs.selection.outputs.common == 'true' || needs.selection.outputs.lifecycle == 'true' || (needs.selection.outputs.tools == 'true' && needs.selection.outputs.tools_scope != 'checklist') || needs.selection.outputs.media == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
       PYTHONUTF8: '1'
       PYTHONIOENCODING: utf-8
@@ -155,20 +196,55 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.13.4"
+          enable-cache: true
+      - run: uv sync --frozen --group test --no-group build --no-dev
       - uses: pnpm/action-setup@v6
+        if: needs.selection.outputs.lifecycle == 'true'
         with:
           version: 11.28.4
           run_install: false
       - uses: actions/setup-node@v5
+        if: needs.selection.outputs.lifecycle == 'true'
         with:
           node-version: '22.23.4'
           package-manager-cache: false
       - run: pnpm install --frozen-lockfile --ignore-scripts
-      - run: python scripts/test_workflow.py --stage merge --pack lifecycle
+        if: needs.selection.outputs.lifecycle == 'true'
+      - name: POSIX path and symlink contracts
+        if: needs.selection.outputs.common == 'true'
+        run: >-
+          uv run --no-sync python scripts/run_check.py --timeout 120 --
+          uv run --no-sync python scripts/run_tests.py --required --report .artifacts/posix-paths.json
+          tests.test_editor_manifest.EditorManifestTests.test_rejects_symlink_escape
+          tests.test_editor_manifest.EditorManifestTests.test_accepts_symlink_within_web_directory
+          tests.test_asr_presets.RecognitionPresetTests.test_symbolic_links_are_unavailable_and_cannot_be_loaded
+          tests.test_thumbnail_cache.ThumbnailCacheTests.test_symlink_registration_matches_resolved_source_namespace
+          tests.test_gui_web.GuiWebBridgeTests.test_open_existing_path_uses_external_opener_for_file_and_folder
+      - name: Unix checksum contracts
+        if: needs.selection.outputs.tools == 'true' && needs.selection.outputs.tools_scope != 'checklist'
+        run: >-
+          uv run --no-sync python scripts/run_check.py --timeout 120 --
+          uv run --no-sync python scripts/run_tests.py --required --report .artifacts/posix-checksum.json
+          tests.test_verify_sha256_script
+      - name: POSIX process lifecycle
+        if: needs.selection.outputs.lifecycle == 'true'
+        run: uv run --no-sync python scripts/test_workflow.py --stage merge --pack lifecycle
+      - name: Linux real media dependencies
+        if: needs.selection.outputs.media == 'true'
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Linux real bad-file probe contracts
+        if: needs.selection.outputs.media == 'true'
+        run: >-
+          uv run --no-sync python scripts/run_check.py --timeout 180 --
+          uv run --no-sync python scripts/run_tests.py --required --report .artifacts/posix-ffprobe.json
+          tests.test_ffprobe_failure_integration
       - uses: actions/upload-artifact@v6
         if: always()
         with:
-          name: windows-lifecycle-evidence
+          name: posix-contract-evidence
           path: .artifacts/
           include-hidden-files: true
           retention-days: 7
@@ -199,7 +275,7 @@ jobs:
   test-gate:
     name: Required test gate
     if: always()
-    needs: [selection, documentation, editor, windows-lifecycle, browser-gates, website]
+    needs: [selection, documentation, editor, posix-contracts, browser-gates, website]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5

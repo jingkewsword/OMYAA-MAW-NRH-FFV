@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import ast
 import re
+import sys
 from pathlib import Path
 
 PYTHON_PACKS = ("common", "media", "long-media", "tools", "manual")
@@ -99,17 +100,19 @@ def source_test_ids(path: Path) -> list[str]:
 
 
 def allowed_platform_skip(test_id: str, reason: str) -> bool:
-    """Dependency/codec/fixture skips are never successes in a required pack."""
+    """Only exact platform guards are exempt; missing capabilities still fail."""
+    identity = test_id.removeprefix("tests.")
+    if (identity == "test_ass_fonts.FontRootsTests.test_darwin_roots_include_mobile_asset_font_directories"
+            and reason == "本机没有 MobileAsset 字体资产目录"):
+        return sys.platform in {"win32", "linux"}
     if os.name == "nt":
-        return (test_id.endswith("test_open_existing_path_uses_external_opener_for_file_and_folder")
-                or "test_verify_sha256_script.VerifySha256ScriptTests" in test_id
-                and "需要能读取仓库路径且带 sha256sum/awk/grep 的 bash" in reason
-                or ("symbolic links unavailable:" in reason or "Symlink creation is unavailable:" in reason)
-                and any(name in test_id for name in ("test_editor_manifest.", "test_asr_presets.")))
-    return (test_id in WINDOWS_FFMPEG_TESTS and reason == "Windows PATHEXT resolution"
-            or test_id.endswith("test_open_output_folder_uses_startfile_on_windows")
-            or "test_local_log.DefaultLogDirectoryTests." in test_id)
-
+        return (identity == "test_gui_web.GuiWebBridgeTests.test_open_existing_path_uses_external_opener_for_file_and_folder"
+                and reason == "Non-Windows paths use the external opener")
+    return (identity in {name.removeprefix("tests.") for name in WINDOWS_FFMPEG_TESTS} and reason == "Windows PATHEXT resolution"
+            or identity == "test_gui_web.GuiWebBridgeTests.test_open_output_folder_uses_startfile_on_windows"
+            and reason == "os.startfile 仅 Windows 可用；os.name 补丁会让 pathlib 选择 WindowsPath"
+            or identity == "test_local_log.DefaultLogDirectoryTests.test_uses_localappdata_namespace"
+            and reason == "LOCALAPPDATA 变量仅为 Windows 语义")
 
 ALL_MERGE = {"common", "browser", "smoke", "media", "long-media", "lifecycle", "tools", "editor-e2e", "website"}
 
@@ -255,6 +258,8 @@ def select_packs(paths: list[str], *, release: bool = False) -> dict:
         elif path.startswith(("resources/", "scripts/build-", "scripts/verify_", "scripts/packaging/", "runtime/", "local-runtime/", "ocr-runtime/", "moss-runtime/")) or path in {"MAW.spec", "requirements.txt"}:
             preview = True
             selected.update({"tools", "media"})
+            if path in {"scripts/build-editor.mjs", "scripts/build-launcher.mjs"}:
+                selected.add("editor-e2e")
         else:
             selected.update(ALL_MERGE)
             preview = True
