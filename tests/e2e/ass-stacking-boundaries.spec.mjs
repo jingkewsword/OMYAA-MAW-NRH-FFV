@@ -2,7 +2,7 @@
 // No production positioning helper or predicted anchor formula is an oracle.
 import { expect, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
+import { copyFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { cleanupTempDir, disableOnboarding, findFreePort, generateWav,
   generateWaveformPayload, makeTempDir, startServer } from './helpers.mjs';
@@ -23,12 +23,12 @@ test.afterAll(async () => { await server?.stop(); cleanupTempDir(tempDir); });
 
 const cue = (id, text, start = 0, end = 4000) => ({ id, text, start, end });
 const cases = [
-  { name: 'static single-line control', times: [1000] },
+  { name: 'static single-line control', times: [1000], faultControl: true },
   { name: '1440p preview and burn share the native frame coordinate system',
     width: 2560, height: 1440, times: [1000] },
   { name: 'main explicit multiline', main: 'Main one\nMain two\nMain three', times: [1000] },
   { name: 'secondary explicit multiline', extension: 'Secondary one\nSecondary two\nSecondary three', times: [1000] },
-  { name: 'largest emphasis and comment runs', main: 'Main **BIG**\n//COMMENT//',
+  { name: 'largest emphasis and comment runs', main: 'Main **BIG**\n%%COMMENT%%',
     emphasisScale: 2.4, commentScale: 2.2, times: [1000] },
   { name: 'top edge moves the complete group into view', alignment: 8, marginV: 0, times: [1000] },
   { name: 'rotated left-aligned paint', alignment: 7, extensionAlignment: 1,
@@ -51,11 +51,14 @@ const cases = [
     animations: { t: { enabled: true, startMs: 0, endMs: 1500, accel: 2, tags: '\\fs120\\frz25' } },
     times: [250, 750, 1250] },
   { name: 'emphasis and comment font-size clocks survive fractional group fit', marginV: 220,
-    main: 'Plain **BIG**\n//COMMENT//\nPlain **BIG**\n//COMMENT//',
-    extension: 'Secondary **BIG**\n//COMMENT//',
+    main: 'Plain **BIG**\n%%COMMENT%%\nPlain **BIG**\n%%COMMENT%%',
+    extension: 'Secondary **BIG**\n%%COMMENT%%',
     emphasisScale: 2.4, commentScale: 2.2,
     animations: { t: { enabled: true, startMs: 0, endMs: 1500, accel: 2, tags: '\\fs120\\frz10' } },
     times: [250, 750, 1250] },
+  { name: 'inline italic markers agree between canvas and libass', marginV: 220,
+    main: '//Italic words// and %%MUTED%% text',
+    extension: 'Secondary //slanted//', times: [1000] },
   { name: 'zero move times interpolate over the complete cue',
     animations: { move: { enabled: true, x1: 300, y1: 560, x2: 750, y2: 420, t1: 0, t2: 0 } },
     times: [250, 1000, 1750], verifyMove: true, verifyOriginalMove: true },
@@ -138,6 +141,7 @@ async function capture(page, timeMs) {
     const native = document.querySelector('.ass-preview-canvas');
     const draws = [];
     const texts = [];
+    const fontPaints = [];
     const originalDraw = CanvasRenderingContext2D.prototype.drawImage;
     const originalText = CanvasRenderingContext2D.prototype.fillText;
     CanvasRenderingContext2D.prototype.drawImage = function (source, ...args) {
@@ -152,6 +156,7 @@ async function capture(page, timeMs) {
     };
     CanvasRenderingContext2D.prototype.fillText = function (text, ...args) {
       texts.push(String(text));
+      fontPaints.push({ text: String(text), font: this.font });
       return originalText.call(this, text, ...args);
     };
     try {
@@ -222,16 +227,43 @@ async function capture(page, timeMs) {
         else result.bands[result.bands.length - 1][1] = Math.max(result.bands[result.bands.length - 1][1], y + 1);
       }
     }
-    return { width, height, tracks, nativeTracks, texts, captured: draws.length, assigned: cursor,
+    return { width, height, tracks, nativeTracks, texts, fontPaints, captured: draws.length, assigned: cursor,
       nativePng: native.toDataURL('image/png'), replayPng: combined.toDataURL('image/png'),
       ass: MaweExportSrt.buildAss(),
     };
   }, timeMs);
 }
 
-function libass(ass, timeMs, testInfo, label) {
+// Per-test, source-content keyed reuse: a changed browser export cannot hit an
+// earlier sequence. Raw files are still materialized under each original label.
+const oracleSeries = new WeakMap();
+function libass(ass, timeMs, testInfo, label, times = [timeMs]) {
   const path = testInfo.outputPath(`${label}.ass`);
   writeFileSync(path, ass);
+  if (times.length > 1) {
+    let cache = oracleSeries.get(testInfo);
+    if (!cache) oracleSeries.set(testInfo, cache = new Map());
+    const key = JSON.stringify([ass, times]);
+    let series = cache.get(key);
+    if (!series) {
+      const stem = join(tempDir, `oracle-series-${testInfo.testId}-${cache.size}`);
+      writeFileSync(`${stem}.ass`, ass);
+      const metrics = JSON.parse(execFileSync(process.env.MAW_E2E_PYTHON || 'python', [
+        resolve('tests/helpers/ass-stacking-pixel-oracle.py'), `${stem}.ass`, String(timeMs),
+        stem, '--times', ...times.map(String),
+      ], { encoding: 'utf8', timeout: 40_000, windowsHide: true }));
+      cache.set(key, series = { stem, metrics });
+    }
+    const index = times.indexOf(timeMs);
+    if (index < 0) throw new Error(`Missing libass sample time: ${timeMs}`);
+    const output = testInfo.outputPath(`${label}-libass`);
+    for (const kind of ['', '-guard', '-viewport']) {
+      copyFileSync(`${series.stem}${kind}-${index}.png`, `${output}${kind}.png`);
+      copyFileSync(`${series.stem}${kind}.ffmpeg.log`, `${output}${kind}.ffmpeg.log`);
+      if (kind) copyFileSync(`${series.stem}${kind}.ass`, `${output}${kind}.ass`);
+    }
+    return structuredClone(series.metrics[index]);
+  }
   return JSON.parse(execFileSync(process.env.MAW_E2E_PYTHON || 'python', [
     resolve('tests/helpers/ass-stacking-pixel-oracle.py'), path, String(timeMs),
     testInfo.outputPath(`${label}-libass`),
@@ -284,11 +316,11 @@ for (const fixture of cases) test(fixture.name, async ({ page }, testInfo) => {
   for (const time of fixture.times) {
     const frame = await capture(page, time);
     const metrics = await evidence(frame, testInfo, `t${time}`);
-    const pixels = libass(frame.ass, time, testInfo, `t${time}`);
+    const pixels = libass(frame.ass, time, testInfo, `t${time}`, fixture.times);
     if (originalClock) {
       // The legacy single-cue raw libass animation is the independent timing oracle.
       // Matching two consumers of the group planner would be circular.
-      const original = libass(originalClock, time, testInfo, `original-clock-${time}`);
+      const original = libass(originalClock, time, testInfo, `original-clock-${time}`, fixture.times);
       writeFileSync(testInfo.outputPath(`original-clock-${time}.json`), JSON.stringify(original, null, 2));
       for (const engine of ['canvas', 'libass']) {
         const box = engine === 'canvas' ? frame.tracks[0].box : pixels.tracks.main.box;
@@ -304,7 +336,13 @@ for (const fixture of cases) test(fixture.name, async ({ page }, testInfo) => {
       expect.soft(track.outside, `Canvas track ${index} loses no painted pixels`).toBe(0);
     }
     expect.soft(pixels.outside, 'libass loses no painted pixels').toBe(0);
-    expect.soft(pixels.sha256, 'guard-band translation preserves native libass pixels').toBe(pixels.guardCropSha256);
+    expect.soft(pixels.guardViewportSha256, 'independent viewport clipping preserves all in-frame libass pixels').toBe(pixels.guardCropSha256);
+    if (fixture.faultControl) {
+      const clippedSource = frame.ass.replace(/\\pos\([^,]+,([^)]+)\)/u, '\\pos(0,$1)');
+      expect(clippedSource).not.toBe(frame.ass);
+      const clipped = libass(clippedSource, time, testInfo, `fault-offscreen-${time}`);
+      expect(clipped.outside, 'the independent guard detects actual offscreen paint').toBeGreaterThan(0);
+    }
     expect.soft(pixels.fontSelections.length, 'libass records an actual selected font').toBeGreaterThan(0);
     const guard = pixels.guardBox;
     if (guard) {
@@ -322,7 +360,7 @@ for (const fixture of cases) test(fixture.name, async ({ page }, testInfo) => {
         frame.tracks[index].box[coordinate] - pixels.tracks[key].box[coordinate]),
       `${key} Canvas/libass edge ${coordinate} agrees within 3 native pixels`).toBeLessThanOrEqual(3);
     }
-    frames.push({ canvas: metrics, libass: pixels });
+    frames.push({ canvas: metrics, libass: pixels, ass: frame.ass });
   }
   if (fixture.verifyGrowth) for (const engine of ['canvas', 'libass']) {
     const box = frame => engine === 'canvas' ? frame.canvas.tracks[0].box : frame.libass.tracks.main.box;
@@ -338,11 +376,19 @@ for (const fixture of cases) test(fixture.name, async ({ page }, testInfo) => {
     await configure(page, { main: 'M', extension: 'W', overlaySegments: [cue('overlay-control', 'O')] });
     const small = await capture(page, 1000);
     const reference = libass(small.ass, 1000, testInfo, 'fit-single-line-control');
+    // A secondary cue may follow its own preset over the main cue. Measure
+    // each independent layer to distinguish occlusion from dropped glyphs.
+    const isolated = ['main', 'extension', 'overlay'].map((role, layer) => {
+      const source = tall.ass.split('\n').filter(line => !line.startsWith('Dialogue: ')
+        || line.startsWith(`Dialogue: ${layer},`)).join('\n');
+      return libass(source, 1000, testInfo, `fit-isolated-${role}`).tracks[role];
+    });
     for (const engine of ['canvas', 'libass']) {
       const full = engine === 'canvas' ? tall.canvas.tracks : ['main', 'extension', 'overlay'].map(k => tall.libass.tracks[k]);
       const base = engine === 'canvas' ? small.tracks : ['main', 'extension', 'overlay'].map(k => reference.tracks[k]);
       const ratios = full.map((track, i) => (track.bands[0][1] - track.bands[0][0]) / (base[i].bands[0][1] - base[i].bands[0][0]));
-      expect.soft(full.map(t => t.bands.length), `${engine} preserves every multiline glyph band`).toEqual([11, 3, 3]);
+      expect.soft((engine === 'canvas' ? full : isolated).map(t => t.bands.length),
+        `${engine} preserves every multiline glyph band`).toEqual([11, 3, 3]);
       // 组缩放只作用于主/叠加；副字幕跟随其样式预设，字号不被整组缩小。
       expect.soft(ratios[0], `${engine} actually shrinks oversized group`).toBeLessThan(0.95);
       expect.soft(ratios[1], `${engine} secondary keeps its preset size`).toBeGreaterThan(0.95);
@@ -378,6 +424,33 @@ for (const fixture of cases) test(fixture.name, async ({ page }, testInfo) => {
             .toBeCloseTo(rootDelta, 6);
         }
       }
+    }
+  }
+});
+
+test('solo inline italic and immediate targets agree before during and after the original transform clock', async ({ page }, testInfo) => {
+  test.setTimeout(180_000); // Six frames from exported ASS and an explicit per-run reference.
+  for (const target of [0, 1]) {
+    await configure(page, { main: 'MAIN //MMMM// TAIL', extensionSegments: [], overlaySegments: [],
+      animations: { t: { enabled: true, startMs: 100, endMs: 1100, tags: `\\i${target}` } } });
+    await page.evaluate(value => { ASS_STYLE_LIBRARY.styles.find(style => style.id === 'ass').italic = !value; }, target);
+    for (const time of [50, 500, 1500]) {
+      const frame = await capture(page, time);
+      const label = `solo-italic-${target}-${time}`;
+      await evidence(frame, testInfo, label);
+      expect(await page.evaluate(() => window.MaweAssPreview.stackPlan.slices.every(slice => slice.legacy))).toBe(true);
+      for (const [text, italic] of [['MAIN ', Boolean(target)], ['MMMM', true], [' TAIL', Boolean(target)]]) {
+        const painted = frame.fontPaints.filter(item => item.text === text);
+        expect(painted.length, `real Canvas paints ${text}`).toBeGreaterThan(0);
+        for (const item of painted) expect(/^italic /u.test(item.font), `${text} italic at ${time}ms`).toBe(italic);
+      }
+      const event = frame.ass.split('\n').find(line => line.startsWith('Dialogue:'));
+      expect(event).toContain(`\\t(100,1100,1,\\i${target})`);
+      const expectedBody = target ? 'MAIN MMMM TAIL' : String.raw`MAIN {\i1}MMMM{\i0} TAIL`;
+      const expected = frame.ass.replace(event, event.slice(0, event.indexOf('MAIN ')) + expectedBody);
+      const actualPixels = libass(frame.ass, time, testInfo, label);
+      const expectedPixels = libass(expected, time, testInfo, `${label}-expected`);
+      expect(actualPixels.sha256, 'real libass matches the explicit per-run italic reference').toBe(expectedPixels.sha256);
     }
   }
 });
@@ -446,10 +519,11 @@ test('secondary preset paint remains fixed before during and after the main cue'
   await configure(page, { mainSegments: [cue('short-main', 'Main', 500, 1500)],
     extensionSegments: [cue('long-secondary', 'Secondary', 0, 2000)], overlaySegments: [] });
   let previous;
-  for (const time of [250, 1000, 1750]) {
+  const times = [250, 1000, 1750];
+  for (const time of times) {
     const frame = await capture(page, time);
     await evidence(frame, testInfo, `secondary-alone-${time}`);
-    const pixels = libass(frame.ass, time, testInfo, `secondary-alone-${time}`);
+    const pixels = libass(frame.ass, time, testInfo, `secondary-alone-${time}`, times);
     writeFileSync(testInfo.outputPath(`secondary-alone-${time}-libass.json`), JSON.stringify(pixels, null, 2));
     const actual = frame.nativeTracks.extension.box;
     expect(actual, 'Canvas paints the fixed extension').not.toBeNull();
@@ -579,11 +653,12 @@ for (const [name, t1, t2] of [['instant', 500, 500], ['linear', 0, 1000]]) {
       return source;
     });
     const results = [];
-    for (const time of [490, 500, 501, 1490, 1500, 1501, 1750]) {
+    const times = [490, 500, 501, 1490, 1500, 1501, 1750];
+    for (const time of times) {
       const frame = await capture(page, time);
       await evidence(frame, testInfo, `slice-move-${time}`);
-      const pixels = libass(frame.ass, time, testInfo, `slice-move-${time}`);
-      const reference = libass(original, time, testInfo, `unsplit-move-${time}`);
+      const pixels = libass(frame.ass, time, testInfo, `slice-move-${time}`, times);
+      const reference = libass(original, time, testInfo, `unsplit-move-${time}`, times);
       results.push({ time, canvas: frame.nativeTracks.main, grouped: pixels.tracks.main, original: reference.tracks.main });
       expect.soft(frame.captured, 'slice move records all actual paint').toBe(frame.assigned);
       expect.soft(pixels.sha256, `slice move guard preserves native pixels at ${time}`).toBe(pixels.guardCropSha256);
@@ -619,11 +694,12 @@ test('overlapping fad intervals retain libass fade-in priority in actual pixels'
     return source;
   });
   const results = [];
-  for (const time of [250, 500, 750]) {
+  const times = [250, 500, 750];
+  for (const time of times) {
     const frame = await capture(page, time);
     await evidence(frame, testInfo, `overlap-fad-${time}`);
-    const pixels = libass(frame.ass, time, testInfo, `overlap-fad-${time}`);
-    const original = libass(standalone, time, testInfo, `original-fad-${time}`);
+    const pixels = libass(frame.ass, time, testInfo, `overlap-fad-${time}`, times);
+    const original = libass(standalone, time, testInfo, `original-fad-${time}`, times);
     results.push({ time, canvas: frame.nativeTracks, grouped: pixels, original });
     expect.soft(pixels.sha256, 'fad guard render preserves native pixels').toBe(pixels.guardCropSha256);
     expect.soft(pixels.outside, 'fad group loses no actual pixels').toBe(0);
@@ -703,10 +779,11 @@ test('libass keeps nonlinear transform and fade clocks when a cue is sliced', as
   const shifted = header + 'Dialogue: 0,0:00:00.50,0:00:02.00,Default,,0,0,0,,{\\t(-500,500,2,\\fs144)\\fade(255,0,255,-500,500,1000,1500)}Clock\n';
   const reset = header + 'Dialogue: 0,0:00:00.50,0:00:02.00,Default,,0,0,0,,{\\t(0,1000,2,\\fs144)\\fade(255,0,255,0,1000,1500,2000)}Clock\n';
   const results = [];
-  for (const time of [750, 1750]) {
-    const original = libass(reference, time, testInfo, `clock-reference-${time}`);
-    const preserved = libass(shifted, time, testInfo, `clock-shifted-${time}`);
-    const restarted = libass(reset, time, testInfo, `clock-reset-${time}`);
+  const times = [750, 1750];
+  for (const time of times) {
+    const original = libass(reference, time, testInfo, `clock-reference-${time}`, times);
+    const preserved = libass(shifted, time, testInfo, `clock-shifted-${time}`, times);
+    const restarted = libass(reset, time, testInfo, `clock-reset-${time}`, times);
     results.push({ time, original: original.sha256, preserved: preserved.sha256, restarted: restarted.sha256 });
     expect(preserved.sha256, `sliced nonlinear/fade clock at ${time}ms`).toBe(original.sha256);
     expect(restarted.sha256, `reset clock is observably different at ${time}ms`).not.toBe(original.sha256);
@@ -730,14 +807,35 @@ test('exported layout slices preserve the original main cue nonlinear and fade c
     return { grouped, standalone: MaweExportSrt.buildAss() };
   });
   const rows = [];
-  for (const time of [750, 1750]) {
-    const grouped = libass(sources.grouped, time, testInfo, `candidate-clock-grouped-${time}`);
-    const original = libass(sources.standalone, time, testInfo, `candidate-clock-standalone-${time}`);
+  const times = [750, 1750];
+  for (const time of times) {
+    // Position may change with layout. Put the independent original-clock
+    // reference at that position so font raster phase is held constant; never
+    // copy the candidate's timestamps, font-size, transform or fade tags.
+    const timestamp = text => text.split(':').reduce((value, part) => value * 60 + Number(part), 0) * 1000;
+    const active = sources.grouped.split('\n').filter(line => line.startsWith('Dialogue: 0,'))
+      .map(line => line.slice(10).split(','))
+      .find(fields => timestamp(fields[1]) <= time && time < timestamp(fields[2]));
+    const position = active.slice(9).join(',').match(/\\(?:an[1-9]|pos\([^)]+\))/gu);
+    expect(position?.some(tag => tag.startsWith('\\pos('))).toBe(true);
+    const alignedReference = sources.standalone.replace(/^Dialogue: 0,.*$/gmu, line => {
+      const fields = line.slice(10).split(',');
+      const text = fields.slice(9).join(',').replace(/\\(?:an[1-9]|pos\([^)]+\))/gu, '');
+      return 'Dialogue: ' + fields.slice(0, 9).join(',') + ',{' + position.join('') + '}' + text;
+    });
+    const grouped = libass(sources.grouped, time, testInfo, `candidate-clock-grouped-${time}`, times);
+    const original = libass(alignedReference, time, testInfo, `candidate-clock-standalone-${time}`);
     rows.push({ time, grouped: grouped.tracks.main, original: original.tracks.main });
     expect(grouped.tracks.main.painted, `main remains visible at ${time}ms`).toBeGreaterThan(30);
     expect(grouped.tracks.main.glyphSha256,
       `layout may move main, but must not restart its nonlinear transform/fade at ${time}ms`)
       .toBe(original.tracks.main.glyphSha256);
+    if (time === 750) {
+      const restartedSource = alignedReference.replace(/\\t\(0,1000,2,/gu, '\\t(500,1500,2,');
+      expect(restartedSource).not.toBe(alignedReference);
+      const restarted = libass(restartedSource, time, testInfo, 'candidate-clock-restarted');
+      expect(grouped.tracks.main.glyphSha256, 'a restarted transform remains observably different').not.toBe(restarted.tracks.main.glyphSha256);
+    }
   }
   writeFileSync(testInfo.outputPath('candidate-clock-comparison.json'), JSON.stringify(rows, null, 2));
   // This fixture changes the visible top-edge group at 500/1500ms. Merely

@@ -1,3 +1,4 @@
+import { gotoWaveform } from './helpers.mjs';
 import { expect, test } from '@playwright/test';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -80,7 +81,7 @@ test.beforeEach(async ({ page }, testInfo) => {
   await page.addInitScript(() => {
     localStorage.setItem('moy.asr.editor.settings.v1', JSON.stringify({ autoSaveProject: false }));
   });
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await expect(page.locator(MAIN_CUE_TEXT)).toBeVisible();
 });
 

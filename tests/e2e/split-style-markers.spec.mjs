@@ -104,6 +104,16 @@ for (const role of ['main', 'extension', 'overlay', 'linked']) {
     for (const segments of result) {
       expect(segments.map(s => s.text)).toEqual(['**甲**', '**乙**']);
       expect(segments.map(s => [s.start, s.end])).toEqual([[1000, 3000], [3000, 5000]]);
+      // Each split cue now carries its own complete marker pair in items.
+      // Keep per-cue agreement and the original-text conservation check at
+      // the real merge boundary, which folds adjacent closing/opening pairs.
+      expect(segments.map(s => s.items.map(i => i.text).join(''))).toEqual(segments.map(s => s.text));
+      const joined = await page.evaluate(segments => {
+        const result = AsrEditorUtils.joinSegmentTextsMassFold(segments, '', 'both');
+        return { text: result.text, itemsText: result.items.map(item => item.text).join('') };
+      }, segments);
+      expect(joined.text).toBe('**甲乙**');
+      expect(joined.itemsText).toBe('**甲乙**');
       expect(segments.map(s => s.items.map(i => i.text).join(''))).toEqual(['**甲**', '**乙**']);
       expect(segments[0].items[0].end).toBe(3000);
       expect(segments[1].items[0].start).toBe(3000);

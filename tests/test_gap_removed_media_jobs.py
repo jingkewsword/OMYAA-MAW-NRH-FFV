@@ -456,7 +456,7 @@ class MediaJobsHttpTests(unittest.TestCase):
             media_path=self.source, source_media_path=self.source, sticker_root=None, stickers=[])
         self.server = server_editor.EditorServer(("127.0.0.1", 0), project, no_waveform=True)
         self.server.media_jobs.temp_root = self.root
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread = threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
         self.thread.start()
         self.origin = f"http://127.0.0.1:{self.server.server_address[1]}"
         self.base = "/api/exports/gap-removed-video/jobs"

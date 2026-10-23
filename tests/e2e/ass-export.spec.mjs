@@ -410,14 +410,25 @@ test('ASS emphasis controls drive preview and inline export color', async ({ pag
   await page.locator('#ass-mode-toggle').check();
   await openSettingsPage(page, 'special-edit');
   await expect(page.locator('#ass-inline-text-settings')).toBeVisible();
-  await expect(page.locator('#ass-inline-text-settings input[type=checkbox]')).toHaveCount(6);
-  await expect(page.locator('[data-ass-symbol="//"]')).toHaveText('//注释//');
+  await expect(page.locator('#ass-inline-text-settings input[type=checkbox]')).toHaveCount(7);
+  await expect(page.locator('[data-ass-symbol="%%"]')).toHaveText('%%弱化%%');
+  await expect(page.locator('[data-ass-symbol="//"]')).toHaveText('//斜体//');
   await expect(page.locator('#ass-inline-text-title')).toHaveText('特殊文本');
   await expect(page.locator('#ass-special-symbol-rule')).toHaveValue('both');
   await expect(page.locator('#ass-special-symbol-rule option:checked')).toHaveText('单双皆可');
   await expect(page.locator('[data-ass-symbol="_"]')).toHaveText('_下划线_/__下划线__');
   await page.locator('#ass-special-symbol-rule').selectOption('none');
   await expect(page.locator('#ass-inline-text-options')).toBeHidden();
+  const literal = await page.evaluate(() => {
+    const text = '%%弱化%% //斜体//';
+    MaweBoot.DATA.segments = [{ start: 0, end: 4000, text }];
+    MaweDom.overlayToggle.checked = true;
+    MawePlaybackLoop.refreshSubtitlePreview(1000, 0);
+    const items = window.MaweAssCanvas.lastRender.tracks[0].lines.flatMap(line => line.items);
+    return { preview: items.map(item => item.text).join(''), ass: MaweExportSrt.buildAss() };
+  });
+  expect(literal.preview).toBe('%%弱化%% //斜体//');
+  expect(literal.ass).toContain('%%弱化%% //斜体//');
   await page.locator('#ass-special-symbol-rule').selectOption('double');
   await expect(page.locator('#ass-inline-text-options')).toBeVisible();
   await expect(page.locator('[data-ass-symbol="_"]')).toHaveText('__下划线__');
@@ -433,7 +444,7 @@ test('ASS emphasis controls drive preview and inline export color', async ({ pag
   await expect(page.locator('#ass-style-mass-help'))
     .toHaveAttribute('data-title', '基于 Markdown 语法灵感的进阶式 ASS，也可以理解为 MAW-ASS。');
   await expect(page.locator('#ass-special-format-hint'))
-    .toHaveText('你可以使用 **强调**、~~删除~~、--缩小--、++放大++、!!震动!!、>>淡入淡出<< 来添加特殊样式。');
+    .toHaveText('你可以使用 **强调**、~~删除~~、--缩小--、++放大++、!!震动!!、>>淡入淡出<<、{{放大出现}} 来添加特殊样式。');
   await expect(page.locator('#ass-special-format-menu-hint')).toBeVisible();
   await expect(page.locator('#ass-special-format-menu-hint'))
     .toHaveText('详见字幕右键菜单「左右添加字符」部分。');
@@ -834,7 +845,7 @@ test('explains a stale page when the server rejects style sync with 403', async 
 
 test('refreshes inline font metrics and interpolates fs tags in native resolution', async ({ page }) => {
   await page.goto(server.url);
-  await page.addStyleTag({ content: '@font-face { font-family: "ASS Metric Test"; src: local("Arial"); size-adjust: 150%; }' });
+  await page.addStyleTag({ content: '@font-face { font-family: "ASS Metric Test"; src: local("Arial"), local("Liberation Sans"); size-adjust: 150%; }' });
   await page.evaluate(async () => { await document.fonts.load('20px "ASS Metric Test"'); });
   const ratios = await page.evaluate(() => {
     MaweBoot.DATA.media_metadata = { video_width: 640, video_height: 360 };
@@ -994,6 +1005,15 @@ test('offsets the opaque shadow and keeps the border box shadow unclipped', asyn
       red: bbox((r, g, b) => r > 200 && g < 40 && b < 40),
     };
   });
+  const renderedColourBBoxes = async (colours) => {
+    // Font/media readiness can defer the first Canvas paint on a fresh page.
+    // Require real pixels before comparing geometry; Infinity is not a box.
+    await expect.poll(async () => {
+      const boxes = await colourBBoxes();
+      return colours.every((colour) => Object.values(boxes[colour]).every(Number.isFinite));
+    }).toBe(true);
+    return colourBBoxes();
+  };
 
   // BorderStyle 1：影子剪影相对文字整体偏移 (shad, shad)，右下露边。
   await page.evaluate(() => {
@@ -1007,7 +1027,7 @@ test('offsets the opaque shadow and keeps the border box shadow unclipped', asyn
     MaweDom.overlayToggle.checked = true;
     MawePlaybackLoop.refreshSubtitlePreview(1000, 0);
   });
-  const opaque = await colourBBoxes();
+  const opaque = await renderedColourBBoxes(['text', 'shadowBox']);
   expect(opaque.shadowBox.minX).toBeGreaterThanOrEqual(opaque.text.minX + 14);
   expect(opaque.shadowBox.minY).toBeGreaterThanOrEqual(opaque.text.minY + 14);
   expect(opaque.shadowBox.maxY).toBeGreaterThan(opaque.text.maxY);
@@ -1019,7 +1039,7 @@ test('offsets the opaque shadow and keeps the border box shadow unclipped', asyn
     Object.assign(style, { borderStyle: 3, outline: 6, outlineColor: '#ff0000', shadow: 30 });
     MawePlaybackLoop.refreshSubtitlePreview(1000, 0);
   });
-  const boxed = await colourBBoxes();
+  const boxed = await renderedColourBBoxes(['red', 'shadowBox']);
   expect(boxed.red.maxY).toBeGreaterThan(0);
   expect(boxed.shadowBox.maxY).toBeGreaterThanOrEqual(boxed.red.maxY + 20);
   expect(boxed.shadowBox.maxX).toBeGreaterThanOrEqual(boxed.red.maxX + 20);

@@ -1,5 +1,6 @@
 param(
-    [switch]$SkipTests
+    [switch]$SkipTests,
+    [switch]$PreparedEnvironment
 )
 
 Set-StrictMode -Version Latest
@@ -18,28 +19,43 @@ if (-not (Test-Path -LiteralPath $EntryPoint -PathType Leaf)) {
 
 Push-Location -LiteralPath $RepoRoot
 try {
-    uv sync --group build --frozen
+    if (-not $PreparedEnvironment) {
+        uv sync --group build --frozen
+        if ($LASTEXITCODE -ne 0) { throw "Build dependency preparation failed." }
+    }
 
     # bundle 是构建产物（不入库）：打包前显式构建；MAW.spec 会在缺失时 fail fast。
     if (-not (Get-Command pnpm -ErrorAction SilentlyContinue)) {
-        throw "pnpm is required to build web bundles. Install Node.js (>=22.13) and pnpm, then re-run."
+        throw "pnpm is required to build web bundles. Install Node.js (22.23.4+, 24.22.1+ or 26.12.1+) and pnpm, then re-run."
     }
-    pnpm install --frozen-lockfile
-    if ($LASTEXITCODE -ne 0) { throw "pnpm install failed (exit $LASTEXITCODE)." }
-    pnpm run build
-    if ($LASTEXITCODE -ne 0) { throw "Web bundle build failed (exit $LASTEXITCODE)." }
+    if ($PreparedEnvironment) {
+        # CI already built/tested these exact bundles. Verify freshness before
+        # reusing them; never accept an absent/stale artifact to save time.
+        node scripts/build-editor.mjs --check
+        if ($LASTEXITCODE -ne 0) { throw "Prepared editor bundle is missing or stale." }
+        node scripts/build-launcher.mjs --check
+        if ($LASTEXITCODE -ne 0) { throw "Prepared launcher bundle is missing or stale." }
+    } else {
+        pnpm install --frozen-lockfile --ignore-scripts
+        if ($LASTEXITCODE -ne 0) { throw "pnpm install failed (exit $LASTEXITCODE)." }
+        pnpm run build
+        if ($LASTEXITCODE -ne 0) { throw "Web bundle build failed (exit $LASTEXITCODE)." }
+    }
     # 生成托管 Runtime 的 frozen requirements txt（MAW.spec datas 条件追加打包）；
     # 主清单（local/ocr dependency-group 走 uv export，moss 走 uv pip compile）与 CPU 变体
     # （从声明源剥离 GPU 参数后原生冻结）统一由 freezer 模块执行，与
     # build-appimage.sh / release.yml / 源码模式自动补齐完全同源。
     New-Item -ItemType Directory -Path 'build' -Force | Out-Null
-    uv run python -m maw.runtimes.freezer freeze --force
+    uv run --no-sync python -m maw.runtimes.freezer freeze --force
+    if ($LASTEXITCODE -ne 0) { throw "Runtime manifest freezing failed." }
 
     if (-not $SkipTests) {
-        uv run python -m unittest tests.test_packaging_contract
+        uv run --no-sync python scripts/run_check.py --timeout 60 -- uv run --no-sync python scripts/run_tests.py --required tests.test_packaging_contract
+        if ($LASTEXITCODE -ne 0) { throw "Packaging contract tests failed." }
     }
 
-    uv run --group build pyinstaller --noconfirm --clean $SpecPath
+    uv run --no-sync --group build pyinstaller --noconfirm --clean $SpecPath
+    if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed." }
 
     if (-not (Test-Path -LiteralPath $ExePath -PathType Leaf)) {
         throw "PyInstaller completed but did not create dist\MAW\MAW.exe."

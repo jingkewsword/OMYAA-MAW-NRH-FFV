@@ -1,3 +1,4 @@
+import { gotoWaveform, waitForWaveformLayout } from './helpers.mjs';
 import { expect, test } from '@playwright/test';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -23,7 +24,7 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem('moy.asr.editor.settings.v1', JSON.stringify({ autoSaveProject: false, autoSnapAdjacentCues: false }));
   });
-  await page.goto(server.url);
+  await gotoWaveform(page, server.url);
   await expect(page.locator('.waveform-row').first()).toBeVisible();
 });
 const word = (page, index) => page.locator(`.waveform-word-block[data-segment-idx="0"][data-item-idx="${index}"]`).first();
@@ -446,7 +447,10 @@ test('classic linked edges and Alt independence edit only in-sentence items', as
     MaweBoot.DATA.timebase = { unit: 'milliseconds', fps: 30 };
     MaweSettings.EDITOR_SETTINGS.autoSnapAdjacentCues = true;
     MaweSettings.EDITOR_SETTINGS.adjacentBoundaryMode = 'classic';
-    MaweBoot.DATA.segments[0].items = [{ text: '我', start: 1000, end: 3000 }, { text: '很喜欢', start: 3000, end: 6000 }];
+    MaweBoot.DATA.segments[0].items = [
+      { text: '我', start: 1000, end: 3000, start_frame: 30, end_frame: 90 },
+      { text: '很喜欢', start: 3000, end: 6000, start_frame: 90, end_frame: 180 },
+    ];
   });
   await setWordTiming(page);
   let handle = await word(page, 0).locator('.right').boundingBox();
@@ -458,6 +462,11 @@ test('classic linked edges and Alt independence edit only in-sentence items', as
   expect(items[0].end).toBeGreaterThan(3000);
   expect(items[0].end).toBe(items[1].start);
   await page.keyboard.press('Control+z');
+  await expect.poll(async () => (await source(page)).items).toEqual([
+    { text: '我', start: 1000, end: 3000, start_frame: 30, end_frame: 90 },
+    { text: '很喜欢', start: 3000, end: 6000, start_frame: 90, end_frame: 180 },
+  ]);
+  await waitForWaveformLayout(page);
   handle = await word(page, 0).locator('.right').boundingBox();
   await page.keyboard.down('Alt');
   await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);

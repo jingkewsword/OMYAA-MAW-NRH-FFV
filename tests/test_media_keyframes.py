@@ -124,6 +124,8 @@ class KeyframeInspectorTests(unittest.TestCase):
         for declared in (True, False):
             inspector = self.inspector(ts_payload(payload, declared=declared), "mpegts")
             self.assertTrue(self.classify(inspector, len(payload)).safe)
+            # A codec parser's synthetic trailing zero is not verified payload.
+            self.assertEqual(self.classify(inspector, len(payload) + 1).reason, "payload_position_unverified")
         inspector = self.inspector(ts_payload(payload), "mpegts")
         self.assertIsNone(self.classify(inspector, len(payload) - 1).safe)
         combined = b"\0\0\1\x41\x88\0\0\1\x65\x88"
@@ -208,17 +210,27 @@ class RealKeyframeInspectorTests(unittest.TestCase):
                         target = root / f"{codec}.{extension}"
                         subprocess.run(["ffmpeg", "-nostdin", "-y", "-v", "error", "-i", str(source),
                             "-c", "copy", str(target)], capture_output=True, timeout=20, check=True)
+                        # Check byte-exact demux positions, not codec-parser rewrites.
+                        # FFmpeg 6.1's HEVC parser appends a zero to the first TS AU;
+                        # its parsed size then cannot verify the original PES bytes.
                         probe = subprocess.run(["ffprobe", "-v", "error", "-show_packets", "-show_streams",
                             "-show_format", "-show_entries", "packet=stream_index,pos,size,flags:stream=codec_name,nal_length_size:format=format_name",
                             "-of", "json", str(target)], capture_output=True, text=True, timeout=20, check=True)
                         metadata = json.loads(probe.stdout)
+                        raw_sizes = None
+                        if codec == "hevc" and extension == "ts":
+                            raw = subprocess.run(["ffprobe", "-v", "error", "-fflags", "+noparse+nofillin",
+                                "-show_packets", "-show_entries", "packet=stream_index,pos,size", "-of", "json", str(target)],
+                                capture_output=True, text=True, timeout=20, check=True)
+                            raw_sizes = {(p["stream_index"], p["pos"]): p["size"] for p in json.loads(raw.stdout)["packets"]}
                         stream = metadata["streams"][0]
                         with KeyframeInspector(target, container_name=metadata["format"]["format_name"]) as inspector:
                             keys = [p for p in metadata["packets"] if "K" in p["flags"]]
                             self.assertGreaterEqual(len(keys), 3)
                             for index, packet in enumerate(keys):
+                                size = packet["size"] if raw_sizes is None else raw_sizes[(packet["stream_index"], packet["pos"])]
                                 result = inspector.classify(stream_index=0, codec_name=codec, pos=packet["pos"],
-                                    size=packet["size"], nal_length_size=stream.get("nal_length_size"))
+                                    size=size, nal_length_size=stream.get("nal_length_size"))
                                 self.assertEqual(result.kind, "hevc_cra" if codec == "hevc" and index else f"{codec}_idr",
                                     f"{result}; stats={inspector.stats}")
                                 self.assertEqual(result.safe, codec == "h264" or index == 0)

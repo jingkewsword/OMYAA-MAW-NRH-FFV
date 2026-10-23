@@ -1,3 +1,4 @@
+import { waitForWaveformLayout } from './helpers.mjs';
 // Waveform deletion identity regression — shared scenario suite.
 // Runs identical assertions against both localhost server and portable HTML.
 // All selection is through real waveform pointer/click actions (no force).
@@ -25,6 +26,9 @@ import { join } from 'node:path';
 // 60s duration / 5s per row = 12 rows; viewport shows ~3-4 → forces virtualization.
 async function configureMultiRowMode(page) {
   await page.addInitScript(() => {
+    // Reloads intentionally restore the original fixture, not a pending save
+    // from an earlier deletion scenario. Autosave has dedicated coverage.
+    localStorage.setItem('moy.asr.editor.settings.v1', JSON.stringify({ autoSaveProject: false }));
     const settings = {
       mode: 'multi',
       layout: 'wave-right',
@@ -41,6 +45,8 @@ async function configureMultiRowMode(page) {
       waveformScale: 1,
       disabledDisplay: 'dim',
     };
+    // Reloads reuse this fixture; autosave must not persist an earlier scenario's deletions.
+    localStorage.setItem('moy.asr.editor.settings.v1', JSON.stringify({ autoSaveProject: false }));
     localStorage.setItem('moy.asr.waveform.settings.v1', JSON.stringify(settings));
   });
 }
@@ -50,6 +56,7 @@ async function configureMultiRowMode(page) {
 // segments in the current viewport + overscan are rendered. We wait for at
 // least one block to confirm the waveform is ready.
 async function waitForWaveformCues(page) {
+  await waitForWaveformLayout(page);
   await page.waitForSelector('.waveform-cue-block', { state: 'visible', timeout: 15_000 });
 }
 

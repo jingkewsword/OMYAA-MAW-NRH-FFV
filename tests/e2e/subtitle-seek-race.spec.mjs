@@ -6,6 +6,7 @@ import {
   findFreePort,
   generateProjectJson,
   generateWav,
+  waitForWaveformLayout,
   makeTempDir,
   startServer, closeSettingsPanels, openSettingsPage, toggleGlobalSettings } from './helpers.mjs';
 
@@ -31,6 +32,7 @@ async function waitForMedia(page) {
     const player = document.getElementById('player');
     return player.readyState >= 1 && Number.isFinite(player.duration) && player.duration > 0;
   });
+  await waitForWaveformLayout(page);
 }
 
 async function setClickTarget(page, value) {

@@ -181,9 +181,9 @@ test('English locale covers the editor shell and recent-project setting stays fi
       const value = node.nodeValue.trim();
       if (/[\u3400-\u9fff]/u.test(value)) found.add(value);
     }
-    document.querySelectorAll('[title], [placeholder], [aria-label]').forEach((element) => {
+    document.querySelectorAll('[title], [placeholder], [aria-label], [data-title]').forEach((element) => {
       if (element.closest(skip)) return;
-      ['title', 'placeholder', 'aria-label'].forEach((name) => {
+      ['title', 'placeholder', 'aria-label', 'data-title'].forEach((name) => {
         const value = element.getAttribute(name) || '';
         if (/[\u3400-\u9fff]/u.test(value)) found.add(value);
       });

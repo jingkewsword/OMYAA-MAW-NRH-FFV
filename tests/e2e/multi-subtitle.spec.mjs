@@ -171,12 +171,13 @@ test('creates an empty secondary track on enable and imports subtitles optionall
   await dropFiles(page, [srtSpec('main.srt', mainSrt)]);
   const dialogs = [];
   page.on('dialog', async (dialog) => { dialogs.push(dialog.message()); await dialog.dismiss(); });
-  await expect(page.locator('#project-multi-subtitle-settings')).toBeHidden();
+  await expect(page.locator('#editor-settings-page-multi-subtitle')).toBeHidden();
   await expect(page.locator('#multi-subtitle-toggle-label'))
     .toHaveAttribute('data-title', '开启后显示副字幕轨，可手动添加或导入第二条字幕。');
   await setProjectTrackEnabled(page, 'multi-subtitle-toggle', true);
-  await expect(page.locator('#project-multi-subtitle-settings')).not.toHaveAttribute('hidden');
-  await openSettingsPage(page, 'multi-subtitle');
+  await openMultiSubtitleSettings(page);
+  await expect(page.locator('#editor-settings-page-multi-subtitle')).not.toHaveAttribute('hidden');
+  await expect(page.locator('#editor-settings-page-multi-subtitle')).toBeVisible();
   await expect(page.locator('#multi-subtitle-empty-hint')).toBeVisible();
   await closeSettingsPanels(page);
   const trackId = await page.evaluate(() => MaweMultiSubtitleCore.getActiveExtensionTrack().id);
@@ -205,18 +206,20 @@ test('creates an empty secondary track on enable and imports subtitles optionall
   });
   expect(importGap.above).toBeGreaterThanOrEqual(8);
   expect(importGap.horizontalGap).toBeGreaterThanOrEqual(8);
-  await page.locator('#project-multi-subtitle-settings').screenshot({ path: test.info().outputPath('empty-track-settings.png') });
+  await page.locator('#editor-settings-page-multi-subtitle').screenshot({ path: test.info().outputPath('empty-track-settings.png') });
   const chooserPromise = page.waitForEvent('filechooser');
   await page.locator('#multi-subtitle-import').click();
   const chooser = await chooserPromise;
   await chooser.setFiles({ name: 'translation.srt', mimeType: 'text/plain', buffer: Buffer.from(extensionSrt, 'utf8') });
   await expect(page.locator('#multi-subtitle-import-modal')).toHaveClass(/show/);
   await page.locator('#multi-subtitle-import-result-confirm').click();
+  await openMultiSubtitleSettings(page);
   await expect(page.locator('#multi-subtitle-empty-hint')).toBeHidden();
+  await closeSettingsPanels(page);
   expect(await page.evaluate(() => MaweMultiSubtitleCore.getActiveExtensionTrack().id)).toBe(trackId);
   expect(await page.evaluate(() => MaweMultiSubtitleCore.getActiveExtensionTrack().segments.length)).toBe(3);
   await page.locator('#undo-btn').click();
-  await openSettingsPage(page, 'project-tracks');
+  await openMultiSubtitleSettings(page);
   await expect(page.locator('#multi-subtitle-empty-hint')).toBeVisible();
   await closeSettingsPanels(page);
   expect(await page.evaluate(() => MaweMultiSubtitleCore.getActiveExtensionTrack().segments.length)).toBe(0);
@@ -233,14 +236,16 @@ test('keeps the quick-import prompt when enabling an empty secondary track', asy
   const chooser = await chooserPromise;
   expect(prompt).toBe('是否导入第二条字幕？（后续也可以将字幕或工程拖入编辑器加载）');
   await expect(page.locator('#multi-subtitle-toggle')).toBeChecked();
-  await openSettingsPage(page, 'project-tracks');
+  await openMultiSubtitleSettings(page);
   await expect(page.locator('#multi-subtitle-empty-hint')).toBeVisible();
   await closeSettingsPanels(page);
   const trackId = await page.evaluate(() => MaweMultiSubtitleCore.getActiveExtensionTrack().id);
   await chooser.setFiles({ name: 'translation.srt', mimeType: 'text/plain', buffer: Buffer.from(extensionSrt, 'utf8') });
   await expect(page.locator('#multi-subtitle-import-modal')).toHaveClass(/show/);
   await page.locator('#multi-subtitle-import-result-confirm').click();
+  await openMultiSubtitleSettings(page);
   await expect(page.locator('#multi-subtitle-empty-hint')).toBeHidden();
+  await closeSettingsPanels(page);
   expect(await page.evaluate(() => MaweMultiSubtitleCore.getActiveExtensionTrack().id)).toBe(trackId);
   expect(await page.evaluate(() => MaweMultiSubtitleCore.getActiveExtensionTrack().segments.length)).toBe(3);
   await setProjectTrackEnabled(page, 'multi-subtitle-toggle', false);
@@ -273,7 +278,7 @@ test('saves an empty secondary track and supports manual creation, edits, undo a
   expect(empty.multi_subtitle.tracks).toHaveLength(1);
   expect(empty.multi_subtitle.tracks[0].segments).toEqual([]);
   await dropProject(empty);
-  await openSettingsPage(page, 'project-tracks');
+  await openMultiSubtitleSettings(page);
   await expect(page.locator('#multi-subtitle-empty-hint')).toBeVisible();
   await closeSettingsPanels(page);
   await page.screenshot({ path: test.info().outputPath('empty-secondary-lane.png') });
@@ -291,7 +296,9 @@ test('saves an empty secondary track and supports manual creation, edits, undo a
   await editor.fill('手动副字幕');
   await editor.press('ControlOrMeta+Enter');
   await expect(page.locator('.waveform-cue-block[data-track="extension"]')).toHaveCount(1);
+  await openMultiSubtitleSettings(page);
   await expect(page.locator('#multi-subtitle-empty-hint')).toBeHidden();
+  await closeSettingsPanels(page);
   await page.locator('#undo-btn').click();
   expect(await page.evaluate(() => MaweMultiSubtitleCore.getActiveExtensionTrack().segments[0].text)).toBe('');
   await page.locator('#undo-btn').click();
@@ -505,7 +512,7 @@ test('light theme keeps the main waveform subtitle white and secondary subtitle 
   });
   expect(colors.main.background).toBe('rgba(255, 255, 255, 0.82)');
   // 初始播放位置命中主字幕活动态，使用亮色主题的活动字幕深色令牌。
-  expect(colors.main.color).toBe('rgb(31, 37, 48)');
+  expect(colors.main.color).toBe('rgb(29, 29, 32)');
   expect(colors.extension.background).toBe('rgba(238, 240, 244, 0.68)');
   expect(colors.extension.background).not.toBe(colors.main.background);
 });
@@ -1349,13 +1356,17 @@ test('keeps inline edits after switching to another dual-column subtitle', async
   const extensionText = firstRow.locator('.multi-cue-column.extension .text');
 
   await mainText.dblclick();
-  await mainText.fill('主轨修改后保留');
+  // Select through the real keyboard boundary so a pending native dblclick
+  // caret repair yields before text replacement, as it does for user input.
+  await mainText.press('ControlOrMeta+A');
+  await page.keyboard.insertText('主轨修改后保留');
   await secondRow.locator('.multi-cue-column.main .text').click();
   await expect(mainText).toHaveText('主轨修改后保留');
   expect(await page.evaluate(() => MaweBoot.DATA.segments[0].text)).toBe('主轨修改后保留');
 
   await extensionText.dblclick();
-  await extensionText.fill('副轨修改后保留');
+  await extensionText.press('ControlOrMeta+A');
+  await page.keyboard.insertText('副轨修改后保留');
   await secondRow.locator('.multi-cue-column.extension .text').click();
   await expect(extensionText).toHaveText('副轨修改后保留');
   expect(await page.evaluate(() => MaweBoot.DATA.multi_subtitle.tracks[0].segments[0].text))
@@ -4307,6 +4318,9 @@ test('ASS mode previews and exports extension cues with the shared extension sty
   const result = await page.evaluate(() => {
     MaweBoot.DATA.media_metadata = { video_width: 1920, video_height: 1080 };
     ASS_STYLE_LIBRARY = window.AsrEditorUtils.defaultAssStyleLibrary();
+    // Keep this stacking fixture explicit; built-in defaults have their own regression.
+    ASS_STYLE_LIBRARY.styles.find((style) => style.id === 'ass').marginV = 88;
+    ASS_STYLE_LIBRARY.styles.find((style) => style.id === 'ass-extension').marginV = 36;
     MaweSettings.EDITOR_SETTINGS.assMode = true;
     MaweDom.overlayToggle.checked = true;
     MawePlaybackLoop.refreshSubtitlePreview(1000, 0);

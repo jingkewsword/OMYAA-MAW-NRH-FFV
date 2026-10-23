@@ -219,10 +219,20 @@ test('JKL direction mode drives the timeline backward and forward', async ({ pag
     await expect(page.locator('#media-playback-rate')).toHaveValue(rate);
   }
 
-  const stoppedAt = await page.evaluate(() => document.getElementById('player').currentTime);
+  // At -16x, one frame between a CDP sample and key dispatch moves ~267ms.
+  // Capture the clock at the actual input boundary, before the page handler.
+  await page.evaluate(() => {
+    window.jklStopAt = null;
+    window.addEventListener('keydown', event => {
+      if (event.key.toLowerCase() === 'k') window.jklStopAt = document.getElementById('player').currentTime;
+    }, { capture: true, once: true });
+  });
   await page.keyboard.press('k');
+  const stoppedAt = await page.evaluate(() => window.jklStopAt);
+  expect(stoppedAt).not.toBeNull();
   await expect(page.locator('#media-playback-rate')).toHaveValue('1');
   await expect.poll(() => page.evaluate(() => document.getElementById('player').paused)).toBe(true);
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await expect.poll(() => page.evaluate((expected) => {
     return Math.abs(document.getElementById('player').currentTime - expected);
   }, stoppedAt)).toBeLessThan(0.01);

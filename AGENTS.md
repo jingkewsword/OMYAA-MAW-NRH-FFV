@@ -60,13 +60,14 @@ uv run python edit.py --blank
 以下是维护者准备环境和手动验证的命令；Agent 执行遵循本节后面的命令与日志纪律。
 
 ```powershell
-uv sync
+uv sync --group test
 pnpm install --frozen-lockfile
 pnpm run check:editor
 pnpm run typecheck
 node --test tests\test_editor_script_syntax.mjs tests\test_editor_script_order.mjs
 node --test tests\test_editor_utils.mjs tests\test_waveform_js.mjs
-uv run python scripts/run_tests.py
+uv run --no-sync python scripts/test_workflow.py --stage dev
+uv run --no-sync python scripts/test_workflow.py --stage merge --base-ref origin/main
 git diff --check
 ```
 
@@ -76,6 +77,8 @@ git diff --check
 新增业务逻辑写入所属领域模块，避免再扩大入口。目录位置不决定执行顺序。
 
 ### Agent 命令执行：避免 uv 超时卡住
+
+开发核心、修改影响、合并与发布 required 规则见[测试分层](docs/INDEX.md#engineering-test-workflow)。`scripts/test_workflow.py` 内部复用有界 `run_check.run`，可直接作为统一入口；其他测试命令仍用下面的外层包装。`--plan-only` 先确认范围，未知改动扩大，依赖 skip 不能算通过。新增重测试必须说明独有故障边界、成本与触发条件，优先复用已有夹具和行为表。
 
 - `uv run` 每次执行都会重新解析并可能同步环境，冷启动时远超命令工具的默认超时（约 2 分钟），表现为命令"卡住"且长时间无输出。
 - Agent 自动化执行的命令一律使用 `uv run --no-sync`（环境由开发者手动 `uv sync` 维护）。
@@ -91,9 +94,9 @@ git diff --check
 - 对页面 / 内联脚本做成员断言的测试类，继承 `tests/compact_assertions.py` 的 `CompactContainerAssertions` 混入：失败信息压缩为「needle + 容器规模」，比截断更好读。`tests/test_compact_assertions_usage.py` 会扫出漏掉混入的类（漏了直接红灯），压缩行为本身由 `tests/test_run_tests_runner.py` 守门。
 - 后台长驻进程（serve.py、http.server 等）不要用会等待进程树的方式启动：优先用独立终端，或把输出重定向到文件后再以端口探活（如 `Invoke-WebRequest` 轮询），用完必须终止进程。曾发生后台 server 挂住会话 2 小时以上的事故。
 - 禁止用 bash 后台 `&`（含 `nohup ... &`）启动任何长驻进程：stdin 仍挂在会话管道上永不 EOF，即使重定向 stdout/stderr，命令工具也会等待进程树而永久阻塞（2026-10-09 `python -m http.server ... &` 事故，探活成功后仍卡死）。需要本地服务一律 paseo 独立终端启动、用完 kill；一次性验证（如本地打开生成的 HTML）优先静态校验，不起服务。
+- 不依赖固定全量耗时估算：各组按 `test_workflow.py` 的期限执行并留存实测。合成失活测试的短期限只用于 harness；真实应用服务保持原默认期限。
 - paseo 独立终端发命令必须以 `\r`（回车）结尾：`\n` 只会换行回显、不触发执行，**终端有回显不代表命令已运行**（2026-10-16 事故：`\n` 导致 Launcher 命令未执行，伪装成 GUI 静默退出，绕了一圈查进程、日志和应用逻辑才发现）。启动长驻进程后用 `Get-CimInstance Win32_Process` 确认进程真实存在；注意提权进程的 CommandLine 可能为 null，按 CommandLine 过滤会漏查。
 - paseo `checkout-pr` 拉取 fork PR 可能因 gh GraphQL 调用直接报错：回退用 `git fetch origin pull/<N>/head:<本地分支>` + `git worktree add <路径> <分支>`；产物是普通 git worktree，不注册为 paseo workspace。
-- 已知时长：全量 Python 套件约 110s、单条 e2e spec 约 2 分钟，命令默认超时 120s 处于临界；这些命令显式设置更大的超时，或按文件拆分执行。
 - 新 worktree 先检查现有环境：锁文件一致时可只读复用主仓库 Python venv，显式设置 `MAW_TEST_PYTHON`（Node 跨语言测试）和 `MAW_E2E_PYTHON`（e2e）；不在共享 venv 上同步不同依赖。Node 在当前 worktree 按锁文件安装一次，e2e 还需浏览器。依赖缺失只记录一次并修复对应层，禁止为同一失败循环重建环境；e2e / Node 的 uv 默认路径使用 `--no-sync`。
 - PowerShell 内联脚本（`node -e "..."`、多层嵌套引号）极易解析失败；复杂逻辑写成临时脚本文件再执行。命令输出为空时，先怀疑参数与引号，而不是重跑同一命令。
 
@@ -167,6 +170,18 @@ git diff --name-status
 - 最终汇总必须明确列出：已修复项、仅说明项、阻塞/未验证项、验证命令及结果。
 - 检查任务表是否仍有 `进行中`、`待处理` 或 `阻塞`，并对每一项给出下一步或原因；不能只说“基本完成”。
 - 在共享工作区中保留用户和其他任务的 WIP：操作前后都检查状态，只修改本任务文件/代码，不使用 `git reset`、`git clean` 或覆盖无关 diff。
+
+## 提交前自审
+
+批量改动、功能开发与反馈修复在自检通过之后、提交 / 提 PR 之前，做一轮独立自审（标准对标 Greptile）。目标是把问题在提交前消灭，减少提交后被审查工具或维护者打回后来回修：早发现、早治疗。一两行笔误修复与纯文档措辞可由开发者自行判断跳过。
+
+- 独立视角：由未参与实现的审查者（agent 用后台 subagent）通读全部 diff；实现者只回答提问，不为自己辩护。
+- 每条 finding 必须有证据（文件:行、实际执行过的命令输出），禁止臆测式点评；标准覆盖正确性、边界、异常与降级路径、回归风险、跨平台、性能、测试有效性与仓库约定。
+- 双向验证：新增测试必须在「修复缺失」的代码上真实失败，证明能守住回归；行为修复用既有用例做旧逻辑回退对照。验证后恢复原状并重建产物。
+- 分诊与记录：真实缺陷修复并复验；nit 与接受的风险逐条写入 `docs/logs/release<基线>/<YYMMDD>_<主题>/REVIEW_FINDINGS.md` 并登记日志索引，不静默丢弃。
+- 放行门槛：没有未处置的 blocker / major 才提交；PR 描述如实写自审结论与未测边界。
+
+详细流程见[开发概览](docs/engineering/DEVELOPMENT.md)。
 
 ## 批量改动的人工核查清单
 

@@ -196,6 +196,7 @@ test('text processing uses the custom wrapping row and allows one-sided characte
   const assPresetRows = page.locator('.text-process-wrap-preset-row-ass');
   await expect(assPresetRows).toHaveCount(2);
   await expect(assPresetRows.nth(0)).toBeHidden();
+  await expect(page.locator('#text-process-wrap-presets-common')).toContainText('♪音符♪');
   await expect(assPresetRows.nth(1)).toBeHidden();
   await expect(page.locator('#text-process-wrap-presets-common')).toContainText('♪音符♪');
   const custom = page.locator('#text-process-wrap-presets-common').getByRole('button', { name: '自定义' });

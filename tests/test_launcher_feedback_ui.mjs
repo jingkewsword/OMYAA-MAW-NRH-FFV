@@ -9,6 +9,56 @@ const source = readFileSync(new URL("postprocess.js", launcherDir), "utf8");
 const strings = readFileSync(new URL("i18n/launcher-strings.js", launcherDir), "utf8");
 const stateSource = readFileSync(new URL("boot/launcher-state.js", launcherDir), "utf8");
 
+test("backend discovery preserves native fallback, ready events and late-settlement boundaries", async () => {
+  const source = readFileSync(new URL("boot/launcher-theme-bridge.js", launcherDir), "utf8");
+  const fixture = (api) => {
+    const timers = [], listeners = [];
+    const window = { pywebview: api ? { api } : undefined,
+      addEventListener: (name, callback, options) => listeners.push({ name, callback, options }) };
+    const context = vm.createContext({ window,
+      setTimeout: (callback, delay) => timers.push({ callback, delay }) });
+    vm.runInContext(source, context);
+    return { window, timers, listeners, wait: () => context.waitForBackend() };
+  };
+
+  const nativeApi = { get_config() {} };
+  const immediate = fixture(nativeApi);
+  assert.equal(await immediate.wait(), nativeApi);
+  assert.equal(immediate.timers.length, 0);
+  assert.equal(immediate.listeners.length, 0);
+
+  const fallback = fixture();
+  let resolved = false;
+  const pendingFallback = fallback.wait().then(value => { resolved = true; return value; });
+  await Promise.resolve();
+  assert.equal(resolved, false);
+  assert.equal(fallback.timers.length, 1);
+  assert.equal(fallback.timers[0].delay, 1800);
+  fallback.timers[0].callback();
+  assert.equal(await pendingFallback, null);
+  fallback.window.pywebview = { api: nativeApi };
+  fallback.listeners[0].callback();
+  assert.equal(await pendingFallback, null);
+
+  const ready = fixture();
+  const pendingReady = ready.wait();
+  assert.equal(ready.listeners[0].name, "pywebviewready");
+  assert.equal(ready.listeners[0].options.once, true);
+  ready.window.pywebview = { api: nativeApi };
+  ready.listeners[0].callback();
+  assert.equal(await pendingReady, nativeApi);
+  ready.window.pywebview = undefined;
+  ready.timers[0].callback();
+  assert.equal(await pendingReady, nativeApi);
+
+  const mock = fixture();
+  const pendingMock = mock.wait();
+  mock.listeners[0].callback();
+  assert.equal(await pendingMock, null);
+  mock.timers[0].callback();
+  assert.equal(await pendingMock, null);
+});
+
 test("the editor action uses plain labels without emoji in both languages", () => {
   assert.match(strings, /open_editor:\s*"打开编辑器"/);
   assert.match(strings, /open_editor:\s*"Open editor"/);

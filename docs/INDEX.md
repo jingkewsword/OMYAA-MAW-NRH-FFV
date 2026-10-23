@@ -83,6 +83,11 @@
 
 ## 工程说明
 
+<a name="engineering-test-workflow"></a>
+### 测试分层与准入
+
+[打开正文](engineering/TEST_WORKFLOW.md)
+
 <a name="engineering-long-commands"></a>
 ### Agent 长命令防卡死指南（Windows / PowerShell 5.1）
 
@@ -150,6 +155,17 @@
 
 ## 共享计划
 
+<a name="plan-test-suite-governance"></a>
+### 测试成本与长期治理
+
+[打开方案](plans/TEST_SUITE_GOVERNANCE.md)
+
+[同步后新增功能的测试集检查](logs/release1.9.0-beta.2/261016_测试治理优化/新增功能测试检查.md)
+
+[清单工具测试必要性与准备优化](logs/release1.9.0-beta.2/261016_测试治理优化/清单工具准备优化.md)
+
+[缩略图缓存测试准备与持久化边界](logs/release1.9.0-beta.2/261016_测试治理优化/缩略图缓存夹具降本.md)
+
 <a name="plan-release-pipeline"></a>
 ### 正式版本归档、官网与更新检测管线
 
@@ -212,6 +228,13 @@
 
 [保留日志索引](logs/INDEX.md) · [当前相关参考与未决事项](logs/CURRENT.md) · [2026-08-11 README 原文](archived/README-2026-08-11.md)
 
+当前安全记录：[2026-10 证书与工具链安全修复](logs/release1.10.0-beta.1/261022_证书与工具链安全/SECURITY.md)。
+
 当前功能记录：[单句放大出现设计账本](logs/release1.9.0-beta.3/261020_每句放大出现/SENTENCE_POP_IN.md) · [主字幕单句缩放进度账本](logs/release1.9.0-beta.2/ASS_CUE_SCALE.md) · [人工核对清单](logs/release1.9.0-beta.2/ASS_CUE_SCALE.checklist.md)
 
 反馈账本中的“已修复”只对应其记录的版本和验证范围。发布变化见 [CHANGELOG](../CHANGELOG.md)。
+
+<a name="log-media-required-reports"></a>
+### 媒体分层与可信报告
+
+[打开记录](logs/release1.10.0-beta.1/261023_媒体分层与可信报告/验证记录.md)

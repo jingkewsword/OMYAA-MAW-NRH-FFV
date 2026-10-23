@@ -124,7 +124,8 @@ class PackagingContractTests(CompactContainerAssertions, unittest.TestCase):
         portable_step = workflow.index("- name: Add portable editor page")
         self.assertLess(build_step, portable_step)
         root_build = workflow[build_step:workflow.index("- name: Install website dependencies")]
-        self.assertIn("pnpm install --frozen-lockfile && pnpm run build", root_build)
+        self.assertIn("pnpm install --frozen-lockfile --ignore-scripts", root_build)
+        self.assertIn("pnpm run build", root_build)
         self.assertNotIn("working-directory: website", root_build)
 
     def test_launcher_version_matches_project_metadata(self) -> None:
@@ -285,8 +286,8 @@ class PackagingContractTests(CompactContainerAssertions, unittest.TestCase):
         self.assertIn("maw.runtimes.freezer", release)
         self.assertNotIn("uv export --frozen", release)
 
-        self.assertIn('RUNTIME_VERSION = "7"', local_spec)
-        self.assertIn('OCR_RUNTIME_VERSION = "3"', ocr_spec)
+        self.assertIn('RUNTIME_VERSION = "8"', local_spec)
+        self.assertIn('OCR_RUNTIME_VERSION = "4"', ocr_spec)
 
         self.assertIn("_has_cuda", runtimes_base)
         self.assertIn("requirements_in", runtimes_base)
@@ -376,6 +377,8 @@ class PackagingContractTests(CompactContainerAssertions, unittest.TestCase):
         self.assertEqual(
             ocr_dependencies,
             {
+                "certifi>=2026.10.19",
+                "urllib3>=2.8.0",
                 "numpy>=2.2,<2.5",
                 "onnxruntime>=1.18",
                 "pillow>=10.0.0",
@@ -575,8 +578,12 @@ class PackagingContractTests(CompactContainerAssertions, unittest.TestCase):
         self.assertIn("'--verify-tag'", publisher)
         self.assertIn("def find_release", publisher)
         self.assertIn("scripts/prepare_release_notes.py", workflow)
-        # publish 必须同时满足 tag 触发 + Windows 构建成功，否则 dispatch 会误发 Release
-        self.assertIn("startsWith(github.ref, 'refs/tags/v') && !cancelled() && needs.build-windows.result == 'success'", workflow)
+        # tag、质量、完整浏览器和 Windows 构建必须都成功；状态函数不能绕过质量失败。
+        publish = workflow[workflow.index("  publish:"):]
+        for clause in ("startsWith(github.ref, 'refs/tags/v')", "!cancelled()",
+                       "needs.test-quality.result == 'success'", "needs.browser-gates.result == 'success'",
+                       "needs.build-windows.result == 'success'"):
+            self.assertIn(clause, publish)
         # 不完整构建警告：needs 上下文只提供单数 result（矩阵 job 的聚合结果），
         # 复数 results 不是有效属性，会让警告永不触发
         self.assertIn("needs.build-aux.result == 'failure'", workflow)
@@ -683,7 +690,7 @@ class PackagingContractTests(CompactContainerAssertions, unittest.TestCase):
         script = read_text("scripts/build-windows.ps1")
 
         self.assertIn("uv sync --group build --frozen", script)
-        self.assertIn("uv run --group build pyinstaller", script)
+        self.assertIn("uv run --no-sync --group build pyinstaller", script)
         self.assertIn("MAW.spec", script)
         self.assertIn("dist\\MAW\\MAW.exe", script)
         self.assertIn("$FaqSource", script)
@@ -735,8 +742,14 @@ class PackagingContractTests(CompactContainerAssertions, unittest.TestCase):
         self.assertIn("windows-2022", workflow)
         self.assertNotIn("actions/setup-node@v4", workflow)
         self.assertNotIn("dtolnay/rust-toolchain@stable", workflow)
-        self.assertIn("uv sync --group build --frozen", workflow)
-        self.assertIn("tests/test_packaging_contract.py", workflow)
+        self.assertIn("uv sync --group build --group test --frozen", workflow)
+        self.assertIn("scripts/test_workflow.py --stage merge --pack common --pack media --pack long-media --pack tools", workflow)
+        self.assertIn("needs: [test-quality, browser-gates, build-windows, build-aux]", workflow)
+        publish = workflow[workflow.index("  publish:"):]
+        self.assertIn("needs.test-quality.result == 'success'", publish)
+        self.assertIn("needs.browser-gates.result == 'success'", publish)
+        windows = workflow[workflow.index("  build-windows:"):workflow.index("  build-aux:")]
+        self.assertIn("--pack tools --pack lifecycle", windows)
         self.assertIn("pyproject.toml", workflow)
         self.assertIn("github.ref_name", workflow)
         self.assertIn(r's/^version = "\(.*\)"$/\1/p', workflow)
@@ -775,11 +788,23 @@ class PackagingContractTests(CompactContainerAssertions, unittest.TestCase):
         self.assertNotIn("actions/setup-node@v4", workflow)
         self.assertNotIn("dtolnay/rust-toolchain@stable", workflow)
         self.assertIn("ref: ${{ github.event.pull_request.head.sha || github.sha }}", workflow)
-        self.assertIn("uv sync --group build --frozen", workflow)
+        self.assertIn("uv sync --group build --group test --frozen", workflow)
         self.assertIn("scripts\\build-windows.ps1 -SkipTests", workflow)
         self.assertIn("dist\\MAW\\MAW.exe", workflow)
         self.assertNotIn("MOSE", workflow)
         self.assertIn("Verify no FFmpeg is bundled", workflow)
+        steps = re.split(r"(?m)^      - ", workflow)[1:]
+        compatibility = next(index for index, step in enumerate(steps)
+                             if step.startswith("name: Required media failure compatibility\n"))
+        installs = [(index, step) for index, step in enumerate(steps)
+                    if re.search(r"(?m)^\s+choco install ffmpeg\b", step)]
+        self.assertEqual(len(installs), 1, "real bad-file checks need their test-only media tools")
+        index, install = installs[0]
+        self.assertLess(index, compatibility, "dependencies must be ready before required media tests")
+        self.assertIn("GITHUB_PATH", install, "later steps must resolve the real tool directory")
+        self.assertIn("ffprobe.exe", install)
+        self.assertEqual(len(re.findall(r"(?m)^\s*& .+ -version\s*$", install)), 2,
+                         "both real media executables must be checked")
         self.assertIn("Compress-Archive", workflow)
         self.assertIn("actions/upload-artifact@v6", workflow)
         self.assertIn("retention-days: 14", workflow)
