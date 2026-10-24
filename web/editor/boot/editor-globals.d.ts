@@ -121,6 +121,7 @@ interface MaweBootApi {
 
 interface MaweExportSrtApi {
   cleanupMainSegments: () => ProjectSegment[];
+  cleanupPreviewSegment: (segment: ProjectSegment) => ProjectSegment;
   currentAssVideoResolution: any;
   assExportOptions: any;
   buildAss: any;
@@ -310,6 +311,7 @@ interface Window {
   MaweAssFrame?: { notifyProjectChanged?(): void };
   webkitAudioContext?: typeof AudioContext;
   AsrGapRemoveCore: {
+    createCleanupRetainedProjector(gapRemove: unknown): (segments: ProjectSegment[]) => ProjectSegment[];
     projectCleanupRetainedSegments(segments: ProjectSegment[], gapRemove: unknown): ProjectSegment[];
     getCleanupScopeItems(segment: ProjectSegment, gap: unknown): ProjectSegmentItem[];
     isGapRemoveDisplayProtected(gap: import('../media/waveform/waveform-types.js').Gap): boolean;

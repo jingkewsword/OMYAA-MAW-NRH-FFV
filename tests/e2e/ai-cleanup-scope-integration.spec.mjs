@@ -292,3 +292,72 @@ test('S3-T03 multi-track drag fail-opens the moved scope and saves independent t
   expect(reopened.overlay).toBe('overlay-only');
   expect(reopened.extension).toBe('extension-only');
 });
+
+test('S3-T04 playback reuses cleanup projections and observes direct edits, restoration, history and project switches', async ({ page }) => {
+  const stable = await page.evaluate(() => {
+    const ranges = MaweBoot.DATA.gap_remove.provenance.sources.ai_cleanup;
+    window.cleanupSourceNormalizations = 0;
+    ranges.map = function (...args) {
+      window.cleanupSourceNormalizations += 1;
+      return Array.prototype.map.apply(this, args);
+    };
+    // Replacing the source object starts a fresh projection lifetime.
+    MaweBoot.DATA.gap_remove = { ...MaweBoot.DATA.gap_remove, skip_playback: false };
+    MaweDom.overlayToggle.checked = true;
+    MaweSettings.EDITOR_SETTINGS.assMode = false;
+    MawePlaybackLoop.refreshSubtitlePreview(2500, 0);
+    MaweSettings.EDITOR_SETTINGS.assMode = true;
+    MawePlaybackLoop.refreshSubtitlePreview(2500, 0);
+    MaweSettings.EDITOR_SETTINGS.assMode = false;
+    MawePlaybackLoop.refreshSubtitlePreview(2500, 0);
+    const prepared = window.cleanupSourceNormalizations;
+    for (let frame = 0; frame < 30; frame += 1) MawePlaybackLoop.refreshSubtitlePreview(2500 + frame, 0);
+    MaweSettings.EDITOR_SETTINGS.assMode = true;
+    for (let frame = 0; frame < 30; frame += 1) MawePlaybackLoop.refreshSubtitlePreview(2500 + frame, 0);
+    MaweSettings.EDITOR_SETTINGS.assMode = false;
+    MaweCoreState.player.currentTime = 2.5;
+    return { prepared, after: window.cleanupSourceNormalizations };
+  });
+  expect(stable.prepared).toBeGreaterThan(0);
+  expect(stable.after).toBe(stable.prepared);
+  await expect(page.locator('#overlay-main-text')).toHaveText('kept');
+  await page.evaluate(() => MaweCoreState.player.play());
+  await expect.poll(() => page.evaluate(() => MaweCoreState.player.currentTime)).toBeGreaterThan(2.8);
+  await page.evaluate(() => MaweCoreState.player.pause());
+
+  await page.evaluate(() => {
+    const cue = MaweBoot.DATA.segments[0];
+    cue.text = 'deleted words expanded';
+    cue.items[2].text = 'expanded';
+  });
+  expectAllMainOutputs(await renderOutputs(page, 2500), 'expanded');
+
+  await page.evaluate(() => {
+    MaweHistory.pushGapRemoveUndo('restore scoped words');
+    const state = MaweGapRemoveData.getGapRemoveData(true);
+    MaweGapRemoveUi.commitManualGapRemoveChange(state, [{ start: 0, end: 1200, removed: false }]);
+  });
+  expectRestoredMainOutputs(await renderOutputs(page, 2500), 'deleted', 'words', 'expanded');
+  await page.evaluate(() => MaweHistory.performUndo());
+  const undone = await renderOutputs(page, 2500);
+  expectAllMainOutputs(undone, 'expanded');
+  expect(undone.css).not.toContain('deleted');
+  await page.evaluate(() => MaweHistory.performRedo());
+  expectRestoredMainOutputs(await renderOutputs(page, 2500), 'deleted', 'words', 'expanded');
+
+  const switched = await page.evaluate(() => {
+    const project = JSON.parse(JSON.stringify(MaweBoot.DATA));
+    project.segments = [{ id: 'new-cue', start: 0, end: 5000, text: 'new project', items: [] }];
+    project.multi_subtitle = { enabled: false, tracks: [], bindings: [] };
+    project.overlay_track = { enabled: false, segments: [] };
+    delete project.gap_remove;
+    MaweProjectLoad.applyCanonicalProject(project, 'new-project.mosp');
+    MaweDom.overlayToggle.checked = true;
+    MaweSettings.EDITOR_SETTINGS.assMode = false;
+    MawePlaybackLoop.refreshSubtitlePreview(2500, 0);
+    return { text: MaweDom.overlayMainTextNode.nodeValue, srt: MaweExportSrt.buildSrt() };
+  });
+  expect(switched.text).toBe('new project');
+  expect(switched.srt).toContain('new project');
+  expect(switched.srt).not.toContain('deleted');
+});
