@@ -217,10 +217,25 @@ export function createUtilsModule(dependencies) {
     const mainById = new Map((Array.isArray(mainSegments) ? mainSegments : [])
       .map((segment) => [stableId(segment?.id), segment]));
     const trackById = new Map((multiSubtitle.tracks || []).map((track) => [track.id, track]));
+    // Build each referenced track's index once per sync. Keeping it local also
+    // observes in-place timing edits and replaced/reordered segments next time.
+    const extensionByTrack = new Map();
     (multiSubtitle.bindings || []).forEach((binding) => {
       const main = mainById.get(binding.main_segment_ids?.[0]);
       const track = trackById.get(binding.track_id);
-      const extension = track?.segments?.find((segment) => segment.id === binding.extension_segment_ids?.[0]);
+      let extensionById = extensionByTrack.get(track);
+      if (!extensionById && track?.segments) {
+        extensionById = new Map();
+        for (const segment of track.segments) {
+          const id = segment.id;
+          // The previous find selected the first occurrence of an ID.
+          if (!extensionById.has(id)) extensionById.set(id, segment);
+        }
+        extensionByTrack.set(track, extensionById);
+      }
+      const extensionId = binding.extension_segment_ids?.[0];
+      // Map matches NaN keys, whereas the previous strict-equality find did not.
+      const extension = Number.isNaN(extensionId) ? undefined : extensionById?.get(extensionId);
       if (!main || !extension) return;
       binding.start_offset_ms = Math.round(Number(extension.start) - Number(main.start));
       binding.end_offset_ms = Math.round(Number(extension.end) - Number(main.end));
