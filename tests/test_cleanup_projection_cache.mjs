@@ -150,6 +150,71 @@ test('no AI cleanup is an allocation-free projection fast path and releases the 
   assert.equal(counts.retainedBuilds, baseline.retainedBuilds + 1, 'old project context is not retained globally');
 });
 
+test('a cue without a local scope skips gap snapshots and observes newly added scopes', () => {
+  const { cue, gap } = fixture();
+  const local = structuredClone(gap.provenance.sources.ai_cleanup[0]);
+  gap.provenance.sources.ai_cleanup[0].cleanup_scope.segment_id = 'elsewhere';
+  const gaps = gap.gaps;
+  let reads = 0;
+  Object.defineProperty(gap, 'gaps', { configurable: true, get() { reads += 1; return gaps; } });
+  const { cache, counts } = cacheRuntime();
+  for (let frame = 0; frame < 30; frame += 1) assert.equal(cache.retainedCue(cue, gap), cue);
+  assert.equal(reads, 0, 'unrelated cues must not inspect the full gaps input');
+  assert.equal(counts.retainedBuilds, 0);
+  gap.provenance.sources.ai_cleanup.push(local);
+  assert.equal(cache.retainedCue(cue, gap).text, '甲丙', 'an in-place scope addition must be seen immediately');
+  assert.ok(reads > 0);
+  assert.equal(counts.retainedBuilds, 1);
+});
+
+test('scope moves, removal, restoration and cue ID edits leave and re-enter the local fast path', () => {
+  const { cue, gap } = fixture();
+  const { cache } = cacheRuntime();
+  const range = gap.provenance.sources.ai_cleanup[0];
+  assert.equal(cache.retainedCue(cue, gap).text, '甲丙');
+  range.cleanup_scope.segment_id = 'elsewhere';
+  assert.equal(cache.retainedCue(cue, gap), cue);
+  // A manual restoration made while this cue is unrelated must still be checked
+  // once its scope returns, including when the source root was never replaced.
+  gap.provenance.manual_overrides.push({ start: 500, end: 1000, removed: false });
+  range.cleanup_scope.segment_id = cue.id;
+  assert.equal(cache.retainedCue(cue, gap), cue);
+  gap.provenance.manual_overrides.length = 0;
+  assert.equal(cache.retainedCue(cue, gap).text, '甲丙');
+  gap.provenance.sources.ai_cleanup = [];
+  assert.equal(cache.retainedCue(cue, gap), cue);
+  gap.provenance.sources.ai_cleanup = [range];
+  assert.equal(cache.retainedCue(cue, gap).text, '甲丙');
+  cue.id = 'elsewhere';
+  assert.equal(cache.retainedCue(cue, gap), cue);
+  cue.id = 'cue';
+  assert.equal(cache.retainedCue(cue, gap).text, '甲丙');
+  const restoredProject = structuredClone(gap);
+  assertEquivalent(cache, [structuredClone(cue)], restoredProject);
+  assertEquivalent(cache, [cue], gap);
+});
+
+test('an unrelated cue in a new project releases the old context and leaves export invalidation intact', () => {
+  const { cue, gap } = fixture();
+  const other = fixture('other');
+  const { cache, counts } = cacheRuntime();
+  const retained = cache.retainedCue(cue, gap);
+  const exported = cache.exportSegments([cue], gap);
+  const before = { ...counts };
+  assert.equal(cache.retainedCue(cue, other.gap), cue);
+  assert.deepEqual(counts, before, 'switching to an unrelated project needs no projector');
+  assert.equal(cache.retainedCue(cue, gap).text, retained.text);
+  assert.equal(counts.retainedBuilds, before.retainedBuilds + 1, 'the old context must have been released');
+  const source = [cue];
+  cache.exportSegments(source, gap);
+  gap.provenance.manual_overrides.push({ start: 500, end: 1000, removed: false });
+  gap.gaps[0].removed = false;
+  assert.equal(cache.retainedCue(other.cue, gap), other.cue);
+  const changed = cache.exportSegments(source, gap);
+  assert.notDeepEqual(changed, exported);
+  assertEquivalent(cache, source, gap);
+});
+
 test('duplicate cue IDs, repeated words and missing fields do not merge cache entries or authorize stale scopes', () => {
   const { cue, gap } = fixture();
   const sameId = structuredClone(cue);

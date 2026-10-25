@@ -107,6 +107,11 @@ export function createCleanupProjectionCache({ createRetainedProjector, createEx
 
   function retainedCue(cue, gapRemove) {
     if (!hasCleanup(gapRemove)) return cue;
+    if (gapReference !== gapRemove) reset(gapRemove);
+    // Read scope IDs on every call so in-place additions/moves can make a cue
+    // relevant, without inspecting the full gap input for unrelated cues.
+    if (!gapRemove.provenance.sources.ai_cleanup.some((range) => range?.cleanup_scope
+        && cue?.id === range.cleanup_scope.segment_id)) return cue;
     syncGap(gapRemove);
     if (!retainedProjector) retainedProjector = createRetainedProjector(gapRemove);
     return projectCue(cue, retainedCues, retainedProjector);

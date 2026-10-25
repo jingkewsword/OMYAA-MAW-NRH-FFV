@@ -361,3 +361,34 @@ test('S3-T04 playback reuses cleanup projections and observes direct edits, rest
   expect(switched.srt).toContain('new project');
   expect(switched.srt).not.toContain('deleted');
 });
+
+test('S3-T05 unrelated current cues return immediately and re-enter cleanup after scope edits and undo/redo', async ({ page }) => {
+  await page.evaluate(() => {
+    MaweDom.overlayToggle.checked = true;
+    MaweSettings.EDITOR_SETTINGS.assMode = false;
+    MaweCoreState.player.currentTime = 2.5;
+    MawePlaybackLoop.refreshSubtitlePreview(2500, 0);
+  });
+  await expect(page.locator('#overlay-main-text')).toHaveText('kept');
+  await page.evaluate(() => {
+    MaweHistory.pushGapRemoveUndo('move scope away from current cue');
+    MaweBoot.DATA.gap_remove.provenance.sources.ai_cleanup[0].cleanup_scope.segment_id = 'other-cue';
+    MawePlaybackLoop.refreshSubtitlePreview(2500, 0);
+  });
+  await expect(page.locator('#overlay-main-text')).toHaveText(INITIAL_TEXT);
+  await page.evaluate(() => MaweHistory.performUndo());
+  await expect(page.locator('#overlay-main-text')).toHaveText('kept');
+  await page.evaluate(() => MaweHistory.performRedo());
+  await expect(page.locator('#overlay-main-text')).toHaveText(INITIAL_TEXT);
+  await page.evaluate(() => {
+    MaweBoot.DATA.gap_remove.provenance.sources.ai_cleanup[0].cleanup_scope.segment_id = 'main-001';
+    MawePlaybackLoop.refreshSubtitlePreview(2500, 0);
+  });
+  await expect(page.locator('#overlay-main-text')).toHaveText('kept');
+  expectAllMainOutputs(await renderOutputs(page, 2500), 'kept');
+  await page.evaluate(() => {
+    MaweBoot.DATA.gap_remove.provenance.sources.ai_cleanup[0].cleanup_scope.segment_id = 'other-cue';
+  });
+  const outputs = await renderOutputs(page, 2500);
+  expectAllMainOutputs(outputs, 'deleted', 'words', 'kept');
+});
