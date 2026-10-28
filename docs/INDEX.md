@@ -160,6 +160,8 @@
 
 [打开方案](plans/TEST_SUITE_GOVERNANCE.md)
 
+[消费者选择与 Linux CI 准备验收](logs/release1.10.0-beta.1/261028_测试选择与Linux准备/验收记录.md)
+
 [同步后新增功能的测试集检查](logs/release1.9.0-beta.2/261016_测试治理优化/新增功能测试检查.md)
 
 [清单工具测试必要性与准备优化](logs/release1.9.0-beta.2/261016_测试治理优化/清单工具准备优化.md)

@@ -39,8 +39,12 @@ jobs:
           cache-dependency-path: pnpm-lock.yaml
       - run: uv sync --frozen --group test --no-group build --no-dev
       - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Prepare bounded Ubuntu package downloads
+        run: sudo "$(command -v python)" scripts/prepare_ci_apt.py
       - run: pnpm exec playwright install --with-deps chromium
-      - run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-noto-cjk
+        timeout-minutes: 5
+      - run: sudo apt-get update && sudo apt-get install --no-install-recommends -y ffmpeg fonts-noto-cjk
+        timeout-minutes: 5
       - name: Discover and execute the required partition
         run: uv run --no-sync python scripts/test_workflow.py --stage merge --pack editor-e2e --browser-shard ${{ matrix.shard }}/4
       - name: Preserve shard coverage record

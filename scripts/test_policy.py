@@ -29,7 +29,7 @@ DOC_TOOL_PATHS = {"scripts/check_docs.py", "scripts/prepare_release_notes.py",
 SITE_TOOL_PATHS = {"scripts/build_release_site.py", "scripts/prepare_release_notes.py"}
 TOOL_MODULES = {"test_docs_check", "test_release_notes", "test_release_site", "test_release_publication", "test_run_check", "test_run_tests_runner",
                 "test_verification_checklist", "test_verification_checklist_build", "test_verify_sha256_script", "test_macos_icon",
-                "test_packaging_contract", "test_test_workflow", "test_browser_results"}
+                "test_packaging_contract", "test_test_workflow", "test_browser_results", "test_prepare_ci_apt"}
 MEDIA_METHODS = {
     "test_streaming_extraction_and_cache_match", "test_low_rate_multichannel_keeps_opposite_and_one_sided_audio",
     "test_mono_stays_identical_and_third_channel_is_included", "test_mopeaks_generation_does_not_need_native_quapeaks",
@@ -125,9 +125,9 @@ E2E_FAMILIES = (
     (("waveform", "reapeaks", "quapeaks", "media_cache", "playback", "seek", "audition"), ("waveform-", "playback-", "playhead-", "hover-seek", "subtitle-seek", "cue-context", "media-controls", "gap-", "filmstrip")),
     (("thumbnail", "filmstrip"), ("filmstrip", "waveform-view-performance", "settings-structure")),
     (("segmentation", "punctuation", "word_timing", "word-timing", "timed-text", "text-tools", "split", "merge"), ("word-timing", "timed-text", "split-", "keyboard-timing", "editor-text-tools", "launcher-resegment")),
-    (("ass_", "ass-", "/ass.", "font", "subtitle-preview"), ("ass-", "subtitle-preview", "bilingual-label", "burn-video-jobs", "editor-help-srt-burn")),
+    (("ass_", "ass-", "/ass.", "font", "subtitle-preview"), ("ass-", "subtitle-preview", "bilingual-label", "burn-video-jobs", "editor-help-srt-burn", "sticker-preview-lifecycle")),
     (("export", "fcp7", "otio"), ("ass-export", "fcp7-export", "otio-export", "gap-", "multi-subtitle", "speaker-label", "waveform-history", "editor-menu-focus", "burn-video-jobs", "editor-help-srt-burn")),
-    (("sticker", "burn-video"), ("burn-video-jobs", "editor-help-srt-burn", "ass-export")),
+    (("sticker", "burn-video"), ("burn-video-jobs", "editor-help-srt-burn", "ass-export", "sticker-preview-lifecycle")),
     (("marker", "speaker", "overlay", "multi-subtitle", "multi_subtitle"), ("marker", "speaker-label", "overlay-track", "multi-subtitle")),
     (("cue-scroll", "cue-list", "cue-render"), ("cue-", "click-behavior", "layout-feedback")),
     (("tooltip",), ("shared-tooltip", "launcher-keycaps")),

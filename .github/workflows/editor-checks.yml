@@ -2,6 +2,7 @@ name: Editor build and contracts
 
 on:
   pull_request:
+  workflow_dispatch:
   push:
     branches: [main]
 
@@ -232,9 +233,13 @@ jobs:
       - name: POSIX process lifecycle
         if: needs.selection.outputs.lifecycle == 'true'
         run: uv run --no-sync python scripts/test_workflow.py --stage merge --pack lifecycle
+      - name: Prepare bounded Ubuntu package downloads
+        if: needs.selection.outputs.media == 'true'
+        run: sudo "$(command -v python)" scripts/prepare_ci_apt.py
       - name: Linux real media dependencies
         if: needs.selection.outputs.media == 'true'
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+        timeout-minutes: 5
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y ffmpeg
       - name: Linux real bad-file probe contracts
         if: needs.selection.outputs.media == 'true'
         run: >-

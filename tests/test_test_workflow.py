@@ -414,6 +414,12 @@ class TestWorkflowTests(unittest.TestCase):
                 self.assertNotIn("editor-e2e", plan["packs"])
                 self.assertTrue({"tests/e2e/burn-video-jobs.spec.mjs", "tests/e2e/editor-help-srt-burn.spec.mjs",
                                  "tests/e2e/ass-export.spec.mjs"}.issubset(plan["e2e_specs"]))
+        for path in ("web/editor/io/editor-sticker-root.js", "web/editor/media/editor-sticker-overlay.js",
+                     "web/editor/styles/editor-wiring-ass-frame.js"):
+            with self.subTest(path=path):
+                plan = select_packs([path])
+                self.assertIn("e2e", plan["packs"])
+                self.assertIn("tests/e2e/sticker-preview-lifecycle.spec.mjs", plan["e2e_specs"])
         for path in ("web/editor/state/editor-state.js", "web/editor/unknown-module.js"):
             self.assertIn("editor-e2e", select_packs([path])["packs"])
 
