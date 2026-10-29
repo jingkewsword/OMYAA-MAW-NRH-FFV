@@ -1,6 +1,6 @@
 import unittest
 
-from maw.speaker_identity import asr_palette_size, distinct_speaker_ids
+from maw.speaker_identity import asr_palette_size, distinct_speaker_ids, prepare_asr_speaker_segments
 from maw.speaker import apply_project_speaker_colors, speaker_color_summary
 
 
@@ -37,6 +37,31 @@ class SpeakerIdentityTests(unittest.TestCase):
         self.assertEqual(apply_project_speaker_colors(project)["speakers"], ["6"])
         self.assertNotIn("color_group_id", segments[0])
         self.assertIn("color_group_id", segments[1])
+
+    def test_cleaned_segments_keep_word_timing_but_only_store_segment_identity(self):
+        source = [{"id": "cue-1", "text": "你好", "start": 0, "end": 200,
+                   "speaker": "provider-1", "items": [
+                       {"text": "你", "start": 0, "end": 100, "speaker": "provider-1"},
+                       {"text": "好", "start": 100, "end": 200, "speaker": "provider-1"}]}]
+        original = repr(source)
+        result = prepare_asr_speaker_segments(source, {"provider-1": "spk-1"})
+        self.assertEqual(result[0]["speaker"], "spk-1")
+        self.assertEqual(result[0]["items"], [
+            {"text": "你", "start": 0, "end": 100}, {"text": "好", "start": 100, "end": 200}])
+        self.assertEqual(repr(source), original)
+
+    def test_mixed_or_unmapped_identity_is_not_silently_discarded(self):
+        mixed = [{"speaker": "one", "items": [{"speaker": "one"}, {"speaker": "two"}]}]
+        with self.assertRaisesRegex(ValueError, "multiple source speakers"):
+            prepare_asr_speaker_segments(mixed, {"one": "spk-1", "two": "spk-2"})
+        with self.assertRaisesRegex(ValueError, "unmapped source speaker"):
+            prepare_asr_speaker_segments([{"speaker": "one"}], {})
+
+    def test_word_identity_can_supply_unambiguous_segment_identity(self):
+        source = [{"items": [{"text": "Hi", "speaker": "one"}, {"text": "!"}]}]
+        result = prepare_asr_speaker_segments(source, {"one": "spk-1"})
+        self.assertEqual(result[0]["speaker"], "spk-1")
+        self.assertNotIn("speaker", result[0]["items"][0])
 
 
 if __name__ == "__main__":
