@@ -56,8 +56,12 @@ test('editing a shared snapshot separates just the edited track and library dele
   const project = fixture(), [main, secondary] = project.tracks;
   h.applyTrackStyle(project, main, library.styles[1]);
   secondary.style = copy(main.style);
+  main.style.vendor = { keep: true };
+  project.styles[0].vendor = { keep: true };
   h.updateTrackStyle(project, main, { fontSize: 77 });
   assert.equal(h.resolveTrackStyle(project, main, library).style.fontSize, 77);
+  assert.deepEqual(main.style.vendor, { keep: true });
+  assert.deepEqual(h.resolveTrackStyle(project, main, library).style.vendor, { keep: true });
   assert.equal(h.resolveTrackStyle(project, secondary, library).style.fontSize, library.styles[1].fontSize);
   const changed = copy(library);
   changed.styles = changed.styles.filter(style => style.id !== library.styles[1].id);

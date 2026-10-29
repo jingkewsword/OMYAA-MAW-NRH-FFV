@@ -70,6 +70,7 @@ window.MaweDomPanelsWiring.overlayTrackToggle?.addEventListener('change', () => 
   MaweCommands.run('切换叠加字幕', command => {
     const overlay = next ? window.AsrEditorUtils.ensureOverlayTrack(MaweBoot.DATA) : getOverlayTrack();
     if (!overlay) return;
+    window.MaweAssManagerWiring?.initializeProjectStyles?.();
     overlay.enabled = next;
     overlay._dirty = true;
     command.commit({ cueList: true, waveform: 'full' });

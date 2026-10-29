@@ -57,7 +57,10 @@ export function initMaweStickerOverlay() {
 
 
   function rebuildStickerIntervals(surface = 'preview') {
-  const selected = window.AsrEditorUtils.TrackPolicy.selectTracks(MaweBoot.DATA, 'all', surface);
+  const selected = window.AsrEditorUtils.TrackPolicy.selectTracks(MaweBoot.DATA, 'all', surface)
+    .filter(track => surface !== 'preview'
+      || (track.role !== 'main' || MaweDom.overlayToggle.checked)
+        && (track.role !== 'secondary' || MaweDom.extensionOverlayToggle?.checked));
   const trackKey = selected.map(track => track.id).join('\0');
   if (surface === 'preview' && stickerIntervalCacheVersion === stickerOverlayDataVersion && stickerIntervalTrackKey === trackKey) return stickerIntervals;
   const intervals = [];

@@ -40,7 +40,7 @@ export function createUtilsModule(dependencies) {
     const oldId = track.style?.style_id;
     const id = nextId(styles);
     styles.push({ ...normalized(libraryStyle), id, builtin: false });
-    track.style = { style_id: id, forked: false };
+    track.style = { ...track.style, style_id: id, forked: false };
     discardUnused(project, oldId);
     return true;
   }
@@ -53,8 +53,8 @@ export function createUtilsModule(dependencies) {
     const id = nextId(styles);
     const updated = normalized({ ...previous, ...patch, id });
     if (comparable(updated) === comparable(previous)) return false;
-    styles.push({ ...updated, id, builtin: false });
-    track.style = { style_id: id, forked: true };
+    styles.push({ ...previous, ...updated, id, builtin: false });
+    track.style = { ...track.style, style_id: id, forked: true };
     discardUnused(project, previous.id);
     return true;
   }
@@ -77,8 +77,8 @@ export function createUtilsModule(dependencies) {
       if (comparable(replacement) === comparable(resolved.style)) continue;
       const styles = project.styles;
       const id = nextId(styles);
-      styles.push({ ...normalized(replacement), id, builtin: false });
-      track.style = { style_id: id, forked: false };
+      styles.push({ ...resolved.style, ...normalized(replacement), id, builtin: false });
+      track.style = { ...track.style, style_id: id, forked: false };
       discardUnused(project, resolved.style.id);
       changed = true;
     }

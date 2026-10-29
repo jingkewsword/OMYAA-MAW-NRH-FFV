@@ -14,6 +14,7 @@ test('track controls preserve state, undo and save at narrow size',async({page},
  await page.setViewportSize({width:800,height:700}); await disableOnboarding(page); await page.goto(server.url); await expect(page.locator('.waveform-row').first()).toBeVisible();
  await page.evaluate(()=>MaweSettingsPanels.openEditorSettingsAtTab('editor-settings-tab-project-tracks'));
  const main=page.locator('[data-track-role="main"]'); const overlay=page.locator('[data-track-role="overlay"]');
+ const originalSegments = await page.evaluate(() => JSON.parse(JSON.stringify(MaweBoot.DATA.tracks.map(track => ({ id: track.id, segments: track.segments })))));
  await expect(main.locator('[data-track-field="enabled"]')).toBeChecked();
  await expect(overlay.locator('[data-track-field="enabled"]')).toBeChecked();
  const before=await page.evaluate(()=>MaweHistory.editorHistory.undoLength());
@@ -24,6 +25,7 @@ test('track controls preserve state, undo and save at narrow size',async({page},
  await overlay.locator('[data-track-field="export"]').uncheck();
  await expect.poll(()=>page.evaluate(()=>MaweProjectSave.saveProjectToServer({silent:true}))).toBe(true);
  let saved=JSON.parse(readFileSync(project,'utf8')); expect(saved.tracks.find(t=>t.role==='main').preview_visible).toBe(false); expect(saved.tracks.find(t=>t.role==='overlay').export.enabled).toBe(false);
+ expect(saved.tracks.map(track => ({ id: track.id, segments: track.segments }))).toEqual(originalSegments);
  await page.reload(); await page.evaluate(()=>MaweSettingsPanels.openEditorSettingsAtTab('editor-settings-tab-project-tracks'));
  await expect(main.locator('[data-track-field="preview"]')).not.toBeChecked(); await expect(overlay.locator('[data-track-field="export"]')).not.toBeChecked();
  const gap=await main.evaluate(el=>getComputedStyle(el).columnGap); expect(parseFloat(gap)).toBeGreaterThanOrEqual(8);
