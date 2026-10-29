@@ -42,10 +42,14 @@ test('library edits update linked tracks, project edits fork, and save is one un
   await page.evaluate(() => MaweAssManagerWiring.saveProjectStyleToLibrary('main'));
   expect(await page.evaluate(() => MaweHistory.editorHistory.undoLength())).toBe(count + 1);
   expect(await page.evaluate(() => MaweAssManagerWiring.projectStyleOptions('secondary').style.fontSize)).toBe(120);
+  const status = page.locator('[data-track-role="main"] [data-track-style-status]');
+  await expect(status).toHaveText('样式库');
   await page.evaluate(() => MaweHistory.performUndo());
   expect(await page.evaluate(() => MaweAssManagerWiring.projectStyleOptions('main').status)).toBe('forked');
+  await expect(status).toHaveText('已修改');
   expect(await page.evaluate(() => MaweAssManagerWiring.projectStyleOptions('secondary').style.fontSize)).toBe(100);
   await page.evaluate(() => MaweHistory.performRedo());
+  await expect(status).toHaveText('样式库');
   expect(await page.evaluate(() => MaweAssManagerWiring.projectStyleOptions('secondary').style.fontSize)).toBe(120);
 });
 
