@@ -1282,3 +1282,4 @@ if __name__ == "__main__":
     spec_mips = file.spectral_mipmaps()
     if spec_mips:
         print("first 5 spectral peaks (mip 0):", spec_mips[0].spectral[:5])
+
