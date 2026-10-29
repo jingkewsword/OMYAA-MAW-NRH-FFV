@@ -1841,8 +1841,8 @@ test('waveform toolbar exposes grouped icon controls and selected cues use a yel
   await expect(selectTool.locator('svg')).toHaveCount(1);
   await expect(splitTool).toContainText('分割');
   await expect(splitTool.locator('svg')).toHaveCount(1);
-  await expect(selectTool).toHaveAttribute('title', /V/);
-  await expect(splitTool).toHaveAttribute('title', /R/);
+  await expect(selectTool).toHaveAttribute('data-title', /V/);
+  await expect(splitTool).toHaveAttribute('data-title', /R/);
   await expect(page.locator('#help-toggle')).toContainText('帮助');
 
   await page.keyboard.press('r');

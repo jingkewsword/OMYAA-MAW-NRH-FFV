@@ -14,3 +14,17 @@
 - 本地 43 项 required 契约测试通过，无 skip，含真实 Playwright 分片发现（`.artifacts/checks/20261029T183831Z-03151e79/result.json`）；文档检查通过（`.artifacts/checks/20261029T183831Z-41009046/result.json`）。
 - 独立复核发现空包误扩大、Pillow 缺失、tone30 类名和预览范围问题，均已修复并复验；最终无未处置阻塞项。真实 GitHub Actions、临时 PR 矩阵及 branch protection 现状待核验。
 - 第二批 Windows common/media 本地 240 秒超时尚无确定原因，不能据此声称已通过。
+
+## 真实 Actions 阶段记录
+
+以下临时 PR 使用固定基线 `6699c5e4`，只用于验收，不合并。
+
+- 文档 PR 30、工具 PR 31：总门禁通过，预览成功跳过；均已关闭。
+- leaf PR 32、media PR 33、long PR 34：选择成功，Windows 测试在旧 head 因新测试类缺少紧凑断言混入而失败；PR 32 另有一次缩略图替换测试失败。混入已修并本地复验；不能将这些旧 run 视为通过。
+- 混合 PR 35：总门禁通过；预览在旧 head 因同一混入问题失败。
+- 非法输出 PR 36、选择失败 PR 37：总门禁按预期失败；文档损坏 PR 38：真实文档检查及总门禁按预期失败。三者已关闭。
+- PR 39 刻意缺少浏览器第 3 片报告；聚合结果待核验。
+- PR 29 初始完整浏览器测试暴露既有夹具与 ESM 初始化不匹配及 tooltip 断言过时；已保留原行为断言作最小适配，真实浏览器专项通过。filmstrip 用例的拖动坐标落在视口外，已在拖动前滚入视口，保留原拖动与断言并通过专项复验（`.artifacts/checks/20261029T185103Z-7cd60c55/result.json`）。timed-text 等失败仍需确认，不据此标记完整四片通过。
+- fork main 的 branch protection 查询返回 401，状态未核实；未修改仓库设置。
+
+- 媒体 fixture 与 tooltip 适配经独立复核；媒体 7 项和波形工具栏 1 项真实浏览器验证通过（`.artifacts/checks/20261029T185022Z-89fbb535/result.json`、`.artifacts/checks/20261029T184822Z-c61bc927/result.json`）。

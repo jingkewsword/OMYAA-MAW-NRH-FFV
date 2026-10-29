@@ -115,6 +115,7 @@ test('video filmstrip respects tail width, cross-row seek, frame snapping and ex
   await page.keyboard.press('ControlOrMeta+z');
   const quick=page.locator('#word-timing-quick-toggle');if(await quick.getAttribute('aria-pressed')!=='true')await quick.click();
   const word=page.locator('.waveform-word-block[data-segment-idx="0"][data-item-idx="0"]').first();await expect(word).toBeVisible();
+  await word.scrollIntoViewIfNeeded();
   const wordBox=await word.boundingBox(),wordBefore=await page.evaluate(()=>MaweBoot.DATA.segments[0].items[0].start);
   await page.mouse.move(wordBox.x+15,wordBox.y+15);await page.mouse.down();await page.mouse.move(wordBox.x+35,wordBox.y+15,{steps:4});await page.mouse.up();
   expect(await page.evaluate(()=>MaweBoot.DATA.segments[0].items[0].start)).toBeGreaterThan(wordBefore);
