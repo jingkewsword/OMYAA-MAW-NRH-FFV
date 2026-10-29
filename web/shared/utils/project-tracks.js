@@ -1,3 +1,4 @@
+import { selectTracks } from './track-policy.js';
 // The only project-level subtitle model. Legacy containers are accepted solely
 // by importProject; consumers receive track entities from one canonical tree.
 export function createUtilsModule() {
@@ -631,16 +632,8 @@ export function createUtilsModule() {
     }
     return snapshot;
   }
-  function selectSubtitleTracks(project, { subtitleTracks = 'main', includeOverlay = true } = {}) {
-    const main = getMainTrack(project);
-    const overlay = getOverlayTrack(project);
-    const extension = getExtensionTrack(project);
-    const selections = {
-      main: [main, ...(includeOverlay ? [overlay] : [])], overlay: [overlay], extension: [extension],
-      main_and_extension: [main, ...(includeOverlay ? [overlay] : []), extension], all: [main, overlay, extension],
-    };
-    if (!own(selections, subtitleTracks)) throw new Error('Unknown subtitle track selection');
-    return selections[subtitleTracks].filter(track => track?.enabled === true);
+  function selectSubtitleTracks(project, { subtitleTracks = 'main', includeOverlay = true, surface = 'export' } = {}) {
+    return selectTracks(project, subtitleTracks, surface, { includeOverlay });
   }
   return Object.freeze({ PROJECT_TRACKS_SCHEMA, ProjectTracksError, importProject, migrateProjectTracks, makeProject,
     validateTracksProject, getTrack, getTracksByRole, getMainTrack, getExtensionTrack, getOverlayTrack,

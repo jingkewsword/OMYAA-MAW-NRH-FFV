@@ -313,7 +313,8 @@ test('production ordinary/gap SRT and ASS builders remove local words while inde
 test('burn subtitles can retain media cue timing while file export extends the first cue', () => {
   const { context, srt, main } = runtime();
   context.window.MaweExportContext.mergedExportSegments = () => ({ segments: main, overlaySet: new Set(), overlaySegments: [] });
-  context.activeExtensionSegments = () => [];
+  context.window.AsrEditorUtils.getExtensionTrack(context.MaweBoot.DATA).enabled = false;
+  context.window.AsrEditorUtils.getOverlayTrack(context.MaweBoot.DATA).enabled = false;
   context.MaweSettings.EDITOR_SETTINGS.exportStartAtZero = true;
   const ordinaryFile = srt.buildSrt();
   const ordinaryBurn = srt.buildSrt({ alignFirstStart: false });
