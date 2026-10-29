@@ -95,3 +95,4 @@
     stickerBurnEnabled, collectStickerPlans, collectStickerIntervals, stickerLayerBox,
   });
 })(typeof window !== 'undefined' ? window : globalThis);
+
