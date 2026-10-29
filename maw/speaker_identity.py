@@ -44,11 +44,19 @@ def allocate_source_speaker_ids(
 
     Existing project IDs are reserved only; matching an opaque source ID does
     not establish that speakers from separate sources are the same person.
+    Include item identities so a cue with no segment-level identity can still
+    be converted when its items identify one speaker unambiguously.
     """
     used = set(reserved_ids)
     mapping: dict[str, str] = {}
     number = 1
-    for source_id in distinct_speaker_ids(segments):
+    source_entries: list[Mapping[str, Any]] = []
+    for segment in segments:
+        source_entries.append(segment)
+        items = segment.get("items")
+        if isinstance(items, list):
+            source_entries.extend(item for item in items if isinstance(item, Mapping))
+    for source_id in distinct_speaker_ids(source_entries):
         candidate = f"spk-{number:03d}"
         while candidate in used:
             number += 1

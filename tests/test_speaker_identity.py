@@ -63,6 +63,13 @@ class SpeakerIdentityTests(unittest.TestCase):
         self.assertEqual(result[0]["speaker"], "spk-1")
         self.assertNotIn("speaker", result[0]["items"][0])
 
+    def test_allocation_supports_word_only_source_identity(self):
+        source = [{"items": [{"text": "Hi", "speaker": "one"}, {"text": "!"}]}]
+        mapping = allocate_source_speaker_ids(source, reserved_ids=set())
+        result = prepare_asr_speaker_segments(source, mapping)
+        self.assertEqual(result[0]["speaker"], mapping["one"])
+        self.assertEqual(result[0]["items"], [{"text": "Hi"}, {"text": "!"}])
+
     def test_v2_identity_contract_preserves_distinct_people_with_same_name_and_color(self):
         project = {"speakers": [{"id": "p1", "name": "主持人", "color": "#f9ca1f"},
                                 {"id": "p2", "name": "主持人", "color": "#f9ca1f"}],
