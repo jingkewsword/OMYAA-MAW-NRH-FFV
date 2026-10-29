@@ -56,6 +56,13 @@ export function initMaweDynamicExports() {
         nativeTextObjects: MaweDom.fcp7ExportNativeText.checked,
         baseName: MaweBoot.FILENAME_BASE,
       });
+      // FCP exports overlay stickers even when its text-track choice is main only.
+      const overlay = window.AsrEditorUtils.getOverlayTrack(MaweBoot.DATA);
+      const includesOverlayText = options.nativeTextObjects && ['overlay', 'all'].includes(options.subtitleTracks);
+      const includesOverlayStickers = overlay?.segments?.some(segment => segment.sticker_group_id);
+      if (includesOverlayText || includesOverlayStickers) {
+        window.AsrEditorUtils.TrackPolicy.assertExportable(MaweBoot.DATA, 'overlay');
+      }
       const plan = window.AsrEditorUtils.buildProjectExportPlan(MaweBoot.DATA, {
         ...options,
         ...MaweSpeakerLabels.speakerLabelExportOptions(),

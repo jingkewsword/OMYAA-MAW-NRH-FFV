@@ -116,5 +116,5 @@ test('track visibility independently gates ordinary SRT and ASS surfaces', () =>
   assert.equal(mainTrack.segments[0].text, 'main text');
   overlayTrack.export.enabled = true;
   overlayTrack.variant = 'future';
-  assert.doesNotMatch(api.buildSrt(), /overlay text/);
+  assert.throws(() => api.buildSrt(), /不支持导出叠加轨/);
 });

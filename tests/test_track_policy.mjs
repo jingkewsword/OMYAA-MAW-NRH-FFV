@@ -30,3 +30,16 @@ test('ordinary selection includes main and overlay; secondary requires explicit 
   overlay.variant = 'future';
   assert.deepEqual(selectTracks(project), [main]);
 });
+test('export diagnostics apply only to selected enabled overlay', () => {
+  const overlay = { id: 'o', role: 'overlay', name: 'future track', enabled: true, variant: 'future' };
+  const project = { tracks: [overlay] };
+  assert.throws(() => TrackPolicy.assertExportable(project, 'main'), /future track.*future/);
+  assert.throws(() => TrackPolicy.assertExportable(project, 'all'), /future/);
+  assert.doesNotThrow(() => TrackPolicy.assertExportable(project, 'extension'));
+  assert.doesNotThrow(() => TrackPolicy.assertExportable(project, 'main', { includeOverlay: false }));
+  overlay.export = { enabled: false };
+  assert.doesNotThrow(() => TrackPolicy.assertExportable(project));
+  overlay.export.enabled = true;
+  overlay.enabled = false;
+  assert.doesNotThrow(() => TrackPolicy.assertExportable(project));
+});

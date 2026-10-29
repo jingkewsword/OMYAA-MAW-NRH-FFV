@@ -23,4 +23,14 @@ export function selectTracks(project, mode = 'main', surface = 'export', { inclu
   return selections[mode].filter(track => isTrackEnabled(track, surface));
 }
 
-export const TrackPolicy = Object.freeze({ isTrackEnabled, selectTracks, unsupportedVariant });
+// Reject an unsupported selected overlay before filtering, so export cannot silently omit it.
+export function assertExportable(project, mode = 'main', { includeOverlay = true } = {}) {
+  const includesOverlay = mode === 'overlay' || mode === 'all'
+    || (includeOverlay && (mode === 'main' || mode === 'main_and_extension'));
+  const track = includesOverlay && project?.tracks?.find(item => item?.role === 'overlay');
+  if (track?.enabled === true && track.export?.enabled !== false && unsupportedVariant(track)) {
+    throw new Error(`不支持导出叠加轨“${track.name || track.id}”的类型“${track.variant}”；请关闭该轨或其导出开关`);
+  }
+}
+
+export const TrackPolicy = Object.freeze({ isTrackEnabled, selectTracks, unsupportedVariant, assertExportable });

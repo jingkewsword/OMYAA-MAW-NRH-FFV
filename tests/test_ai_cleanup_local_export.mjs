@@ -412,3 +412,28 @@ test('ASS renders independent track snapshots even when the library has no match
   assert.equal(styles.get('extension'), 'Snapshot Extension');
   assert.equal(styles.get('overlay'), 'Snapshot Overlay');
 });
+test('unsupported selected overlay blocks SRT and ASS, but disabled overlay and preview remain usable', () => {
+  const { context, utils, srt } = runtime();
+  const overlay = utils.getOverlayTrack(context.MaweBoot.DATA);
+  context.window.MaweExportContext.mergedExportSegments = () => {
+    const overlaySegments = utils.TrackPolicy.isTrackEnabled(overlay, 'export') ? overlay.segments : [];
+    return { segments: [...utils.getMainTrack(context.MaweBoot.DATA).segments, ...overlaySegments], overlaySet: new Set(overlaySegments), overlaySegments };
+  };
+  overlay.variant = 'future';
+  overlay.preview_visible = false;
+  for (const build of [() => srt.buildSrt(), () => srt.buildAss(), () => srt.buildGapRemovedSrt(), () => srt.buildGapRemovedAss()]) {
+    assert.throws(build, /不支持导出叠加轨.*future/);
+  }
+  assert.doesNotThrow(() => srt.buildAss({ preview: true }));
+  for (const disable of ['enabled', 'export']) {
+    overlay.enabled = true;
+    overlay.export = { enabled: true };
+    if (disable === 'enabled') overlay.enabled = false;
+    else overlay.export.enabled = false;
+    assert.match(srt.buildSrt(), /我这个功能呢/);
+    assert.doesNotMatch(srt.buildSrt(), /overlay untouched/);
+    assert.match(srt.buildAss(), /Dialogue:/);
+    assert.doesNotMatch(srt.buildAss(), /overlay untouched/);
+    assert.equal(overlay.variant, 'future');
+  }
+});

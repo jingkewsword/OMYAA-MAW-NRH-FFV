@@ -31,6 +31,7 @@ export function initMaweExportSrt() {
   }
 
   function buildSrt({ alignFirstStart = MaweSettings.EDITOR_SETTINGS.exportStartAtZero } = {}) {
+  window.AsrEditorUtils.TrackPolicy.assertExportable(MaweBoot.DATA);
   const { segments, overlaySet, overlaySegments } = cleanupMergedExportSegments();
   const firstEnabledIndex = window.AsrEditorUtils.getSrtExportFirstIndex(
     segments,
@@ -51,6 +52,7 @@ export function initMaweExportSrt() {
   // loaded project. Video subtitles follow the returned media timeline rather
   // than the independent, millisecond-precise gap-removed SRT preference.
   function captureVideoSrt() {
+    window.AsrEditorUtils.TrackPolicy.assertExportable(MaweBoot.DATA);
     const { segments, overlaySet, overlaySegments } = cleanupMergedExportSegments();
     const options = {
       colorContextResolver: window.MaweExportContext.exportColorContextResolver(overlaySet, overlaySegments),
@@ -108,6 +110,8 @@ export function initMaweExportSrt() {
 
 
   async function downloadColorSrts(gapRemoved = false) {
+  try { window.AsrEditorUtils.TrackPolicy.assertExportable(MaweBoot.DATA); }
+  catch (error) { MaweHint.flashHint(error.message, 'warning'); return; }
   if (MaweInlineEdit.editingState) MaweInlineEdit.finishEdit(true);
   const colors = usedSubtitleColors();
   const removed = gapRemoved ? MaweGapRemoveData.getRemovedGapRanges() : [];
@@ -313,6 +317,7 @@ export function initMaweExportSrt() {
 
   function buildAss({ preview = false, onAssPlan = null, allowAssPlanDiagnostics = false,
     alignFirstStart = MaweSettings.EDITOR_SETTINGS.exportStartAtZero } = {}) {
+  if (!preview) window.AsrEditorUtils.TrackPolicy.assertExportable(MaweBoot.DATA, 'all');
   const speakerOptions = MaweSpeakerLabels.speakerLabelExportOptions();
   if (preview) {
     const settings = MaweSpeakerLabels.getSpeakerLabelSettings();
@@ -357,6 +362,7 @@ export function initMaweExportSrt() {
   }
 
   function buildBilingualSrt() {
+    window.AsrEditorUtils.TrackPolicy.assertExportable(MaweBoot.DATA, 'main_and_extension');
     if (!window.AsrEditorUtils.TrackPolicy.isTrackEnabled(MaweMultiSubtitleCore.getActiveExtensionTrack(), 'export')) return '';
     const { segments, overlaySet, overlaySegments } = cleanupMergedExportSegments();
     return window.AsrEditorUtils.buildBilingualSrtPayload(segments,
@@ -381,6 +387,7 @@ export function initMaweExportSrt() {
   }
 
   function buildGapRemovedSrt({ alignFirstStart = MaweSettings.EDITOR_SETTINGS.exportStartAtZero } = {}) {
+  window.AsrEditorUtils.TrackPolicy.assertExportable(MaweBoot.DATA);
   const removed = MaweGapRemoveData.getRemovedGapRanges();
   if (!removed.length) {
     MaweHint.flashHint('没有已移除的静音空隙；请先在「静音空隙」中扫描', 'invalid');
@@ -408,6 +415,7 @@ export function initMaweExportSrt() {
 
   function buildGapRemovedAss({ onAssPlan = null,
     alignFirstStart = MaweSettings.EDITOR_SETTINGS.exportStartAtZero } = {}) {
+  window.AsrEditorUtils.TrackPolicy.assertExportable(MaweBoot.DATA, 'all');
   const removed = MaweGapRemoveData.getRemovedGapRanges();
   if (!removed.length) {
     MaweHint.flashHint('没有已移除的静音空隙；请先在「静音空隙」中扫描', 'invalid');
