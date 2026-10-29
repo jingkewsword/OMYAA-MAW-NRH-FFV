@@ -525,8 +525,11 @@ document.getElementById('download-gap-removed-video')?.addEventListener('click',
   const selectedAudioTrack = isAudio ? currentAudioTrack() : undefined;
   const audioSelection = selectedAudioTrack === undefined ? {} : { selectedAudioTrack };
   const intervals = context.intervals.map(({ start, end }) => ({ startMs: start, endMs: end }));
-  if (!isAudio && subtitleExportBlocked()) return;
-  const buildVideoSrt = !isAudio ? MaweExportSrt.captureVideoSrt?.() : null;
+  let buildVideoSrt = null;
+  if (!isAudio) {
+    try { buildVideoSrt = MaweExportSrt.captureVideoSrt?.() || null; }
+    catch (error) { MaweHint.flashHint(`无法生成匹配字幕：${error.message || error}`, 'warning'); }
+  }
   let videoTimeline = null;
   const isBindingCurrent = () => MaweBoot.SERVER_CONFIG === config && canExport()
     && config.bindingGeneration === bindingGeneration && config.sourceMediaId === sourceMediaId
