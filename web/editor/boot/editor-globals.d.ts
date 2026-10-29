@@ -102,6 +102,7 @@ interface ProjectOverlayTrack {
 interface ProjectData {
   schema: 'moy.asr.project.v2';
   tracks: ProjectTrack[];
+  styles?: Array<{ id: string; name: string; [key: string]: unknown }>;
   bindings: ProjectBinding[];
   bilingual: { display_mode: string; active_track_id?: string };
   subtitle_groups?: {
