@@ -362,3 +362,4 @@ def make_sprite(jpegs: Sequence[bytes], *, cancel: threading.Event | None = None
         if result.returncode:
             raise ThumbnailError(result.stderr.decode("utf-8", "replace")[-500:])
         return (directory / "sprite.jpg").read_bytes()
+
