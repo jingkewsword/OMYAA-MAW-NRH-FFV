@@ -131,7 +131,7 @@ class TestWorkflowTests(unittest.TestCase):
             with self.subTest(path=path):
                 plan = select_packs([path])
                 self.assertEqual(plan["packs"], ["docs", "website"])
-                self.assertFalse(plan["preview"])
+                self.assertEqual(plan["preview"], path in test_policy.SITE_TOOL_PATHS)
                 self.assertEqual(test_workflow.preparation(plan["packs"]),
                                  {"application": False, "real_media": False})
         steps = list(test_workflow.commands(["website"], ROOT / ".artifacts"))
@@ -151,6 +151,15 @@ class TestWorkflowTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertTrue(ALL_MERGE.issubset(select_packs([path])["packs"]))
         self.assertTrue(ALL_MERGE.issubset(select_packs([])["packs"]))
+
+    def test_windows_preview_keeps_application_and_shared_changes(self):
+        for path in ("web/launcher/modules/provider-memory.js", "maw/thumbnails.py",
+                     "maw/quapeaks.py", "web/editor/state/editor-state.js",
+                     "tests/e2e/keyboard-timing.spec.mjs", "uv.lock", "unknown-boundary.py"):
+            with self.subTest(path=path):
+                self.assertTrue(select_packs([path])["preview"])
+        self.assertFalse(select_packs(["docs/user/WORKFLOW.md"])["preview"])
+        self.assertTrue(select_packs(["docs/user/WORKFLOW.md", "web/launcher/modules/provider-memory.js"])["preview"])
 
     def test_core_builders_require_complete_browser_collection(self):
         leaf = "tests/e2e/verification-checklist.spec.mjs"
@@ -192,7 +201,7 @@ class TestWorkflowTests(unittest.TestCase):
             with self.subTest(path=path):
                 plan = select_packs([path])
                 self.assertEqual(plan["packs"], ["docs", "website"] if path in test_policy.SITE_TOOL_PATHS else ["docs"])
-                self.assertFalse(plan["preview"])
+                self.assertTrue(plan["preview"])
                 commands = list(test_workflow.commands(plan["packs"], ROOT / ".artifacts"))
                 self.assertEqual([name for name, _, _ in commands if not name.startswith("website-")],
                                  ["docs-navigation", "release-docs", "docs-regressions"])
@@ -209,7 +218,7 @@ class TestWorkflowTests(unittest.TestCase):
                 self.assertTrue(expected.issubset(tool_ids), "tool-only changes must run Markdown/HTML regressions")
                 plan = select_packs([f"tests/{module}.py"])
                 self.assertEqual(plan["packs"], ["docs", "tools"])
-                self.assertFalse(plan["preview"])
+                self.assertTrue(plan["preview"])
         for path in ("scripts/check_docs_extra.py", "tools/filmstrip-lab/backend.py", "tools/unknown/check.py"):
             with self.subTest(unknown_tool=path):
                 self.assertTrue(ALL_MERGE.issubset(select_packs([path])["packs"]))
@@ -221,7 +230,7 @@ class TestWorkflowTests(unittest.TestCase):
         plan = select_packs([spec])
         self.assertEqual(plan["packs"], ["docs", "e2e"])
         self.assertEqual(plan["e2e_specs"], [spec])
-        self.assertFalse(plan["preview"])
+        self.assertTrue(plan["preview"])
         self.assertEqual(select_packs([spec, other])["e2e_specs"], sorted([spec, other]))
         self.assertEqual(select_packs([spec, "scripts/check_docs.py"])["e2e_specs"], [spec])
         leaf = select_packs(["web/shared/tooltip.js"])

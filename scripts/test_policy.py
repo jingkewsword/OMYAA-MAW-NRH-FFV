@@ -29,7 +29,7 @@ DOC_TOOL_PATHS = {"scripts/check_docs.py", "scripts/prepare_release_notes.py",
 SITE_TOOL_PATHS = {"scripts/build_release_site.py", "scripts/prepare_release_notes.py"}
 TOOL_MODULES = {"test_docs_check", "test_release_notes", "test_release_site", "test_release_publication", "test_run_check", "test_run_tests_runner",
                 "test_verification_checklist", "test_verification_checklist_build", "test_verify_sha256_script", "test_macos_icon",
-                "test_packaging_contract", "test_test_workflow", "test_browser_results"}
+                "test_packaging_contract", "test_test_workflow", "test_browser_results", "test_ci_selected_gate"}
 MEDIA_METHODS = {
     "test_streaming_extraction_and_cache_match", "test_low_rate_multichannel_keeps_opposite_and_one_sided_audio",
     "test_mono_stays_identical_and_third_channel_is_included", "test_mopeaks_generation_does_not_need_native_quapeaks",
@@ -191,6 +191,14 @@ def select_packs(paths: list[str], *, release: bool = False) -> dict:
                 "reasons": ["release or unavailable change list: expand all required packs"]}
     for original in paths:
         path = original.replace("\\", "/").removeprefix("./")
+        # Keep the existing Windows preview for application, tests and tooling.
+        # Documentation, website sources and the isolated checklist are light.
+        light = (path in {"README.md", "CHANGELOG.md", "CONTRIBUTING.md", "AGENTS.md"}
+                 or path.startswith("docs/") and path not in SCHEMA_PATHS
+                 or path.startswith("website/")
+                 or path.startswith("tools/verification-checklist/"))
+        if not light:
+            preview = True
         if path in {"maw/ffmpeg.py", "tests/test_ffmpeg.py"}:
             selected.add("lifecycle")
         generated = ("website/src/pages/docs/", "website/src/pages/releases/",
@@ -211,6 +219,7 @@ def select_packs(paths: list[str], *, release: bool = False) -> dict:
         if path.startswith("docs/") or path in {"README.md", "CHANGELOG.md", "CONTRIBUTING.md", "AGENTS.md", "JSON_SCHEMA.md"}:
             if path in SCHEMA_PATHS or path.startswith("docs/") and not path.endswith(".md"):
                 selected.update(ALL_MERGE)
+                preview = True
             continue
         if path.startswith("website/"):
             selected.add("website")
