@@ -304,7 +304,9 @@ jobs:
             os: ubuntu-22.04
             arch: x64
             asset: MAW-Linux-x86_64
-            paths: build-appimage/MAW-Linux-x86_64*.AppImage
+            paths: |
+              build-appimage/MAW-Linux-x86_64*.AppImage
+              build-appimage/build-manifest.json
     runs-on: ${{ matrix.os }}
     env:
       PYTHONUTF8: '1'
