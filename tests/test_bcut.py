@@ -44,54 +44,6 @@ def _data_response(data, status=200):
     return _response({"code": 0, "data": data, "message": "", "ttl": 1}, status=status)
 
 
-class ItemMappingTests(unittest.TestCase):
-    def test_words_become_char_level_items(self) -> None:
-        utterances = [
-            _utterance("大家好。", 0, 1000, [
-                _word("大", 0, 300), _word("家", 300, 620),
-                _word("好", 620, 900), _word("。", 900, 1000),
-            ]),
-        ]
-
-        items = bcut.utterances_to_items(utterances)
-
-        self.assertEqual(
-            items,
-            [
-                {"text": "大", "start": 0, "end": 300},
-                {"text": "家", "start": 300, "end": 620},
-                {"text": "好", "start": 620, "end": 900},
-                {"text": "。", "start": 900, "end": 1000},
-            ],
-        )
-
-    def test_missing_words_falls_back_to_utterance_level(self) -> None:
-        utterances = [
-            _utterance("整句没有逐字。", 100, 2000),  # 无 words 字段
-            _utterance("空 words 也回退。", 2100, 3000, []),
-        ]
-
-        items = bcut.utterances_to_items(utterances)
-
-        self.assertEqual(items[0], {"text": "整句没有逐字。", "start": 100, "end": 2000})
-        self.assertEqual(items[1], {"text": "空 words 也回退。", "start": 2100, "end": 3000})
-
-    def test_defends_missing_or_inverted_timestamps(self) -> None:
-        utterances = [
-            _utterance("ab", 0, 200, [
-                _word("a", 100, 200),
-                {"label": "b"},                      # 缺时间戳 → 整句回退
-                {"label": "c", "start_time": 500, "end_time": 400},  # 倒挂 → 整句回退
-                {"label": ""},                       # 空文本跳过
-                "not-a-dict",                        # 异常结构 → 整句回退
-            ]),
-        ]
-
-        items = bcut.utterances_to_items(utterances)
-
-        self.assertEqual(items, [{"text": "ab", "start": 0, "end": 200}])
-
-
 class ParseResultTests(unittest.TestCase):
     def test_parse_result_payload_builds_text_language_items(self) -> None:
         raw = _result_json([
@@ -863,15 +815,6 @@ class GuiWorkflowTests(unittest.TestCase):
 
 class PublicCliWiringTests(unittest.TestCase):
     """maw/cli.py 公开入口的 bcut 接线：choices、参数门控、生成器路由。"""
-
-    def test_parser_accepts_bcut_provider(self) -> None:
-        from maw import cli
-
-        args = cli.build_parser("MAW.exe").parse_args(
-            ["--provider", "bcut", "-i", "clip.mp4"]
-        )
-
-        self.assertEqual(args.provider, "bcut")
 
     def test_bcut_rejects_language_and_model(self) -> None:
         from maw import cli

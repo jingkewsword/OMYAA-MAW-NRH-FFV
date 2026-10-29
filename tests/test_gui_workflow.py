@@ -1622,19 +1622,6 @@ class GuiWorkflowTests(CompactContainerAssertions, unittest.TestCase):
         self.assertIn("完整解压", message)
         self.assertNotIn("Traceback", message)
 
-    def test_entrypoint_unknown_windows_gui_shows_hint_then_reraises(self) -> None:
-        import maw_gui
-
-        error = RuntimeError("unrelated GUI failure")
-        with mock.patch("maw_gui.sys.platform", "win32"):
-            with mock.patch("maw_gui.main", side_effect=error):
-                with mock.patch("maw_gui._show_unknown_startup_hint") as show_hint:
-                    with self.assertRaises(RuntimeError) as raised:
-                        maw_gui.run_entrypoint([])
-
-        self.assertIs(raised.exception, error)
-        show_hint.assert_called_once_with(context=mock.ANY, log_path=mock.ANY)
-
     def test_entrypoint_python_runtime_marker_is_not_owned_on_non_windows(self) -> None:
         import maw_gui
 

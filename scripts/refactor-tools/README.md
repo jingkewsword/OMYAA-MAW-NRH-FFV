@@ -4,7 +4,7 @@
 声明）拆为 77 个特征模块。对应提交区间 `a28ad73..a98cbc2`（分支
 `refactor/editor-module-split`）。当前源码已迁入 `web/editor/` 与 `web/shared/`。只读审计工具从 `editor-scripts.txt` 枚举源码，支持领域子目录；`rebuild-contract.py` 更新显式清单元组，payload 测试直接核对源码内容。
 
-`split-cluster.mjs`、`ns-rewrite-editor.mjs`、`fix-e2e-globals.mjs` 及 `tools/merge-flow.mjs` 仍是历史单体迁移工具，依赖未切段的 `web/editor.js`。它们在当前布局上会拒绝运行，不写文件；如需复现历史迁移，应使用对应旧 checkout。导出的纯作用域处理函数继续由单元测试覆盖。历史 specs 保留原路径作为输入记录。
+`split-cluster.mjs`、`ns-rewrite-editor.mjs`、`fix-e2e-globals.mjs` 及 `tools/merge-flow.mjs` 仍是历史单体迁移工具，依赖未切段的 `web/editor.js`。它们在当前布局上会拒绝运行，不写文件；如需复现历史迁移，应使用对应旧 checkout。`merge-flow` 的纯函数保留为历史参考，不再单独测试。历史 specs 保留原路径作为输入记录。
 
 | 脚本 | 作用 | 依赖 |
 | --- | --- | --- |

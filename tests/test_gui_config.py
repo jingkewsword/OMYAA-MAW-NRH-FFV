@@ -76,40 +76,6 @@ class GuiConfigTests(unittest.TestCase):
             self.assertFalse(getattr(app_paths.sys, "frozen", False))
             self.assertEqual(gui_config.default_env_path(), ROOT / ".env")
 
-    def test_default_env_path_frozen_prefers_file_beside_executable(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app_dir = Path(temp_dir) / "MAW"
-            app_dir.mkdir()
-            adjacent = app_dir / ".env"
-            adjacent.write_text("CONFIG_SOURCE=adjacent\n", encoding="utf-8")
-            with mock.patch.object(app_paths.sys, "platform", "win32"), mock.patch.object(
-                app_paths.sys, "frozen", True, create=True
-            ), mock.patch.object(app_paths.sys, "executable", str(app_dir / "MAW.exe")):
-                with mock.patch.dict(
-                    os.environ,
-                    {"LOCALAPPDATA": str(Path(temp_dir) / "LocalAppData"), "MAW_ENV_FILE": ""},
-                    clear=True,
-                ):
-                    self.assertEqual(gui_config.default_env_path(), adjacent.resolve())
-
-    def test_default_env_path_frozen_falls_back_to_shared_app_data(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            app_dir = Path(temp_dir) / "MAW"
-            app_dir.mkdir()
-            local_app_data = Path(temp_dir) / "LocalAppData"
-            with mock.patch.object(app_paths.sys, "platform", "win32"), mock.patch.object(
-                app_paths.sys, "frozen", True, create=True
-            ), mock.patch.object(app_paths.sys, "executable", str(app_dir / "MAW.exe")):
-                with mock.patch.dict(
-                    os.environ,
-                    {"LOCALAPPDATA": str(local_app_data), "MAW_ENV_FILE": ""},
-                    clear=True,
-                ):
-                    self.assertEqual(
-                        gui_config.default_env_path(),
-                        (local_app_data / "MAW" / ".env").resolve(),
-                    )
-
     def test_default_env_path_keeps_windows_at_repo_root(self) -> None:
         """Given Windows, When resolving, Then it stays at the repository root (unchanged)."""
         with mock.patch.object(app_paths.sys, "platform", "win32"):

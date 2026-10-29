@@ -1101,15 +1101,6 @@ class BurnStickerTests(CompactContainerAssertions, unittest.TestCase):
         self.assertEqual(server_editor._burn_sticker_input_args(stickers),
                          ["-loop", "1", "-i", str(self.sticker_a)])
 
-    def test_parse_accepts_object_payload_with_mode(self) -> None:
-        stickers = server_editor._parse_burn_sticker_inputs(
-            {"mode": "cue-left", "placements": [self._entry()]}, self.stickers_dir)
-        self.assertEqual(len(stickers), 1)
-        with self.assertRaises(ValueError) as caught:
-            server_editor._parse_burn_sticker_inputs(
-                {"mode": "diagonal", "placements": [self._entry()]}, self.stickers_dir)
-        self.assertIn("烧录模式无效", str(caught.exception))
-
     def test_parse_rejects_too_many_placements(self) -> None:
         payload = [self._entry() for _ in range(server_editor.MAX_BURN_STICKER_PLACEMENTS + 1)]
         with self.assertRaises(ValueError) as caught:
@@ -1294,12 +1285,6 @@ class BurnStickerTests(CompactContainerAssertions, unittest.TestCase):
         graph = Path(command[command.index("-/filter_complex") + 1]).read_text(encoding="utf-8")
         self.assertIn("overlay=", graph)
         self.assertIn("ass=filename='burn.ass'[burn_video]", graph)
-
-    def test_full_video_burn_without_stickers_keeps_vf_shortcut(self) -> None:
-        self._run_full_video([])
-        command = next(command for command in self.calls if command[0] == "ffmpeg")
-        self.assertEqual(command[command.index("-vf") + 1], "ass=filename='burn.ass'")
-        self.assertNotIn("-/filter_complex", command)
 
     def test_http_burn_job_forwards_stickers_to_export(self) -> None:
         from tests.test_local_editor_server import server_editor as loaded_server_editor

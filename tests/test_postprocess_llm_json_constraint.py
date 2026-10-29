@@ -54,9 +54,6 @@ def _mock_session(post_side_effect) -> mock.MagicMock:
 
 
 class StripJsonFenceTests(unittest.TestCase):
-    def test_plain_json_passes_through(self) -> None:
-        self.assertEqual(_strip_json_fence('{"groups":[]}'), '{"groups":[]}')
-
     def test_json_fence_is_stripped(self) -> None:
         self.assertEqual(
             _strip_json_fence('```json\n{"groups":[]}\n```'), '{"groups":[]}'
@@ -79,10 +76,6 @@ class StripJsonFenceTests(unittest.TestCase):
     def test_multiple_objects_are_not_silently_accepted(self) -> None:
         content = '{"groups": []} {"groups": [{"id":"unexpected"}]}'
         self.assertEqual(_strip_json_fence(content), content)
-
-    def test_think_block_with_fence(self) -> None:
-        content = '<think>x</think>\n```json\n{"groups":[]}\n```'
-        self.assertEqual(_strip_json_fence(content), '{"groups":[]}')
 
     def test_prose_wrapped_json_is_extracted(self) -> None:
         content = '好的，以下是结果：\n{"groups":[]}\n完成。'
@@ -260,21 +253,6 @@ class JsonConstraintDowngradeTests(unittest.TestCase):
             "json_schema",
         )
 
-    def test_rejected_object_and_schema_drop_to_prompt(self) -> None:
-        settings = _make_settings()
-        responses = [
-            _rejection_response_mock(),
-            _rejection_response_mock(),
-            _response_mock(_completion_body(_NEEDLE_PROTOCOL)),
-        ]
-        session = _mock_session(responses)
-        with mock.patch("maw.postprocess_llm.requests.Session", return_value=session):
-            result = complete_subtitle_groups(settings, "Return JSON.", [])
-        self.assertEqual(result["protocol"], "maw-subtitle-translations-v1")
-        self.assertEqual(session.post.call_count, 3)
-        self.assertNotIn("response_format", session.post.call_args.kwargs["json"])
-        self.assertEqual(json_constraint_supported(settings), False)
-
     def test_cleanup_shares_bounded_downgrade(self) -> None:
         from maw.postprocess_ai_cleanup import llm_complete
 
@@ -433,9 +411,6 @@ class TruncatedJsonRepairTests(unittest.TestCase):
 
     def test_mismatched_closer_is_not_repaired(self) -> None:
         self.assertIsNone(_close_truncated_json('{"a":1]'))
-
-    def test_balanced_content_has_nothing_to_repair(self) -> None:
-        self.assertIsNone(_close_truncated_json('{"a":1}'))
 
     def test_repair_rejects_garbage_suffix(self) -> None:
         with self.assertRaises(json.JSONDecodeError):

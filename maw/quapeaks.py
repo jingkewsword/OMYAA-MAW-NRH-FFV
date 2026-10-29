@@ -72,8 +72,7 @@ _MTIME_TOLERANCE_SECONDS = 5
 _UINT32_MASK = 0xFFFF_FFFF
 _UINT32_MODULUS = 0x1_0000_0000
 
-# MAW 生成的容器后缀。tests/test_reapeaks.py 把它与内核 quapeaks.FILE_SUFFIX
-# 钉成同值：两边各写一份的话，改名时会出现内核写 A、MAW 找 B 的哑火。
+# MAW 使用该后缀写入并查找自身生成的缓存容器。
 QUAPEAKS_SUFFIX = ".quapeaks"
 # 读取顺序：MAW 自己的产物在前（层更全，含自研层），REAPER 真机的
 # .ReaPeaks 在后但必须继续能读。.mopeaks 不在这里 —— 它是波形 sidecar

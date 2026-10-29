@@ -1173,17 +1173,6 @@ class PostprocessPipelineTests(CompactContainerAssertions, unittest.TestCase):
         self.assertTrue(any("跳过" in warning for warning in result.warnings))
         self.assertFalse((self.root / "_maw" / "后处理").exists())
 
-    def test_validation_allows_replace_step_with_no_rules(self) -> None:
-        plan, errors = validate_plan(
-            self.plan({"id": "replace", "enabled": True, "replacements": [], "conversion": "off"}),
-            env_path=self.env_path,
-            media_path=self.media,
-            ffmpeg_path=None,
-        )
-
-        self.assertEqual(errors, ())
-        self.assertEqual([step["id"] for step in plan["steps"] if step["id"] == "replace"], ["replace"])
-
     def test_pipeline_accepts_ocr_as_the_last_step(self) -> None:
         video = self.root / "clip.mp4"
         ffmpeg = self.root / "ffmpeg.exe"

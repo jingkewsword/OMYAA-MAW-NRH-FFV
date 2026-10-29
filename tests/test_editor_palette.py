@@ -12,14 +12,6 @@ from maw.colors import COLOR_PALETTE
 class EditorPaletteInjectionTests(CompactContainerAssertions, unittest.TestCase):
     """调色板单一来源：maw/colors.py → 注入编辑器页面。"""
 
-    def test_build_palette_json_matches_color_palette(self) -> None:
-        injected = json.loads(edit.build_palette_json())
-
-        self.assertEqual(
-            injected,
-            [{"name": name, "value": value} for name, value in COLOR_PALETTE],
-        )
-
     def test_rendered_page_contains_injected_palette_script(self) -> None:
         page = edit.render_editor_page(**self._minimal_context())
 

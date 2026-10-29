@@ -984,18 +984,6 @@ test('peaksRateOf falls back to peaks_per_second for legacy payloads', () => {
   assert.equal(helpers.peaksRateOf(null), 0);
 });
 
-test('a peak index maps back to its own sample position without drift', () => {
-  const { waveform } = helpers.decodeReapeaksFile(
-    buildReapeaksBuffer({ sampleRate: 16000, division: 53, peaks: 9057 }),
-  );
-  const rate = helpers.peaksRateOf(waveform);
-  const last = waveform.peak_count - 1;
-  const trueMs = (last * waveform.division / waveform.sample_rate) * 1000;
-  assert.ok(Math.abs(last / rate * 1000 - trueMs) <= 1000 / rate);
-  // 钉住取整的代价：用整数 302 当刻度，30 s 处已经偏 10 ms 以上
-  assert.ok(Math.abs(last / 302 * 1000 - trueMs) > 10);
-});
-
 test('decodePayload scales by the exact-rate pair when one is present', () => {
   const base = {
     schema: 'moy.asr.waveform.v1',

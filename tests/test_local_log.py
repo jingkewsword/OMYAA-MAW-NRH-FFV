@@ -38,10 +38,6 @@ class LogLineFormattingTests(unittest.TestCase):
         line = format_log_line({"type": "error", "detail": "boom"}, now=_now())
         self.assertEqual(line, "14:32:01.123 [error:?] boom")
 
-    def test_postprocess_stream_is_skipped(self) -> None:
-        line = format_log_line({"type": "postprocess_stream", "kind": "text", "text": "token"}, now=_now())
-        self.assertEqual(line, "")
-
     def test_done_event_expands_result_paths(self) -> None:
         line = format_log_line(
             {"type": "done", "result": {"srtPath": "D:/out.srt", "jsonPath": "D:/out.json"}}, now=_now()

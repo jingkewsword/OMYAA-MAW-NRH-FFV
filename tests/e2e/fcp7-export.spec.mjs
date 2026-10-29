@@ -136,18 +136,6 @@ test('opens the export modal with native text checked by default and closed choi
   await expect(page.locator('#fcp7-export-modal')).not.toHaveClass(/show/);
 });
 
-test('opens the single FCP 7 XML entry with the gap-removed timeline by default', async ({ page }) => {
-  await disableOnboarding(page);
-  await page.goto(server.url);
-  await expect(page.locator('#extra-export-dropdown')).toBeVisible();
-
-  await openFcp7Modal(page);
-  await expect(page.locator('#fcp7-export-timeline-mode')).toHaveValue('gap_removed');
-
-  await page.locator('#fcp7-export-cancel').click();
-  await expect(page.locator('#fcp7-export-modal')).not.toHaveClass(/show/);
-});
-
 test('commits the active panel edit, then saves XML without exporting SRT', async ({ page }) => {
   await disableOnboarding(page);
   await stubSavePicker(page);

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { cleanupTempDir, disableOnboarding, findFreePort, generateWav, makeTempDir, startServer } from './helpers.mjs';
 
@@ -311,12 +311,6 @@ test('pending project attach cannot save new content into the previous file', as
       reapeaksRejected: await MaweMediaLoad.loadReapeaksFile({name: 'pending.ReaPeaks', arrayBuffer() {throw new Error('must not read');}}) === false,
     }));
     const after = readFileSync(aPath, 'utf8');
-    mkdirSync('.artifacts/async-lifecycle-20261015', { recursive: true });
-    writeFileSync('.artifacts/async-lifecycle-20261015/pending-attach-evidence.json', JSON.stringify({
-      upstreamBase: 'de97872103d31a1691171d653b6c72ea2d1f8223', phase: 'fixed', ...saving,
-      before: JSON.parse(originalA).segments[0].text, after: JSON.parse(after).segments[0].text,
-      oldFileUnchanged: after === originalA, newFileUnchanged: readFileSync(bPath, 'utf8') === originalB,
-    }, null, 2));
     expect(saving.visible).toBe('project b');
     expect(saving.canSave).toBe(false);
     expect(saving.saved).toBe(false);

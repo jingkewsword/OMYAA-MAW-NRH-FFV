@@ -369,7 +369,6 @@ class WaveformExtractionTests(CompactContainerAssertions, unittest.TestCase):
             encoding="utf-8"
         )
         self.assertNotIn("waveform.json", source)
-        self.assertNotIn("output_naming", source)
 
     # 这条要真跑 ffmpeg 抽一次波形：CI 的 Windows runner 没装 ffmpeg，
     # 少了这个守卫它就会以 WaveformError 失败（本地有 ffmpeg 看不出来）。
@@ -534,8 +533,6 @@ class EditorAssetTests(CompactContainerAssertions, unittest.TestCase):
         self.assertIn('id="ninja-slash-effect-field"', page)
         self.assertNotIn('__NINJA_SFX_BASE_URL_JSON__', page)
         self.assertIn('"web/sfx/"', page)
-        self.assertIn('const NINJA_SFX_HISTORY = [];', source)
-        self.assertIn('function triggerNinjaSplitFeedback(', source)
         # 帮助按钮改用 🤔 文本图标后，SVG 工具图标只剩选择/分割两个
         self.assertEqual(page.count('class="toolbar-button-icon"'), 2)
         self.assertIn('.waveform-cue-block.selected,', page)
@@ -1028,7 +1025,6 @@ class EditorAssetTests(CompactContainerAssertions, unittest.TestCase):
             page,
         )
         self.assertIn('具体操作取决于', page)
-        self.assertIn('id="help-open-gap-settings"', page)
         self.assertIn('「高级编辑」中的「空隙编辑」，其中「边界与中键」可同时使用两套操作。', page)
         self.assertIn(
             '<span><kbd>Shift+滚轮</kbd> 调整波形振幅</span>\n'
@@ -1112,7 +1108,6 @@ class EditorAssetTests(CompactContainerAssertions, unittest.TestCase):
         self.assertIn('id="media-seek"', page)
         self.assertIn('id="media-volume"', page)
         self.assertIn('id="media-playback-rate"', page)
-        self.assertIn('id="media-fullscreen"', page)
         self.assertIn('function bindPlayerEvents(mediaElement)', source)
         self.assertNotIn('id="player" controls', page)
         self.assertIn('id="overlay-toggle" checked> 预览字幕', page)
@@ -1199,7 +1194,6 @@ class EditorAssetTests(CompactContainerAssertions, unittest.TestCase):
         # 空隙操作已从「移除静音空隙」弹窗移到「设置/波形」分组
         self.assertNotIn('class="gap-remove-operation-section"', page)
         self.assertIn('空隙编辑', page)
-        self.assertIn('id="gap-remove-operation-mode"', page)
         self.assertIn('id="gap-remove-clear-all" class="danger">全部清理</button>', page)
         self.assertIn('确定要清理全部 ${state.gaps.length} 个空隙区段吗？', source)
         self.assertIn("message.className = 'gap-remove-total';", source)

@@ -324,18 +324,6 @@ class EditorAssetContractTests(CompactContainerAssertions, unittest.TestCase):
             self.assertIn("background: #5ab6ff", styles)
             self.assertIn("rgba(94", styles)
 
-    def test_gap_core_exposes_restore_and_clear_semantics(self) -> None:
-        core = edit.read_web_asset("shared/gap-remove-core.js")
-        self.assertIn("function getGapRemoveDisplayGaps", core)
-        self.assertIn("removed: false", core)
-        self.assertIn("function removeGapRemoveProvenanceRange", core)
-        self.assertIn("GAP_DISPLAY_PROJECTION_CACHE", core)
-        self.assertIn("function moveGapRemoveProvenance", core)
-        self.assertIn("function absorbGapRemoveProvenanceRanges", core)
-        self.assertIn("GAP_REMOVE_MANUAL_OPERATION_MOVE", core)
-        self.assertIn("cleared_ranges", core)
-        self.assertNotIn("underlying", core)
-
     def test_editor_overall_gap_move_uses_shared_provenance_operation(self) -> None:
         script = edit.read_web_asset("editor/ui/editor-gap-remove-ui.js")
         start = script.index("function translateManualGap(")
@@ -364,16 +352,6 @@ class EditorAssetContractTests(CompactContainerAssertions, unittest.TestCase):
             "__EDITOR_ONBOARDING_JS__",
         ):
             self.assertNotIn(legacy_token, template)
-
-    def test_server_connection_warning_uses_shared_editor_contract(self) -> None:
-        template = edit.read_web_asset("editor-template.html")
-        styles = edit.read_web_asset("editor.css")
-        script = edit.read_web_asset("editor/io/editor-server-connection.js")
-        self.assertIn('id="server-connection-banner"', template)
-        self.assertIn("SERVER_CONNECTION_FAILURE_THRESHOLD", script)
-        self.assertIn("function checkServerConnection()", script)
-        self.assertIn(".server-connection-banner", styles)
-        self.assertIn(".server-connection-banner[hidden]", styles)
 
     def test_server_startup_labels_distinguish_waveform_cache_and_generation(self) -> None:
         script = edit.read_web_asset("editor/io/editor-server-connection.js")

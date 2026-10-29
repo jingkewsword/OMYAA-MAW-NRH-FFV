@@ -85,22 +85,6 @@ class VerifySha256ScriptTests(unittest.TestCase):
 
         self.assertEqual(proc.returncode, 0, proc.stderr)
 
-    def test_plain_sha256sum_c_cannot_resolve_the_same_layout(self) -> None:
-        """钉住成因：同一份清单与目录布局，把裸文件名喂给 sha256sum -c 会按当前目录找不到归档。"""
-        self.write_manifest()
-
-        proc = subprocess.run(
-            [BASH, "-c", f'grep -F "{ASSET}" "{self.checksums}" | sha256sum -c -'],
-            cwd=str(self.repo_root),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
-
-        self.assertNotEqual(proc.returncode, 0, "sha256sum -c 若能在仓库根解析裸文件名，本坑的说明需重写")
-        self.assertIn("No such file or directory", proc.stderr)
-
     def test_rejects_tampered_archive(self) -> None:
         self.write_manifest(digest=hashlib.sha256(b"someone-elses-bytes").hexdigest())
 

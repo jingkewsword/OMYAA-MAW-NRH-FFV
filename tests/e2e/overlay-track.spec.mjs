@@ -1273,29 +1273,6 @@ test('clears a stale overlay track when a plain SRT replaces the main track', as
     waveform: generateWaveformPayload(3000),
   };
   await page.goto(server.url);
-  await page.evaluate(() => {
-    window.__assignLog = [];
-    let track = MaweBoot.DATA.overlay_track ?? null;
-    Object.defineProperty(MaweBoot.DATA, 'overlay_track', {
-      configurable: true,
-      get() { return track; },
-      set(next) {
-        window.__assignLog.push({
-          kind: 'assign',
-          enabled: next?.enabled ?? null,
-          count: next?.segments?.length ?? null,
-          stack: new Error().stack?.split('\n').slice(2, 5).join(' | '),
-        });
-        track = next;
-      },
-    });
-    setInterval(() => {
-      if (track && track.enabled !== window.__lastEnabled) {
-        window.__assignLog.push({ kind: 'enabled-flip', enabled: track.enabled });
-        window.__lastEnabled = track.enabled;
-      }
-    }, 40);
-  });
   await dropProject(page, project);
   await expect(page.locator('.overlay-track-cue')).toHaveCount(1);
 

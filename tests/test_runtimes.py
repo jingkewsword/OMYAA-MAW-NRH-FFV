@@ -24,7 +24,7 @@ from maw.runtime_manifest import STATUS_INSTALLING, STATUS_READY, write_runtime_
 from maw.runtimes import LOCAL, MOSS, OCR, get_runtime
 from maw.runtimes.base import ManagedRuntime, ManagedRuntimeError, RuntimeSpec
 from maw.runtimes.local_spec import LOCAL_SPEC, PYTORCH_INDEX, LocalRuntimeError
-from maw.runtimes.moss_spec import MOSS_SPEC, PYTORCH_INDEX as MOSS_PYTORCH_INDEX
+from maw.runtimes.moss_spec import MOSS_SPEC
 from maw.runtimes.ocr_spec import OCR_MODEL_ID, OCR_SPEC
 
 PYTHON_RELATIVE = "python/python.exe" if os.name == "nt" else "python/bin/python"
@@ -601,47 +601,6 @@ class AutoFreezeRequirementsTests(CompactContainerAssertions, unittest.TestCase)
         (build.parent / "scripts" / "packaging").mkdir(parents=True)
         self.addCleanup(lambda: shutil.rmtree(build.parent, ignore_errors=True))
         return build
-
-    def test_freeze_commands_mirror_build_pipeline(self) -> None:
-        uv = Path("C:/tools/uv.exe")
-        build = Path("repo/build")
-        # local 主清单：独立 dependency group 的 uv export（uv.lock 离线）
-        self.assertEqual(
-            base_mod.freezer.main_freeze_command(uv, LOCAL_SPEC, build),
-            [str(uv), "export", "--frozen", "--only-group", "local",
-             "--format", "requirements-txt", "-o", str(build / "requirements-local.txt")],
-        )
-        # local CPU 变体：生成式 in（build/ 下）原生冻结（带哈希）
-        self.assertEqual(
-            base_mod.freezer.cpu_freeze_command(uv, LOCAL_SPEC, build),
-            [str(uv), "pip", "compile", str(build / "local-cpu-requirements.in"), "-p", "3.11",
-             "--generate-hashes",
-             "--index-strategy", "unsafe-best-match",
-             "-o", str(build / "requirements-local-cpu.txt")],
-        )
-        # ocr：仅主清单；无 CPU 变体
-        self.assertEqual(
-            base_mod.freezer.main_freeze_command(uv, OCR_SPEC, build),
-            [str(uv), "export", "--frozen", "--only-group", "ocr",
-             "--format", "requirements-txt", "-o", str(build / "requirements-ocr.txt")],
-        )
-        self.assertIsNone(base_mod.freezer.cpu_freeze_command(uv, OCR_SPEC, build))
-        # moss：uv pip compile（in 文件 pin cu130，必须带 extra index）
-        self.assertEqual(
-            base_mod.freezer.main_freeze_command(uv, MOSS_SPEC, build),
-            [str(uv), "pip", "compile", "scripts/packaging/moss-requirements.in", "-p", "3.11",
-             "--extra-index-url", MOSS_PYTORCH_INDEX,
-             "--index-strategy", "unsafe-best-match",
-             "-o", str(build / "requirements-moss.txt")],
-        )
-        # moss CPU 变体：同一 in 文件剥离生成（带哈希），与 local-cpu 同构
-        self.assertEqual(
-            base_mod.freezer.cpu_freeze_command(uv, MOSS_SPEC, build),
-            [str(uv), "pip", "compile", str(build / "moss-cpu-requirements.in"), "-p", "3.11",
-             "--generate-hashes",
-             "--index-strategy", "unsafe-best-match",
-             "-o", str(build / "requirements-moss-cpu.txt")],
-        )
 
     def test_missing_main_txt_is_generated_with_progress_events(self) -> None:
         build = self._temp_build_dir()

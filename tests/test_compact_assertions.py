@@ -30,10 +30,6 @@ class CompactContainerAssertionTests(CompactContainerAssertions, unittest.TestCa
         # 容器本体（50000 个 y）不得泄漏；needle 'yyy' 会合法出现
         self.assertNotIn("yyyyy", message)
 
-    def test_passing_assertions_do_not_raise(self):
-        self.assertIn("a", "abc")
-        self.assertNotIn("z", "abc")
-
     def test_custom_message_is_preserved(self):
         with self.assertRaises(AssertionError) as caught:
             self.assertIn("needle", "x" * 1_000, "补充说明")

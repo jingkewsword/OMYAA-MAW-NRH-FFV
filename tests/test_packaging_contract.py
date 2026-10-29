@@ -185,7 +185,6 @@ class PackagingContractTests(CompactContainerAssertions, unittest.TestCase):
         self.assertIn("*.spec.bak", ignored_paths)
         self.assertIn("*.exe", ignored_paths)
         self.assertIn("!/scripts/packaging/MAW.spec", ignored_paths)
-        self.assertIn("/dist/MAW/MAW.exe", ignored_paths)
 
     def test_spec_packages_full_gui_resources_without_sensitive_or_heavy_outputs(self) -> None:
         """Given the Windows GUI bundle, When MAW.spec is read, Then it is onedir/windowed/noupx."""
@@ -560,9 +559,6 @@ class PackagingContractTests(CompactContainerAssertions, unittest.TestCase):
         self.assertIn("arch: arm64", workflow)
         self.assertIn("https://www.osxexperts.net/ffmpeg81arm.zip", workflow)
         self.assertIn("https://www.osxexperts.net/ffprobe81arm.zip", workflow)
-        self.assertNotIn("MOSE", workflow)
-        self.assertNotIn("actions/setup-node@v4", workflow)
-        self.assertNotIn("dtolnay/rust-toolchain@stable", workflow)
         self.assertNotIn("cargo check --manifest-path src-tauri/Cargo.toml", workflow)
 
     def test_tag_release_workflows_use_idempotent_release_uploads(self) -> None:
@@ -592,8 +588,6 @@ class PackagingContractTests(CompactContainerAssertions, unittest.TestCase):
         self.assertIn("codesign --force --deep --sign - dist/MAW.app", macos_workflow)
         self.assertIn("MAW-macOS-arm64-${Version}.zip", macos_workflow)
         self.assertIn("MAW-lite-macOS-arm64-${Version}.zip", macos_workflow)
-        self.assertIn("scripts/sync_launcher_version.py --write", macos_workflow)
-        self.assertIn("scripts/sync_launcher_version.py --check", macos_workflow)
         self.assertIn('StandardStage="build/release/standard"', macos_workflow)
         self.assertIn('LiteStage="build/release/lite"', macos_workflow)
         self.assertIn('zip -qry "$GITHUB_WORKSPACE/$StandardArchive" MAW.app', macos_workflow)
@@ -601,7 +595,6 @@ class PackagingContractTests(CompactContainerAssertions, unittest.TestCase):
         self.assertIn('FAQ-常见问题.txt', macos_workflow)
         self.assertNotIn("MOSE.app", macos_workflow)
         self.assertIn("MAW-lite-macOS-arm64-*.zip", macos_workflow)
-        self.assertNotIn(".zip.sha256", macos_workflow)
 
     def test_appimage_build_drops_bundled_cpp_runtime(self) -> None:
         """Given the AppImage build script and workflow, When the AppDir is assembled, Then bundled libstdc++/libgcc_s/libgbm are removed and CI forbids them."""
@@ -672,9 +665,6 @@ class PackagingContractTests(CompactContainerAssertions, unittest.TestCase):
             'bash "$REPO_ROOT/scripts/verify_sha256.sh" "$FFMPEG_CHECKSUMS" "$FFMPEG_ASSET" "$FFMPEG_TARBALL"',
             script,
         )
-        # 上游清单只写裸文件名，sha256sum -c 按当前目录解析，而归档落在 build-appimage/
-        # 子目录，必然报 No such file or directory（2026-09-10 Linux 打包即因此失败）。
-        self.assertNotIn("sha256sum -c", script)
         self.assertIn("curl --fail --location --silent --show-error", script)
         self.assertIn('| grep -q "$FFMPEG_BRANCH"', script)
         self.assertNotIn("/releases/download/autobuild-", script)

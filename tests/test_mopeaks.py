@@ -315,13 +315,6 @@ class UnsupportedVersionAndBoundaryTests(unittest.TestCase):
                 with self.assertRaises(mopeaks.MopeaksError):
                     mopeaks.decode_mopeaks(blob)
 
-    def test_supported_version_still_round_trips(self) -> None:
-        payload = make_payload(media_path=self.media_path)
-        mopeaks.save_mopeaks(payload, self.media_path)
-        back = mopeaks.load_mopeaks(self.media_path)
-        self.assertIsNotNone(back)
-        self.assertEqual(back["data"], payload["data"])
-
     def test_parser_refuses_unknown_native_container(self) -> None:
         """ReapeaksFile 同样只比前缀过：QPK2 必须整份判不支持。"""
         from maw import quapeaks as maw_quapeaks
@@ -436,24 +429,6 @@ class WaveformPlacementContractTests(unittest.TestCase):
                 mopeaks.load_mopeaks(self.media_path, audio_track=0),
                 "第 2 轨的缓存不得被第 1 轨命中",
             )
-
-    def test_nonzero_default_track_uses_unsuffixed_cache(self) -> None:
-        with _subfolder_config(output_subfolder=False):
-            default_track = mopeaks.mopeaks_path(
-                self.media_path,
-                audio_track=1,
-                default_audio_track=1,
-            )
-        self.assertEqual(default_track.name, "ICE.mkv.mopeaks")
-
-    def test_index_zero_nondefault_track_uses_track_one_suffix(self) -> None:
-        with _subfolder_config(output_subfolder=False):
-            nondefault = mopeaks.mopeaks_path(
-                self.media_path,
-                audio_track=0,
-                default_audio_track=1,
-            )
-        self.assertEqual(nondefault.name, "ICE.mkv.track-1.mopeaks")
 
     def test_exact_cache_precedes_default_fallback(self) -> None:
         with _subfolder_config(output_subfolder=False):

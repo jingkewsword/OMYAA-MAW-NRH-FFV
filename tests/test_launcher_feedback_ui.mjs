@@ -399,7 +399,6 @@ test("cleanup restoration keeps current task memory and falls back to a visible 
     const ui = providerOwnershipHarness({ remembered });
     ui.context.applyAutoPostprocessPlan({ steps: [{ id: "match", aiCleanup: true, providerId: "qwen" }] });
     assert.equal(ui.context.stepProviderId("cleanup"), "deepseek");
-    assert.equal(ui.context.stepProviderId("cleanup"), "deepseek");
   }
 });
 

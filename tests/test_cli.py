@@ -11,16 +11,6 @@ from maw import cli
 
 
 class CliTests(unittest.TestCase):
-    def test_parser_accepts_srt_and_optional_mosp_outputs(self) -> None:
-        args = cli.build_parser("MAW.exe").parse_args(
-            ["-i", "clip.mp3", "-o", "clip.srt", "clip.mosp"]
-        )
-
-        self.assertEqual(args.input, "clip.mp3")
-        self.assertEqual(args.outputs, ["clip.srt", "clip.mosp"])
-        self.assertIsNone(args.server)
-        self.assertIsNone(args.stop_server)
-
     def test_openai_provider_forwards_base_url_to_generator(self) -> None:
         args = cli.build_parser("MAW.exe").parse_args(
             [

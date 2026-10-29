@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import io
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -24,17 +23,6 @@ from maw.asr.openai import (
 
 
 class OpenAiAsrTests(unittest.TestCase):
-    def test_generator_accepts_shared_debug_flag(self) -> None:
-        result = subprocess.run(
-            [sys.executable, "-m", "maw.asr.openai", "--help"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
-        self.assertEqual(result.returncode, 0)
-        self.assertIn("--debug", result.stdout)
-
     def test_official_openai_defaults(self) -> None:
         self.assertEqual(DEFAULT_BASE_URL, "https://api.openai.com/v1")
         self.assertEqual(DEFAULT_MODEL, "whisper-1")

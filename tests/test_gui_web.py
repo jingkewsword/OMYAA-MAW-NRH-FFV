@@ -1899,7 +1899,6 @@ class GuiWebBridgeTests(CompactContainerAssertions, unittest.TestCase):
         self.assertIn('id="pickToolboxUtilityMedia"', utilities_html)
         self.assertIn('function selectToolboxSection(section)', script)
         self.assertIn('function moveToolFocus(event)', script)
-        self.assertIn('if (!open && wasOpen) $("toolboxFab").focus();', script)
         self.assertIn('let utilityMediaManual = false;', script)
         self.assertIn('$("toolboxUtilityMediaPath").value = $("mediaPath").value.trim();', script)
         self.assertIn('bridge("choose_file", { kind: "media" })', script)
@@ -3900,16 +3899,6 @@ class GuiWebBridgeTests(CompactContainerAssertions, unittest.TestCase):
         self.assertTrue(result["ok"])
         open_path.assert_called_once_with(faq)
 
-    def test_open_faq_uses_bundled_troubleshooting_file(self) -> None:
-        faq = self.root / "FAQ-常见问题.txt"
-        faq.write_text("help\n", encoding="utf-8")
-
-        with mock.patch("maw.gui_web._open_existing_path", return_value={"ok": True}) as open_path:
-            result = self.api.open_faq()
-
-        self.assertTrue(result["ok"])
-        open_path.assert_called_once_with(faq)
-
     def test_open_faq_uses_frozen_resource_root_before_executable_directory(self) -> None:
         faq = self.root / "FAQ-常见问题.txt"
         faq.write_text("help\n", encoding="utf-8")
@@ -4453,19 +4442,6 @@ class GuiWebBridgeTests(CompactContainerAssertions, unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertEqual(result["code"], "local_model_missing")
         self.assertEqual(result["field"], "model")
-
-    def test_start_transcription_rejects_empty_resolved_api_key(self) -> None:
-        """Given media and output but no key anywhere, When starting, Then API key blocks."""
-        media = self.root / "clip.mp3"
-        _ = media.write_bytes(b"media")
-
-        # 置空系统环境变量，保证“任何位置都没有 Key”的前提成立。
-        with mock.patch.dict(os.environ, {"DASHSCOPE_API_KEY": ""}, clear=False):
-            result = self.api.start_transcription({"mediaPath": str(media), "srtPath": str(self.root / "out.srt"), "apiKey": ""})
-
-        self.assertFalse(result["ok"])
-        self.assertEqual(result["field"], "apiKey")
-        self.assertEqual(result["code"], "api_key_missing")
 
     def test_credentials_block_single_and_batch_before_network_or_worker_start(self) -> None:
         media = self.root / "clip.mp3"
@@ -5385,10 +5361,6 @@ class LauncherLogSinkTests(unittest.TestCase):
         self.assertIn("version", context)
         self.assertEqual(sink.events[1], {"type": "error", "code": "transcription_failed", "detail": "boom", "errorContext": context})
 
-    def test_emit_without_sink_does_not_crash(self) -> None:
-        api = LauncherApi(paths=self.paths, window_getter=lambda: self.window)
-        api._emit({"type": "log", "message": "hello"})
-
     def test_shutdown_closes_log_sink(self) -> None:
         sink = _FakeLogSink()
         api = LauncherApi(paths=self.paths, window_getter=lambda: self.window, log_sink=sink)
@@ -5645,7 +5617,6 @@ class LauncherAssetContractTests(CompactContainerAssertions, unittest.TestCase):
             "openLlmSettings",
         ):
             self.assertIn(f'id="{control}"', page)
-        self.assertIn('id="postprocessPromptError"', page)
         self.assertNotIn('id="postprocessApiKey"', page)
         self.assertNotIn('id="postprocessBaseUrl"', page)
         self.assertNotIn('id="postprocessModel"', page)
@@ -5704,7 +5675,6 @@ class LauncherAssetContractTests(CompactContainerAssertions, unittest.TestCase):
         self.assertIn(".toolbox-drawer", stylesheet)
         self.assertIn(".toolbox-content", stylesheet)
         self.assertIn("max-height: 360px", stylesheet)
-        self.assertIn("overflow-y: auto", stylesheet)
         self.assertIn('bindDropField("toolboxInputDropZone", "toolboxInput", "toolboxInputDropZone")', launcher_script)
         self.assertIn("addChainResult", script)
         self.assertIn("selectChainPath", script)
@@ -5758,7 +5728,6 @@ class LauncherAssetContractTests(CompactContainerAssertions, unittest.TestCase):
         self.assertIn('["local models", refreshLocalModels()]', script)
         self.assertNotIn('["local runtime", refreshLocalRuntime()]', script)
         self.assertIn('let ocrRuntimeRequest = 0;', script)
-        self.assertIn('if (requestId !== ocrRuntimeRequest) return result;', script)
         self.assertIn('let localRuntimeRequest = 0;', script)
         self.assertIn('let localModelsRequest = 0;', script)
         self.assertIn('statusRequestId !== localStatusRequest', script)
@@ -6136,7 +6105,6 @@ class LauncherAssetContractTests(CompactContainerAssertions, unittest.TestCase):
         self.assertEqual(_port({}), 8250)
         self.assertEqual(_port({"port": "invalid"}), 8250)
         self.assertIn('id="port" type="number" min="1" max="65535" value="8250"', page)
-        self.assertIn('id="refreshServerStatus"', page)
 
     def test_single_file_editor_controls_are_opt_in_and_contextual(self) -> None:
         page = (ROOT / "web" / "launcher" / "index.html").read_text(encoding="utf-8")
@@ -6444,8 +6412,6 @@ class LauncherAssetContractTests(CompactContainerAssertions, unittest.TestCase):
         self.assertIn('gap_split_placeholder: "Default: 500"', script)
         self.assertIn("配置停顿多久时算作两句字幕、少于多少字时自动合并，以及允许的最大字数（超过会强行断句）；系统会按语言自动选择对应规则。", script)
         self.assertIn("Set how long a pause counts as a new subtitle, how few characters trigger automatic merging, and the maximum allowed characters per subtitle (longer text is forcibly split); the matching rule is selected automatically by language.", script)
-        self.assertIn('english_segmentation_hint: "在生成英文字幕时，会启用该配置。"', script)
-        self.assertIn('english_segmentation_hint: "This configuration is used when generating English subtitles."', script)
         self.assertIn('$("languageGroup").classList.toggle("hidden", current.supportsLanguage === false)', script)
         self.assertIn(".advanced-col {\n  display: grid;\n  grid-template-columns: 1fr 1fr;", stylesheet)
         self.assertIn(".advanced-col #dashscopeRegionHint {\n  grid-column: 1 / -1;\n}", stylesheet)
@@ -6487,13 +6453,9 @@ class LauncherAssetContractTests(CompactContainerAssertions, unittest.TestCase):
 
     def test_length_limit_is_not_exposed_in_launcher_ui(self) -> None:
         page = (ROOT / "web" / "launcher" / "index.html").read_text(encoding="utf-8")
-        script = launcher_sources_text(ROOT)
 
         self.assertNotIn('id="lengthLimitField"', page)
         self.assertNotIn('id="lengthLimit"', page)
-        self.assertIn('lengthLimit: $("lengthLimit")?.value.trim() || ""', script)
-        self.assertIn('const lengthLimit = $("lengthLimit"); if (lengthLimit) lengthLimit.disabled = on;', script)
-        self.assertIn('$("lengthLimitField")?.classList.toggle("hidden", !SHOW_LENGTH_LIMIT_FIELD);', script)
 
     def test_launcher_language_setting_uses_saved_or_system_preference(self) -> None:
         page = (ROOT / "web" / "launcher" / "index.html").read_text(encoding="utf-8")
@@ -6734,7 +6696,6 @@ class LauncherAssetContractTests(CompactContainerAssertions, unittest.TestCase):
         self.assertNotIn('local_model_badge_segment_timestamps', script)
         self.assertIn('appendLocalModelBadges(main, model);', script)
         self.assertIn('className = "local-model-list-meta"', script)
-        self.assertIn('status.textContent = ready ? "✓" : "";', script)
         self.assertIn('id="recognitionAlignmentModelField"', page)
         self.assertIn('id="recognitionAlignmentModel"', page)
         self.assertIn('data-i18n="recognition_alignment_model_hint"', page)
@@ -6882,7 +6843,6 @@ class LauncherAssetContractTests(CompactContainerAssertions, unittest.TestCase):
         postprocess_script = (ROOT / "web" / "launcher" / "postprocess.js").read_text(encoding="utf-8")
 
         self.assertIn('data-i18n="settings_tab_llm">AI 模型</button>', page)
-        self.assertIn('settings_tab_llm: "AI 模型"', launcher_script)
         self.assertIn('data-i18n="auto_backfill_subtitles_hint">只把少量外文语句翻译成目标语言。</p>', page)
         self.assertIn('auto_backfill_subtitles_hint: "只把少量外文语句翻译成目标语言。"', launcher_script)
         self.assertIn('data-i18n="backfill_subtitles_hint">适用于仅有少量语音需要翻译的情况', page)

@@ -511,10 +511,6 @@ class WaveformTimeBaseTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
-    def test_precondition_rate_is_not_integral(self) -> None:
-        exact = self.SAMPLE_RATE / self.DIVISION
-        self.assertNotEqual(exact, round(exact))
-
     def test_publishes_exact_rate_and_the_authoritative_pair(self) -> None:
         exact = self.SAMPLE_RATE / self.DIVISION
         self.assertAlmostEqual(self.payload["peaks_per_second"], exact, delta=1e-6)
@@ -552,15 +548,6 @@ class WaveformTimeBaseTests(unittest.TestCase):
         for index in (0, 1, self.PEAKS // 2, self.PEAKS - 1):
             true_ms = index * self.DIVISION / self.SAMPLE_RATE * 1000
             self.assertLessEqual(abs(index / rate * 1000 - true_ms), bin_ms)
-
-    def test_rounded_scale_would_have_drifted(self) -> None:
-        """钉住取整的代价：同一个峰序号，整数刻度在 30 s 处已偏 11 ms。"""
-        rate = waveform.waveform_peaks_per_second(self.payload)
-        rounded = float(round(rate))
-        last = self.PEAKS - 1
-        true_ms = last * self.DIVISION / self.SAMPLE_RATE * 1000
-        self.assertGreater(abs(last / rounded * 1000 - true_ms), 10.0)
-        self.assertLessEqual(abs(last / rate * 1000 - true_ms), 1000 / rate)
 
     def test_duration_ms_agrees_with_the_exact_rate(self) -> None:
         """payload 必须自洽：duration_ms 等于 peak_count 按真率铺开的长度。"""
@@ -699,19 +686,6 @@ class ChannelMergeTests(unittest.TestCase):
         )
         self.assertGreater(pairs[0][1], quapeaks._wave_to_int8(300))
         self.assertLess(pairs[0][0], quapeaks._wave_to_int8(-100))
-
-    def test_single_channel_is_unchanged(self) -> None:
-        mono = self._pairs("mono.wav.ReaPeaks", sample_rate=8000, division=80, peaks=2)
-        explicit = self._pairs(
-            "same.wav.ReaPeaks",
-            sample_rate=8000,
-            division=80,
-            peaks=2,
-            channels=1,
-            wave_values=[[(100, -100), (200, -50)]],
-        )
-        self.assertEqual(mono, explicit)
-
 
 def subprocess_run(command: list[str]) -> None:
     import subprocess

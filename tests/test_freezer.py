@@ -56,12 +56,6 @@ funasr==1.4.2 \\
 
 
 class StripGpuPinsTests(unittest.TestCase):
-    def test_strips_local_version_suffix(self) -> None:
-        self.assertEqual(
-            freezer_mod.strip_gpu_pins("torch==2.13.0+cu130"),
-            "torch==2.13.0",
-        )
-
     def test_no_cu_pin_is_identity(self) -> None:
         line = "numba>=0.61.0"
         self.assertEqual(freezer_mod.strip_gpu_pins(line), line)

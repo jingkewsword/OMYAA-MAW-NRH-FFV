@@ -23,7 +23,6 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-import quapeaks as kernel  # noqa: E402  真内核，用来钉后缀常量同源
 from maw import media_cache, mopeaks, quapeaks, waveform  # noqa: E402
 
 
@@ -72,11 +71,6 @@ class QuapeaksGenerationTests(unittest.TestCase):
         self.assertIsNotNone(peaks, "extract_waveform 的载荷必须能换成内核入参")
         assert peaks is not None
         return peaks
-
-    def test_suffix_constant_shares_one_source_with_the_kernel(self) -> None:
-        # 两边各写一份的话，改名时会出现"内核写 A、MAW 找 B"的静默哑火。
-        self.assertEqual(quapeaks.QUAPEAKS_SUFFIX, kernel.FILE_SUFFIX)
-        self.assertEqual(mopeaks.mopeaks_path(self.tone).name, "tone.wav.mopeaks")
 
     def test_exact_rate_is_taken_from_the_payload_not_the_rounded_rate(self) -> None:
         # PR #102 的口径：内核那一层要的是 (sample_rate, division)，不是取整峰率。

@@ -217,7 +217,6 @@ test('same-style single/double nesting and overlap preserve actual ASS rendering
         assert.equal(concat, itemText, source);
       }
       assert.equal(JSON.stringify(segment), snapshot);
-      assert.equal(JSON.stringify(segment), snapshot);
     }
   }
 });
