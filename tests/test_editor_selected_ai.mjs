@@ -125,3 +125,25 @@ test('v2 resegmentation remains valid after save and reopen', () => {
   assert.equal(model.validateTracksProject(data).ok, true);
   assert.equal(model.importProject(JSON.parse(JSON.stringify(data))).project.tracks[0].segments.length, 3);
 });
+
+
+test('AI preserves existing speakers and refuses cross-speaker resegmentation', () => {
+  const data = project();
+  core.mainSegments(data)[0].speaker = 'A';
+  core.mainSegments(data)[1].speaker = 'B';
+  const before = JSON.stringify(data);
+  assert.throws(() => core.capture(data, [0, 1], 'resegment'), /说话人/);
+  assert.equal(JSON.stringify(data), before);
+  core.applyAlignment(data, core.capture(data, [0], 'align'), [{ id: 'a', items: [{ text: '你好', start: 0, end: 500 }] }], 'generate');
+  assert.equal(core.mainSegments(data)[0].speaker, 'A');
+  core.applyTranslation(data, core.capture(data, [0], 'translate'), [{ id: 'a', text: 'Hello' }], 'en', id);
+  const secondary = data.tracks.find(t => t.role === 'secondary');
+  secondary.segments[0].speaker = 'translator';
+  core.applyTranslation(data, core.capture(data, [0], 'translate'), [{ id: 'a', text: 'Hi' }], 'en', id);
+  assert.equal(data.tracks.find(t => t.role === 'secondary').segments[0].speaker, 'translator');
+  assert.equal(core.mainSegments(data)[0].speaker, 'A');
+  const split = project();
+  core.mainSegments(split)[0].speaker = 'A';
+  core.applyResegment(split, core.capture(split, [0], 'resegment'), [['c0001a0001'], ['c0001a0002']], id);
+  assert.deepEqual(core.mainSegments(split).slice(0, 2).map(c => c.speaker), ['A', 'A']);
+});

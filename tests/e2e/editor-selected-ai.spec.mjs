@@ -46,6 +46,27 @@ test('translation candidate remains separate until applied and can be undone', a
   });
   expect(gap).toBeGreaterThanOrEqual(8);
   await page.screenshot({ path: '.artifacts/selected-ai-panel.png' });
+  await page.evaluate(() => {
+    MaweHistory.performRedo();
+    MaweEditorAiCore.mainSegments(MaweBoot.DATA)[0].speaker = 'A';
+    MaweBoot.DATA.tracks.find(t => t.role === 'secondary').segments[0].speaker = 'B';
+    window.showSaveFilePicker = undefined;
+  });
+  const downloadPromise = page.waitForEvent('download');
+  await page.evaluate(() => MaweProjectSave.saveProjectAsToFile());
+  const download = await downloadPromise;
+  const saved = join(directory, 'ai-roundtrip.mosp');
+  await download.saveAs(saved);
+  await page.reload();
+  await page.waitForFunction(() => Boolean(window.MaweCoreState?.waveformEditor));
+  await page.locator('#open-project-file').setInputFiles(saved);
+  await expect.poll(() => page.evaluate(() => MaweBoot.DATA.tracks.find(t => t.role === 'secondary')?.segments[0]?.text)).toBe('你好');
+  expect(await page.evaluate(() => ({
+    source: MaweEditorAiCore.mainSegments(MaweBoot.DATA)[0].speaker,
+    target: MaweBoot.DATA.tracks.find(t => t.role === 'secondary').segments[0].speaker,
+    binding: MaweBoot.DATA.bindings[0].source.segment_id,
+    valid: AsrEditorUtils.validateTracksProject(MaweBoot.DATA).ok,
+  }))).toEqual({ source: 'A', target: 'B', binding: 'a', valid: true });
   expect(errors).toEqual([]);
 });
 
