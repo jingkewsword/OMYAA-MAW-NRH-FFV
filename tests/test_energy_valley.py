@@ -25,7 +25,7 @@ from maw.local_asr import LocalTranscription, build_local_segments
 
 SAMPLE_RATE = 16_000
 
-requires_numpy = unittest.skipUnless(np is not None, "numpy is required for energy valley snapping")
+requires_numpy = unittest.skipUnless(np is not None, "numpy and soundfile are required for energy valley snapping")
 
 
 def _write_wav(path: Path, samples: "np.ndarray") -> Path:
