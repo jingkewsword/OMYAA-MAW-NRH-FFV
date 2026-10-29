@@ -39,13 +39,36 @@ test('translation preserves an existing English track and unrelated subtitles', 
   assert.equal(data.multi_subtitle.tracks[0].segments[1].text, 'untouched');
 });
 
+test('unchanged translation retains existing word timestamps exactly', () => {
+  const data = project();
+  const items = [{ text: 'old', start: 0, end: 500, speaker: 'speaker1' }];
+  data.multi_subtitle = { tracks: [{ id: 'ext', language: 'en', segments: [{ id: 'ea', start: 0, end: 500, text: 'old', items }] }], bindings: [{ track_id: 'ext', main_segment_ids: ['a'], extension_segment_ids: ['ea'] }] };
+  core.applyTranslation(data, core.capture(data, [0], 'translate'), [{ id: 'a', text: 'old' }], 'en', id);
+  assert.equal(JSON.stringify(data.multi_subtitle.tracks[0].segments[0].items), JSON.stringify(items));
+});
+
+test('fill rejects replacing even partial and zero-width existing items', () => {
+  const data = project();
+  data.segments[0].items = [{ text: '好', start: 250, end: 500 }, { text: '。', start: 500, end: 500 }];
+  const snap = core.capture(data, [0], 'align'), before = JSON.stringify(data);
+  assert.throws(() => core.applyAlignment(data, snap, [{ id: 'a', items: [{ text: '你好', start: 0, end: 500 }] }], 'fill'), /不能覆盖/);
+  assert.equal(JSON.stringify(data), before);
+});
+
+test('resegment rejects changed group table', () => {
+  const data = project(); data.subtitle_groups = { color: [], sticker: [] };
+  const snap = core.capture(data, [0], 'resegment');
+  data.subtitle_groups.color.push({ id: 'color-1', value: { name: 'blue' } });
+  assert.throws(() => core.ensureCurrent(data, snap), /分组已变化/);
+});
+
 test('invalid translation and timecodes do not partially mutate project', () => {
   const data = project(), snap = core.capture(data, [0, 1], 'align');
   const before = JSON.stringify(data);
   assert.throws(() => core.applyAlignment(data, snap, [
     { id: 'a', items: [{ text: '你好', start: 0, end: 500 }] },
     { id: 'b', items: [{ text: '呀', start: 600, end: 999 }] },
-  ]), /范围/);
+  ], 'generate'), /范围/);
   assert.equal(JSON.stringify(data), before);
   assert.throws(() => core.applyTranslation(data, snap, [{ id: 'a', text: 'hi' }], 'en', id), /不完整/);
   assert.equal(JSON.stringify(data), before);

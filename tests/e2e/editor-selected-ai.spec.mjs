@@ -130,3 +130,65 @@ test('English AI panel preserves literal subtitle text in the candidate preview'
   await expect(page.locator('#editor-ai-status')).toContainText('Review the candidate');
   await expect(page.locator('#editor-ai-preview')).toHaveText('关闭');
 });
+
+test('regeneration asks before replacing word timings and cancellation preserves them', async ({ page }) => {
+  await disableOnboarding(page);
+  await page.goto(server.url);
+  await page.waitForFunction(() => Boolean(window.MaweCoreState?.waveformEditor));
+  await page.evaluate(() => {
+    MaweProjectLoad.applyCanonicalProject({ schema: 'moy.asr.project.v1', media: '', segments: [
+      { id: 'a', start: 0, end: 500, text: '你好', items: [{ text: '你', start: 0, end: 200 }, { text: '好', start: 200, end: 500 }] },
+    ] }, 'test.mosp');
+    Object.assign(MaweBoot.SERVER_CONFIG, { bindingGeneration: 1, sourceMediaId: 'mock-binding' });
+    MaweSelection.selectOnly(0);
+  });
+  await page.route('**/api/editor-ai/start', route => route.fulfill({ json: { id: 'fake', state: 'running' } }));
+  await page.route('**/api/editor-ai/status', route => route.fulfill({ json: { id: 'fake', state: 'done', result: { aligned: [{ id: 'a', items: [{ text: '你好', start: 0, end: 500 }] }], report: {} } } }));
+  await page.locator('#editor-ai-menu-btn').click();
+  await page.locator('[data-editor-ai="align"]').click();
+  await page.locator('#editor-ai-mode').selectOption('generate');
+  await page.locator('#editor-ai-start').click();
+  await expect(page.locator('#editor-ai-apply')).toBeVisible();
+  const before = await page.evaluate(() => JSON.stringify(MaweBoot.DATA.segments[0].items));
+  page.once('dialog', dialog => dialog.dismiss());
+  await page.locator('#editor-ai-apply').click();
+  expect(await page.evaluate(() => JSON.stringify(MaweBoot.DATA.segments[0].items))).toBe(before);
+  page.once('dialog', dialog => dialog.accept());
+  await page.locator('#editor-ai-apply').click();
+  expect(await page.evaluate(() => MaweBoot.DATA.segments[0].items.length)).toBe(1);
+  await page.evaluate(() => MaweHistory.performUndo());
+  expect(await page.evaluate(() => JSON.stringify(MaweBoot.DATA.segments[0].items))).toBe(before);
+});
+
+test('a delayed cancelled task cannot replace the next operation panel', async ({ page }) => {
+  await disableOnboarding(page);
+  await page.goto(server.url);
+  await page.waitForFunction(() => Boolean(window.MaweCoreState?.waveformEditor));
+  await page.evaluate(() => {
+    MaweProjectLoad.applyCanonicalProject({ schema: 'moy.asr.project.v1', media: '', segments: [{ id: 'a', start: 0, end: 500, text: 'Hello' }] }, 'test.mosp');
+    Object.assign(MaweBoot.SERVER_CONFIG, { bindingGeneration: 1, sourceMediaId: 'mock-binding' });
+    MaweSelection.selectOnly(0);
+  });
+  let release;
+  await page.route('**/api/editor-ai/start', route => route.fulfill({ json: { id: 'old', state: 'running' } }));
+  await page.route('**/api/editor-ai/cancel', route => route.fulfill({ json: { id: 'old', state: 'cancelled' } }));
+  await page.route('**/api/editor-ai/status', async route => {
+    await new Promise(resolve => { release = resolve; });
+    await route.fulfill({ json: { id: 'old', state: 'done', result: { translations: [{ id: 'a', text: '旧结果' }] } } });
+  });
+  await page.locator('#editor-ai-menu-btn').click();
+  await page.locator('[data-editor-ai="translate"]').click();
+  await page.locator('#editor-ai-start').click();
+  await page.waitForRequest('**/api/editor-ai/status');
+  await page.locator('#editor-ai-menu-btn').click();
+  await page.locator('[data-editor-ai="resegment"]').click();
+  const oldResponse = page.waitForResponse('**/api/editor-ai/status');
+  release();
+  await oldResponse;
+  await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 100)));
+  await expect(page.locator('#editor-ai-title')).toHaveText('重新断句');
+  await expect(page.locator('#editor-ai-status')).toHaveText('选择主字幕后开始处理。');
+  await expect(page.locator('#editor-ai-start')).toBeVisible();
+  await expect(page.locator('#editor-ai-apply')).toBeHidden();
+  await expect(page.locator('#editor-ai-preview')).toBeHidden();
+});

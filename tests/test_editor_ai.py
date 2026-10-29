@@ -118,6 +118,26 @@ class EditorAiSelectionTests(unittest.TestCase):
                                            source, Path("fixture.wav"), threading.Event())
         self.assertEqual(result["aligned"][0]["items"][0]["text"], "hi")
 
+    def test_fill_protects_partial_and_zero_width_items_before_worker(self):
+        source = validate_selection([
+            {"id": "partial", "start": 0, "end": 500, "text": "AB", "items": [{"text": "B", "start": 300, "end": 500}]},
+            {"id": "zero", "start": 600, "end": 1000, "text": "好。", "items": [{"text": "好", "start": 600, "end": 1000}, {"text": "。", "start": 1000, "end": 1000}]},
+            {"id": "empty", "start": 1100, "end": 1200, "text": "hi"},
+        ])
+        def worker(**kwargs):
+            from maw.postprocess_io import read_project
+            project = read_project(Path(kwargs["project_path"]))
+            self.assertEqual([cue["id"] for cue in project["segments"]], ["empty"])
+            project["segments"][0]["items"] = [{"text": "hi", "start": 1100, "end": 1200}]
+            output = Path(kwargs["output_directory"]) / "result.mosp"
+            output.write_text(json.dumps(project), encoding="utf-8")
+            return {"artifact": {"projectPath": str(output)}, "report": {"skippedSegments": 0}}
+        with mock.patch("maw.local_runtime.run_timestamp_alignment_in_runtime", side_effect=worker), \
+             mock.patch("maw.gui_config.effective_config", return_value=SimpleNamespace(model_cache_root="")):
+            result = EditorAiJobs._compute({"operation": "align", "model": "qwen3-forced-aligner-0.6b", "mode": "fill"}, source, Path("fixture.wav"), threading.Event())
+        self.assertEqual([cue["id"] for cue in result["aligned"]], ["empty"])
+        self.assertEqual(result["report"]["skippedSegments"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()

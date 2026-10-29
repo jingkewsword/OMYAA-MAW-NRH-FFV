@@ -13,7 +13,7 @@
     const counts = resultOperation === 'align' ? (english
       ? `Generated ${Number(report.alignedSegments) || 0}, skipped ${Number(report.skippedSegments) || 0}, failed ${Number(report.failedSegments) || 0}. `
       : `生成 ${Number(report.alignedSegments) || 0} 条，跳过 ${Number(report.skippedSegments) || 0} 条，失败 ${Number(report.failedSegments) || 0} 条。`) : '';
-    const notice = resultOperation === 'translate' ? (english ? 'Replacing an existing translation removes its old word timestamps.' : '替换已有译文将清除其旧字词时间码。') : '';
+    const notice = resultOperation === 'translate' ? (english ? 'Changing a timed translation requires confirmation before removing its old word timestamps.' : '更改带字词时间码的译文前会要求确认。') : '';
     text(hasLines ? counts + (english ? 'Review the candidate. Subtitles and related data will be checked again before applying. ' : '请核对候选结果。应用前会再次检查字幕与关联数据。') + notice
       : counts + (english ? 'There is no result to apply.' : '没有可应用的结果。'));
     resultStatus = { report, resultOperation, hasLines };
@@ -48,6 +48,8 @@
       if (task !== active) return;
       try {
         const response = await request('status', { ...active.binding, id: active.id });
+        if (task !== active) return;
+        if (!currentBinding(active)) { task = null; resetButtons(); text('工程已切换，结果已丢弃。'); return; }
         if (response.state === 'running') continue;
         $('cancel').hidden = true;
         if (response.state !== 'done') { text(response.result?.error || '任务已取消。'); task = null; $('start').hidden = false; return; }
@@ -95,7 +97,7 @@
         .flatMap(b => b.extension_segment_ids || []));
       if (MaweState.selection.indices('overlay').size || [...MaweSelection.selectedExtensionIdxs].some(index => !pairedIds.has(track?.segments[index]?.id))) throw new Error('请只选择主字幕及其联动副字幕。');
       const snapshot = core.capture(MaweBoot.DATA, [...MaweSelection.selectedIdxs], operation);
-      const active = { config, binding: binding(config), snapshot, operation, target: $('target').value, epoch: window.MaweProjectLoad?.projectBindingEpoch };
+      const active = { config, binding: binding(config), snapshot, operation, mode: $('mode').value, target: $('target').value, epoch: window.MaweProjectLoad?.projectBindingEpoch };
       task = active;
       $('start').hidden = true; $('cancel').hidden = false; $('apply').hidden = true; $('preview').hidden = true;
       text('正在处理，您可以继续编辑。');
@@ -103,7 +105,7 @@
       const defaultTrack = metadata.audio_tracks?.find(track => track?.default === true && Number.isInteger(track.audio_index))?.audio_index ?? 0;
       const audioTrack = Number.isInteger(metadata.selected_audio_track) ? metadata.selected_audio_track : defaultTrack;
       const result = await request('start', { ...active.binding, operation, cues: snapshot.cues,
-        provider: $('provider').value, target: active.target, model: $('model').value, mode: $('mode').value,
+        provider: $('provider').value, target: active.target, model: $('model').value, mode: active.mode,
         maxChars: Number($('max').value), language: MaweBoot.DATA.language || '', audioTrack });
       active.id = result.id;
       if (task !== active || !currentBinding(active)) { if (currentBinding(active)) await request('cancel', { ...active.binding, id: active.id }); return; }
@@ -117,10 +119,29 @@
       core.ensureCurrent(MaweBoot.DATA, active.snapshot);
       MaweCuePanel.commitCuePanelEdit();
       core.ensureCurrent(MaweBoot.DATA, active.snapshot);
+      let replacements = 0;
+      if (active.operation === 'align' && active.mode === 'generate') {
+        replacements = (active.result.aligned || []).filter(entry => active.snapshot.cues.some(cue => cue.id === entry.id && cue.items?.length)).length;
+      } else if (active.operation === 'translate') {
+        const multi = active.snapshot.multi;
+        replacements = (active.result.translations || []).filter(entry => {
+          const binding = (multi.bindings || []).find(b => b.main_segment_ids?.length === 1 && b.main_segment_ids[0] === entry.id && b.extension_segment_ids?.length === 1);
+          const track = (multi.tracks || []).find(t => t.id === binding?.track_id);
+          const cue = track?.segments?.find(s => s.id === binding?.extension_segment_ids[0]);
+          return cue?.items?.length && cue.text !== entry.text;
+        }).length;
+      }
+      if (replacements) {
+        const message = document.documentElement.lang === 'en'
+          ? `Applying will replace existing word timestamps on ${replacements} subtitle(s). Continue?`
+          : `应用后将替换 ${replacements} 条字幕原有的字词时间码。是否继续？`;
+        if (!window.confirm(message)) return;
+        core.ensureCurrent(MaweBoot.DATA, active.snapshot);
+      }
       const makeId = () => `ai-${crypto.randomUUID()}`;
       MaweCommands.run('应用 AI 结果', command => {
         if (active.operation === 'translate') core.applyTranslation(MaweBoot.DATA, active.snapshot, active.result.translations, active.target, makeId);
-        else if (active.operation === 'align') core.applyAlignment(MaweBoot.DATA, active.snapshot, active.result.aligned);
+        else if (active.operation === 'align') core.applyAlignment(MaweBoot.DATA, active.snapshot, active.result.aligned, active.mode);
         else core.applyResegment(MaweBoot.DATA, active.snapshot, active.result.groups, makeId);
         MaweSelection.clearSelection({ silent: true, commitCuePanel: false });
         command.commit({ cueList: true, waveform: 'full', preview: 'update' });

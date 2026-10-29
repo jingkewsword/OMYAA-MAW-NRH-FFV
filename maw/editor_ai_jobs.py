@@ -140,6 +140,13 @@ class EditorAiJobs:
         mode = payload.get("mode")
         if mode not in {"fill", "generate"}:
             raise ValueError("请选择补缺或重新生成时间码。")
+        # Fill means completely untimed cues only. The shared toolbox aligner
+        # otherwise replaces partially timed cues and zero-width punctuation.
+        protected = sum(bool(cue.get("items")) for cue in cues) if mode == "fill" else 0
+        if mode == "fill":
+            cues = [cue for cue in cues if not cue.get("items")]
+        if not cues:
+            return {"aligned": [], "report": {"alignedSegments": 0, "skippedSegments": protected, "failedSegments": 0}}
         assert media is not None
         with tempfile.TemporaryDirectory(prefix="maw-editor-ai-") as temp:
             root = Path(temp)
@@ -178,4 +185,6 @@ class EditorAiJobs:
                             raise ValueError("对齐结果包含无效时间码。")
                         previous = item["end"]
                     result.append({"id": cue["id"], "items": items})
-            return {"aligned": result, "report": response.get("report", {})}
+            report = dict(response.get("report") or {})
+            report["skippedSegments"] = int(report.get("skippedSegments") or 0) + protected
+            return {"aligned": result, "report": report}

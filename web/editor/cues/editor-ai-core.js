@@ -25,6 +25,7 @@
       if (cues.some(c => !Array.isArray(c.items) || !c.items.length || c.items.map(x => x.text).join('') !== c.text)) fail('断句需要完整覆盖原文的字词时间码。');
     }
     return { operation, indices: sorted, cues: clone(cues), multi: clone(multi), gap: clone(project.gap_remove || null), timebase: clone(project.timebase || null),
+      groups: operation === 'resegment' ? clone(project.subtitle_groups || null) : null,
       order: operation === 'resegment' ? project.segments.map(c => c.id) : null,
       neighbors: operation === 'resegment' ? clone([project.segments[sorted[0] - 1] || null, project.segments[sorted.at(-1) + 1] || null]) : null };
   }
@@ -34,6 +35,7 @@
     if (current.some((cue, i) => !cue || !equal(cue, snap.cues[i]))) fail('选中的字幕已变化，请重新运行。');
     if (!equal(project.multi_subtitle || snap.multi, snap.multi) || !equal(project.gap_remove || null, snap.gap)) fail('关联字幕或删词范围已变化，请重新运行。');
     if (!equal(project.timebase || null, snap.timebase)) fail('工程时间基准已变化，请重新运行。');
+    if (snap.order && !equal(project.subtitle_groups || null, snap.groups)) fail('字幕分组已变化，请重新运行。');
     if (snap.order && (!equal(project.segments.map(c => c.id), snap.order) ||
         !equal([project.segments[snap.indices[0] - 1] || null, project.segments[snap.indices.at(-1) + 1] || null], snap.neighbors))) fail('字幕顺序或相邻字幕已变化，请重新运行。');
   }
@@ -56,7 +58,9 @@
       if (matches.length) {
         const extension = track.segments.find(s => s.id === matches[0].extension_segment_ids[0]);
         if (!extension) fail('找不到绑定的副字幕。');
-        extension.text = translated.text; delete extension.items; extension._dirty = true;
+        if (extension.text !== translated.text) {
+          extension.text = translated.text; delete extension.items; extension._dirty = true;
+        }
       } else {
         if (JSON.stringify(track.segments).includes('"headIdx"')) fail('副字幕轨含分组引用，暂不能插入译文。');
         if (track.segments.some(s => s.start < cue.end && cue.start < s.end)) fail('新译文与已有副字幕重叠，请先处理对应副字幕。');
@@ -70,12 +74,13 @@
     project.multi_subtitle = multi;
   }
 
-  function applyAlignment(project, snap, aligned) {
+  function applyAlignment(project, snap, aligned, mode = 'fill') {
     if (!Array.isArray(aligned)) fail('时间码结果无效。');
     const ids = new Set();
     for (const entry of aligned) {
       const cue = snap.cues.find(c => c.id === entry.id);
       if (!cue || ids.has(entry.id) || !Array.isArray(entry.items) || !entry.items.length) fail('时间码结果无效。');
+      if (mode === 'fill' && Array.isArray(cue.items) && cue.items.length) fail('补缺不能覆盖已有字词时间码。');
       let previous = cue.start;
       for (const item of entry.items) {
         if (!item || typeof item.text !== 'string' || !Number.isInteger(item.start) || !Number.isInteger(item.end) || item.start < previous || item.end < item.start || item.end > cue.end) fail('时间码超出字幕范围。');
