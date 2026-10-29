@@ -4609,3 +4609,24 @@ test('ASS export gates extension cues on the multi-subtitle toggle and keeps gap
   assertSecondaryCoverage(enabledGapRemovedLines, 1000);
   expect(pageErrors, `Page errors: ${pageErrors.join(' | ')}`).toEqual([]);
 });
+
+test('Z/X edits the selected overlay cue and undo restores it without changing main', async ({ page }) => {
+  const project = {
+    segments: [{ id: 'main-zx', start: 1000, end: 4000, text: 'main' }],
+    overlay_track: { enabled: true, segments: [{ id: 'overlay-zx', start: 1200, end: 3800, text: 'overlay' }] },
+    waveform: generateWaveformPayload(5000),
+  };
+  await page.goto(server.url);
+  await dropFiles(page, [{ name: 'overlay-zx.json', type: 'application/json', base64: Buffer.from(JSON.stringify(project)).toString('base64') }]);
+  const block = page.locator('.waveform-cue-block[data-track="overlay"][data-idx="0"]');
+  await block.click();
+  await moveWaveformPointerToTime(page, block, 2000);
+  await page.keyboard.press('z');
+  const ranges = () => page.evaluate(() => ({
+    main: AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments.map(s => [s.start, s.end]),
+    overlay: AsrEditorUtils.getOverlayTrack(MaweBoot.DATA).segments.map(s => [s.start, s.end]),
+  }));
+  await expect.poll(ranges).toEqual({ main: [[1000, 4000]], overlay: [[2000, 3800]] });
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect.poll(ranges).toEqual({ main: [[1000, 4000]], overlay: [[1200, 3800]] });
+});

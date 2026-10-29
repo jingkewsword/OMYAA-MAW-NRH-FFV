@@ -565,6 +565,16 @@ export function initMaweMultiSubtitleCore() {
 
 
 
+  function boundSyncImpactText(impact) {
+    const details = [];
+    if (impact?.squeezedCount) details.push(`裁剪 ${impact.squeezedCount} 条其他副字幕`);
+    if (impact?.removedCount) details.push(`删除 ${impact.removedCount} 条副字幕`);
+    if (!details.length) return '';
+    return `${details.join('，')}${impact.unboundCount ? '并解除相关绑定' : ''}`;
+  }
+
+
+
   function notifyBoundSyncWarning(drag, message) {
     if (!drag || drag.boundSyncWarningShown) return;
     drag.boundSyncWarningShown = true;
@@ -690,6 +700,7 @@ export function initMaweMultiSubtitleCore() {
     reconcileExtensionTrack,
     resolveExtensionFollowerRange,
     constrainCueRangeToTrack,
+    boundSyncImpactText,
     notifyBoundSyncWarning,
     syncBoundExtensionForMain,
     constrainBoundExtensionPanelEdit
