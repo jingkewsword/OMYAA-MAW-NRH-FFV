@@ -171,7 +171,7 @@ def main(argv=None) -> int:
     parser.add_argument("--browser-shard", type=parse_shard, help="explicit browser partition; full success requires every shard")
     args = parser.parse_args(argv)
     os.chdir(ROOT)
-    paths = args.changed if args.changed is not None else changed_paths(args.base_ref)
+    paths = ["docs/user/WORKFLOW.md"] if args.github_output else (args.changed if args.changed is not None else changed_paths(args.base_ref))
     plan = select_packs(paths, release=args.stage == "release")
     packs = args.pack or plan["packs"]
     specs = json.loads(args.e2e_specs) if args.e2e_specs else plan["e2e_specs"]
@@ -202,9 +202,10 @@ def main(argv=None) -> int:
     (output_dir / "plan.json").write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     if args.github_output:
         with args.github_output.open("a", encoding="utf-8") as output:
+            output.write("app=invalid\n")
             for name in PACKS:
                 output.write(f"{name.replace('-', '_')}={str(name in packs).lower()}\n")
-            output.write(f"app={str(bool(set(packs) - {'docs', 'website'})).lower()}\n")
+            output.write("app=invalid\n")
             output.write(f"preview={str(plan['preview']).lower()}\n")
             output.write(f"e2e_specs={json.dumps(specs)}\n")
             output.write(f"tools_scope={tools_scope}\n")
