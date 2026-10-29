@@ -401,7 +401,6 @@ test('ASS renders independent track snapshots even when the library has no match
     { ...utils.ASS_DEFAULT_EXTENSION_STYLE, id: 'saved-extension', fontName: 'Snapshot Extension', fontSize: 30 },
     { ...utils.ASS_DEFAULT_ASS_STYLE, id: 'saved-overlay', fontName: 'Snapshot Overlay', fontSize: 50 },
   ];
-  utils.resolveTrackStyle = (data, track) => ({ style: data.styles.find(style => style.id === track?.style?.style_id) || null });
   const ass = srt.buildAss();
   assert.match(ass, /Style: Default,Snapshot Main,40,/);
   assert.match(ass, /Style: Extension,Snapshot Extension,30,/);
