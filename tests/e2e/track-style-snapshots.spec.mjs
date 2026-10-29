@@ -111,21 +111,28 @@ test('preview switches hide stickers with their tracks without changing export',
     const h = AsrEditorUtils;
     for (const role of ['main', 'secondary']) {
       const track = MaweBoot.DATA.tracks.find(item => item.role === role);
+      track.segments[0].start = 0;
       h.assignSubtitleGroup(MaweBoot.DATA, track.segments, [0], 'sticker', { name: role, rel: `${role}.png`, filename: `${role}.png` });
     }
     MaweDom.overlayToggle.checked = true;
     MaweDom.extensionOverlayToggle.checked = true;
+    MaweDom.stickerOverlayToggle.checked = true;
+    MaweSettings.EDITOR_SETTINGS.stickersEnabled = true;
     MaweStickerOverlay.stickerOverlayDataVersion += 1;
+    MaweStickerOverlay.renderStickerOverlay(0);
   });
   const read = () => page.evaluate(() => ({
     preview: MaweStickerOverlay.rebuildStickerIntervals('preview').map(item => item.source.name).sort(),
     export: MaweStickerBurnPlan.collectStickerIntervals().map(item => item.rel).sort(),
   }));
   expect(await read()).toEqual({ preview: ['main', 'secondary'], export: ['main.png', 'secondary.png'] });
-  await page.evaluate(() => { MaweDom.overlayToggle.checked = false; });
+  await expect(page.locator('#sticker-overlay-layer img')).toHaveCount(2);
+  await page.evaluate(() => { MaweDom.overlayToggle.checked = false; MaweDom.overlayToggle.dispatchEvent(new Event('change')); });
   expect(await read()).toEqual({ preview: ['secondary'], export: ['main.png', 'secondary.png'] });
-  await page.evaluate(() => { MaweDom.extensionOverlayToggle.checked = false; });
+  await expect(page.locator('#sticker-overlay-layer img')).toHaveCount(1);
+  await page.evaluate(() => { MaweDom.extensionOverlayToggle.checked = false; MaweDom.extensionOverlayToggle.dispatchEvent(new Event('change')); });
   expect(await read()).toEqual({ preview: [], export: ['main.png', 'secondary.png'] });
+  await expect(page.locator('#sticker-overlay-layer img')).toHaveCount(0);
 });
 
 test('importing a project as secondary copies its style and reference metadata', async ({ page }) => {
