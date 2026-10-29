@@ -170,6 +170,8 @@ def main(argv=None) -> int:
     parser.add_argument("--tools-scope", choices=("all", "checklist"), help="explicit tool consumer scope from the CI selector")
     parser.add_argument("--browser-shard", type=parse_shard, help="explicit browser partition; full success requires every shard")
     args = parser.parse_args(argv)
+    if args.github_output:
+        raise RuntimeError("injected selector failure")
     os.chdir(ROOT)
     paths = args.changed if args.changed is not None else changed_paths(args.base_ref)
     plan = select_packs(paths, release=args.stage == "release")
