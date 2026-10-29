@@ -190,6 +190,45 @@ test('previews text changes and applies the reported item-timing mapping', async
   ]);
 });
 
+test('switching text views does not overwrite the next editor focus or input', async ({ page }, testInfo) => {
+  await page.addInitScript(() => localStorage.setItem('moy.asr.editor.onboarding.v1', 'completed'));
+  await page.goto(server.url);
+  await page.locator('#timed-text-edit-btn').click();
+  await page.clock.install();
+  await page.clock.pauseAt(new Date());
+  await page.evaluate(() => {
+    window.textViewEvents = [];
+    for (const type of ['focusin', 'input']) {
+      document.querySelector('#timed-text-edit-modal').addEventListener(type, (event) => {
+        const target = event.target;
+        window.textViewEvents.push({ type, id: target.id, row: target.dataset.index, value: target.value });
+      });
+    }
+  });
+  await page.locator('#timed-text-edit-view [data-view="single"]').click();
+  const initialSingleFocused = await page.locator('#timed-text-edit-single-textarea')
+    .evaluate(element => element === document.activeElement);
+  await page.clock.runFor(1);
+  await expect(page.locator('#timed-text-edit-single-textarea')).toBeFocused();
+  await page.locator('#timed-text-edit-single-textarea').fill('就是那颗\nabc');
+  await page.locator('#timed-text-edit-view [data-view="rows"]').click();
+  const rows = page.locator('#timed-text-edit-rows textarea');
+  const initialRowFocused = await rows.nth(0).evaluate(element => element === document.activeElement);
+  await rows.nth(1).click();
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.clock.runFor(1);
+  // A pending view-switch task must not redirect this insertion to row 1.
+  await page.keyboard.insertText('abXc');
+  const eventsPath = testInfo.outputPath('view-focus-events.json');
+  writeFileSync(eventsPath, JSON.stringify(await page.evaluate(() => window.textViewEvents), null, 2));
+  await testInfo.attach('view-focus-events', { path: eventsPath, contentType: 'application/json' });
+  await expect(rows.nth(0)).toHaveValue('就是那颗');
+  await expect(rows.nth(1)).toHaveValue('abXc');
+  await expect(rows.nth(1)).toBeFocused();
+  expect(initialSingleFocused).toBe(true);
+  expect(initialRowFocused).toBe(true);
+});
+
 test('shows disabled subtitles on demand without replacing hidden cues', async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem('moy.asr.editor.onboarding.v1', 'completed');

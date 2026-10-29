@@ -59,3 +59,30 @@ for (const kind of ['main', 'extension']) {
     assert.equal(selection.anchorOffset, 5);
   });
 }
+
+test('custom wrapping keeps focus with the next field after opening tasks finish', () => {
+  const timers = [], elements = new Map();
+  const document = { activeElement: null, getElementById(id) {
+    if (!elements.has(id)) {
+      const classes = new Set();
+      elements.set(id, { value: '', classList: {
+        add(name) { classes.add(name); }, remove(name) { classes.delete(name); },
+        contains(name) { return classes.has(name); },
+      }, contains(target) {
+        return this === target || (id === 'wrap-chars-modal'
+          && ['wrap-chars-left', 'wrap-chars-right'].some(child => elements.get(child) === target));
+      }, focus() { document.activeElement = this; } });
+    }
+    return elements.get(id);
+  } };
+  const context = { window: {}, document, setTimeout: callback => timers.push(callback),
+    MaweInlineEdit: { editingState: null }, MaweBoot: { DATA: { segments: [{ text: 'Original' }] } } };
+  vm.runInNewContext(readFileSync(new URL('../web/editor/cues/editor-text-process.js', import.meta.url), 'utf8'), context);
+  const api = context.window.MaweTextProcess;
+  api.openWrapCharsModal([0]);
+  const initialFocus = document.activeElement;
+  api.wrapCharsRightInput.focus();
+  timers.forEach(callback => callback());
+  assert.equal(document.activeElement, api.wrapCharsRightInput);
+  assert.equal(initialFocus, api.wrapCharsLeftInput);
+});
