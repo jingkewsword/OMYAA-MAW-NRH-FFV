@@ -273,6 +273,7 @@ interface MaweStateApi {
     indices(kind: SelectionTrack): SelectionIndices;
     add(kind: SelectionTrack, index: number, options?: { activate?: boolean }): void;
     addRef(ref: CueRef, options?: { activate?: boolean }): void;
+    activateRef(ref: CueRef): void;
     removeRef(ref: CueRef): boolean;
     replaceRefs(refs: Iterable<CueRef>, active?: CueRef | null): void;
     getSelectedCueRefs(): CueRef[];

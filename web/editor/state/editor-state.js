@@ -89,6 +89,7 @@ export function createEditorState(project) {
     indices(kind) { trackForKind(kind); return views[kind]; },
     add(kind, index, options) { const ref = refAt(kind, index); if (ref) putRef(ref, options); },
     addRef,
+    activateRef(ref) { if (ref && refs.has(key(ref)) && resolve(ref)) currentRef = copy(ref); },
     remove(kind, index) { return removeRef(refAt(kind, index)); },
     removeRef,
     clear(kind) {

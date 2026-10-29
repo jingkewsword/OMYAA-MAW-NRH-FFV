@@ -119,6 +119,11 @@ test('selection and panel follow cue IDs through insertion, removal, transfer, a
   selection.add('extension', 0, { activate: false });
   assert.equal(selection.getCurrentTrack().id, main.id);
   assert.equal(selection.getCurrentCueRef().segment_id, 'b');
+  selection.activateRef({ track_id: secondary.id, segment_id: 'translation' });
+  assert.equal(selection.getCurrentTrack().id, secondary.id);
+  selection.activateRef({ track_id: main.id, segment_id: 'b' });
+  selection.activateRef({ track_id: main.id, segment_id: 'not-selected' });
+  assert.equal(selection.getCurrentTrack().id, main.id);
   main.segments.unshift({ id: 'new' });
   assert.deepEqual([...selection.indices('main')], [2]);
   assert.equal(selection.mainAnchor, 2);
