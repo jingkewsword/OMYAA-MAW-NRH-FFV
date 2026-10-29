@@ -1,0 +1,43 @@
+import { test, expect } from '@playwright/test';
+import { createUtilsModule as createProjectTracks } from '../../web/shared/utils/project-tracks.js';
+import { writeFileSync, readFileSync, realpathSync } from 'node:fs';
+import { join } from 'node:path';
+import { cleanupTempDir, disableOnboarding, findFreePort, generateWav, generateWaveformPayload, makeTempDir, startServer } from './helpers.mjs';
+let dir, server, project;
+test.beforeAll(async () => {
+ dir=realpathSync(makeTempDir('track-settings')); const media=join(dir,'audio.wav'); project=join(dir,'settings.mosp');
+ generateWav(media,4); writeFileSync(project,JSON.stringify(createProjectTracks().importProject({media,waveform:generateWaveformPayload(4000),segments:[{id:'one',start:500,end:3000,text:'字幕'}],overlay_track:{enabled:true,segments:[]}}).project));
+ server=await startServer(project,media,await findFreePort());
+});
+test.afterAll(async()=>{await server?.stop();cleanupTempDir(dir)});
+test('track controls preserve state, undo and save at narrow size',async({page}, info)=>{
+ await page.setViewportSize({width:800,height:700}); await disableOnboarding(page); await page.goto(server.url); await expect(page.locator('.waveform-row').first()).toBeVisible();
+ await page.evaluate(()=>MaweSettingsPanels.openEditorSettingsAtTab('editor-settings-tab-project-tracks'));
+ const main=page.locator('[data-track-role="main"]'); const overlay=page.locator('[data-track-role="overlay"]');
+ await expect(main.locator('[data-track-field="enabled"]')).toBeChecked();
+ await expect(overlay.locator('[data-track-field="enabled"]')).toBeChecked();
+ const before=await page.evaluate(()=>MaweHistory.editorHistory.undoLength());
+ await main.locator('[data-track-field="preview"]').uncheck();
+ expect(await page.evaluate(()=>MaweHistory.editorHistory.undoLength())).toBe(before+1);
+ await page.evaluate(()=>MaweHistory.performUndo()); await expect(main.locator('[data-track-field="preview"]')).toBeChecked();
+ await page.evaluate(()=>MaweHistory.performRedo()); await expect(main.locator('[data-track-field="preview"]')).not.toBeChecked();
+ await overlay.locator('[data-track-field="export"]').uncheck();
+ await expect.poll(()=>page.evaluate(()=>MaweProjectSave.saveProjectToServer({silent:true}))).toBe(true);
+ let saved=JSON.parse(readFileSync(project,'utf8')); expect(saved.tracks.find(t=>t.role==='main').preview_visible).toBe(false); expect(saved.tracks.find(t=>t.role==='overlay').export.enabled).toBe(false);
+ await page.reload(); await page.evaluate(()=>MaweSettingsPanels.openEditorSettingsAtTab('editor-settings-tab-project-tracks'));
+ await expect(main.locator('[data-track-field="preview"]')).not.toBeChecked(); await expect(overlay.locator('[data-track-field="export"]')).not.toBeChecked();
+ const gap=await main.evaluate(el=>getComputedStyle(el).columnGap); expect(parseFloat(gap)).toBeGreaterThanOrEqual(8);
+});
+test('overlay enable creates a track and shares the old switch with undo', async ({page}) => {
+ await disableOnboarding(page); await page.goto(server.url); await expect(page.locator('.waveform-row').first()).toBeVisible();
+ await page.evaluate(() => { MaweBoot.DATA.tracks = MaweBoot.DATA.tracks.filter(t => t.role !== 'overlay'); MaweDisplaySettings.updateMultiSubtitleUi(); });
+ await page.evaluate(()=>MaweSettingsPanels.openEditorSettingsAtTab('editor-settings-tab-project-tracks'));
+ const enabled = page.locator('[data-track-role="overlay"] [data-track-field="enabled"]');
+ await enabled.check(); await expect(page.locator('#overlay-track-toggle')).toBeChecked();
+ expect(await page.evaluate(()=>MaweBoot.DATA.tracks.filter(t=>t.role==='overlay').length)).toBe(1);
+ await page.evaluate(()=>MaweHistory.performUndo()); await expect(enabled).not.toBeChecked();
+ await page.evaluate(()=>MaweHistory.performRedo()); await expect(enabled).toBeChecked();
+ await page.evaluate(() => { AsrEditorUtils.getOverlayTrack(MaweBoot.DATA).variant = 'future-type'; MaweProjectSettings.syncTrackControls(); });
+ await expect(page.locator('[data-track-role="overlay"] .track-variant-warning')).toContainText('不支持的叠加轨类型：future-type');
+ expect(await page.evaluate(()=>AsrEditorUtils.TrackPolicy.isTrackEnabled(AsrEditorUtils.getOverlayTrack(MaweBoot.DATA), 'preview'))).toBe(false);
+});
