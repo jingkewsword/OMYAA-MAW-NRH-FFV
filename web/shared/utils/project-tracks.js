@@ -259,6 +259,12 @@ export function createUtilsModule() {
       if (!ROLES.has(track.role)) add(`${path}.role`, 'must be main, secondary or overlay');
       if (typeof track.name !== 'string') add(`${path}.name`, 'must be a string');
       if (typeof track.enabled !== 'boolean' || (track.role === 'main' && track.enabled !== true)) add(`${path}.enabled`, track.role === 'main' ? 'main track must be enabled' : 'must be a boolean');
+      if (own(track, 'preview_visible') && typeof track.preview_visible !== 'boolean') add(`${path}.preview_visible`, 'must be a boolean');
+      if (own(track, 'variant') && typeof track.variant !== 'string') add(`${path}.variant`, 'must be a string');
+      if (own(track, 'export')) {
+        if (!object(track.export)) add(`${path}.export`, 'must be an object');
+        else if (own(track.export, 'enabled') && typeof track.export.enabled !== 'boolean') add(`${path}.export.enabled`, 'must be a boolean');
+      }
       validateTrackMetadata(track, path, errors);
       validateSegments(track.segments, `${path}.segments`, errors, cueIds);
     });
@@ -427,6 +433,12 @@ export function createUtilsModule() {
       oldTrackIds.set(trackId, oldExtensionIds[index]);
       tracks.push({ ...track, id: trackId, role: 'secondary', name: own(track, 'name') ? track.name : '副字幕', enabled: multi.enabled ?? false, split_mode: track.split_mode ?? 'word', segments: track.segments ?? [] });
     });
+    for (const track of tracks) {
+      if (!own(track, 'preview_visible')) track.preview_visible = true;
+      if (!own(track, 'variant')) track.variant = 'plain';
+      if (!own(track, 'export')) track.export = {};
+      if (object(track.export) && !own(track.export, 'enabled')) track.export.enabled = true;
+    }
     const errors = [];
     const globalIds = new Set();
     if (GROUP_SCHEMAS.has(raw.schema)) {
