@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 from scripts import test_workflow
 from scripts.check_test_gate import FLAGS, check_gate
+from tests.compact_assertions import CompactContainerAssertions
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -113,7 +114,7 @@ class RequiredGateTests(unittest.TestCase):
         self.assertEqual(check_gate(state), [])
 
 
-class PreviewWorkflowContractTests(unittest.TestCase):
+class PreviewWorkflowContractTests(CompactContainerAssertions, unittest.TestCase):
     def test_preview_keeps_successful_skip_and_rejects_invalid_selection(self):
         workflow = (ROOT / ".github/workflows/pr-release-windows.yml").read_text(encoding="utf-8")
         build = workflow.split("\n  build-windows:\n", 1)[1]
