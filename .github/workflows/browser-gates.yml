@@ -50,7 +50,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: browser-shard-${{ matrix.shard }}
-          path: .artifacts/test-workflow/**/browser-run.json
+          path: ${{ matrix.shard == 3 && '.artifacts/missing-browser-run.json' || '.artifacts/test-workflow/**/browser-run.json' }}
           include-hidden-files: true
           if-no-files-found: warn
           retention-days: 7
