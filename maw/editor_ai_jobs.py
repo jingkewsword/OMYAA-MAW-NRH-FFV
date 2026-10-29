@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from maw.project_tracks import get_main_track
 from maw.editor_ai import resegment_selection, translate_selection, validate_selection
 
 JOB_TIMEOUT_SECONDS = 900
@@ -155,7 +156,7 @@ class EditorAiJobs:
             # Compare with the same normalization the worker uses. Comparing
             # against the raw browser input can misclassify normalization as a
             # successful generation when a cue actually failed or was skipped.
-            baseline_segments = read_project(project)["segments"]
+            baseline_segments = get_main_track(read_project(project))["segments"]
             response = run_timestamp_alignment_in_runtime(
                 project_path=project, media_path=media, model_id=model,
                 output_mode="json", alignment_mode=mode, output_directory=root,
@@ -165,7 +166,7 @@ class EditorAiJobs:
             output = response.get("artifact", {}).get("projectPath")
             if not isinstance(output, str) or not output:
                 raise ValueError("对齐模型未返回工程结果。")
-            generated = read_project(Path(output)).get("segments")
+            generated = get_main_track(read_project(Path(output))).get("segments")
             if not isinstance(generated, list) or len(generated) != len(cues):
                 raise ValueError("对齐结果数量不匹配。")
             result = []

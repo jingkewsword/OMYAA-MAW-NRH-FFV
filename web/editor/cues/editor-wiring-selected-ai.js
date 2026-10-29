@@ -90,11 +90,11 @@
       const config = MaweBoot.SERVER_CONFIG;
       if (!config?.requestToken || !Number.isInteger(config.bindingGeneration) || !config.sourceMediaId) throw new Error('此功能需要本地服务器编辑器。');
       MaweCuePanel.commitCuePanelEdit();
-      const mainIds = new Set([...MaweSelection.selectedIdxs].map(index => MaweBoot.DATA.segments[index]?.id));
+      const mainIds = new Set([...MaweSelection.selectedIdxs].map(index => core.mainSegments(MaweBoot.DATA)[index]?.id));
       const track = MaweMultiSubtitleCore.getActiveExtensionTrack();
-      const bindings = MaweMultiSubtitleCore.getMultiSubtitleState().bindings || [];
-      const pairedIds = new Set(bindings.filter(b => b.track_id === track?.id && b.main_segment_ids?.length === 1 && mainIds.has(b.main_segment_ids[0]))
-        .flatMap(b => b.extension_segment_ids || []));
+      const bindings = MaweBoot.DATA.bindings || [];
+      const pairedIds = new Set(bindings.filter(b => b.target?.track_id === track?.id && b.source?.track_id === core.mainTrack(MaweBoot.DATA).id && mainIds.has(b.source.segment_id))
+        .flatMap(b => [b.target.segment_id]));
       if (MaweState.selection.indices('overlay').size || [...MaweSelection.selectedExtensionIdxs].some(index => !pairedIds.has(track?.segments[index]?.id))) throw new Error('请只选择主字幕及其联动副字幕。');
       const snapshot = core.capture(MaweBoot.DATA, [...MaweSelection.selectedIdxs], operation);
       const active = { config, binding: binding(config), snapshot, operation, mode: $('mode').value, target: $('target').value, epoch: window.MaweProjectLoad?.projectBindingEpoch };
@@ -106,7 +106,7 @@
       const audioTrack = Number.isInteger(metadata.selected_audio_track) ? metadata.selected_audio_track : defaultTrack;
       const result = await request('start', { ...active.binding, operation, cues: snapshot.cues,
         provider: $('provider').value, target: active.target, model: $('model').value, mode: active.mode,
-        maxChars: Number($('max').value), language: MaweBoot.DATA.language || '', audioTrack });
+        maxChars: Number($('max').value), language: core.mainTrack(MaweBoot.DATA).language || '', audioTrack });
       active.id = result.id;
       if (task !== active || !currentBinding(active)) { if (currentBinding(active)) await request('cancel', { ...active.binding, id: active.id }); return; }
       void poll(active);
@@ -125,9 +125,9 @@
       } else if (active.operation === 'translate') {
         const multi = active.snapshot.multi;
         replacements = (active.result.translations || []).filter(entry => {
-          const binding = (multi.bindings || []).find(b => b.main_segment_ids?.length === 1 && b.main_segment_ids[0] === entry.id && b.extension_segment_ids?.length === 1);
-          const track = (multi.tracks || []).find(t => t.id === binding?.track_id);
-          const cue = track?.segments?.find(s => s.id === binding?.extension_segment_ids[0]);
+          const binding = (multi.bindings || []).find(b => b.source?.track_id === active.snapshot.trackId && b.source?.segment_id === entry.id);
+          const track = (multi.tracks || []).find(t => t.id === binding?.target?.track_id);
+          const cue = track?.segments?.find(s => s.id === binding?.target?.segment_id);
           return cue?.items?.length && cue.text !== entry.text;
         }).length;
       }

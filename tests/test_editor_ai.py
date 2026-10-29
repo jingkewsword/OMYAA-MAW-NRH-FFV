@@ -1,3 +1,4 @@
+from maw.project_tracks import get_main_track
 import threading
 import time
 import unittest
@@ -92,8 +93,8 @@ class EditorAiSelectionTests(unittest.TestCase):
         def worker(**kwargs):
             from maw.postprocess_io import read_project
             project = read_project(Path(kwargs["project_path"]))
-            self.assertEqual([cue["id"] for cue in project["segments"]], ["one", "two"])
-            project["segments"][0]["items"] = [{"text": "你好", "start": 0, "end": 600}]
+            self.assertEqual([cue["id"] for cue in get_main_track(project)["segments"]], ["one", "two"])
+            get_main_track(project)["segments"][0]["items"] = [{"text": "你好", "start": 0, "end": 600}]
             output = Path(kwargs["output_directory"]) / "result.mosp"
             output.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
             return {"artifact": {"projectPath": str(output)}, "report": {"alignedSegments": 2}}
@@ -107,7 +108,7 @@ class EditorAiSelectionTests(unittest.TestCase):
         def worker(**kwargs):
             from maw.postprocess_io import read_project
             project = read_project(Path(kwargs["project_path"]))
-            project["segments"][0]["items"] = [{"text": "hi", "start": 0, "end": 100}]
+            get_main_track(project)["segments"][0]["items"] = [{"text": "hi", "start": 0, "end": 100}]
             output = Path(kwargs["output_directory"]) / "result.mosp"
             output.write_text(json.dumps(project), encoding="utf-8")
             return {"artifact": {"projectPath": str(output)}, "report": {}}
@@ -127,8 +128,8 @@ class EditorAiSelectionTests(unittest.TestCase):
         def worker(**kwargs):
             from maw.postprocess_io import read_project
             project = read_project(Path(kwargs["project_path"]))
-            self.assertEqual([cue["id"] for cue in project["segments"]], ["empty"])
-            project["segments"][0]["items"] = [{"text": "hi", "start": 1100, "end": 1200}]
+            self.assertEqual([cue["id"] for cue in get_main_track(project)["segments"]], ["empty"])
+            get_main_track(project)["segments"][0]["items"] = [{"text": "hi", "start": 1100, "end": 1200}]
             output = Path(kwargs["output_directory"]) / "result.mosp"
             output.write_text(json.dumps(project), encoding="utf-8")
             return {"artifact": {"projectPath": str(output)}, "report": {"skippedSegments": 0}}

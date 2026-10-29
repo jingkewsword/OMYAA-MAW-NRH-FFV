@@ -31,14 +31,14 @@ test('translation candidate remains separate until applied and can be undone', a
   await page.locator('[data-editor-ai="translate"]').click();
   await page.locator('#editor-ai-start').click();
   await expect(page.locator('#editor-ai-apply')).toBeVisible();
-  expect(await page.evaluate(() => MaweBoot.DATA.multi_subtitle.tracks.length)).toBe(0);
-  await page.evaluate(() => { MaweBoot.DATA.segments[1].text = 'Changed while waiting'; });
+  expect(await page.evaluate(() => MaweBoot.DATA.tracks.filter(t => t.role === 'secondary').length)).toBe(0);
+  await page.evaluate(() => { MaweEditorAiCore.mainSegments(MaweBoot.DATA)[1].text = 'Changed while waiting'; });
   await page.locator('#editor-ai-apply').click();
-  expect(await page.evaluate(() => MaweBoot.DATA.multi_subtitle.tracks[0].segments[0].text)).toBe('你好');
-  expect(await page.evaluate(() => MaweBoot.DATA.segments[1].text)).toBe('Changed while waiting');
+  expect(await page.evaluate(() => MaweBoot.DATA.tracks.find(t => t.role === 'secondary').segments[0].text)).toBe('你好');
+  expect(await page.evaluate(() => MaweEditorAiCore.mainSegments(MaweBoot.DATA)[1].text)).toBe('Changed while waiting');
   await page.evaluate(() => MaweHistory.performUndo());
-  expect(await page.evaluate(() => MaweBoot.DATA.multi_subtitle.tracks.length)).toBe(0);
-  expect(await page.evaluate(() => MaweBoot.DATA.segments[1].text)).toBe('Changed while waiting');
+  expect(await page.evaluate(() => MaweBoot.DATA.tracks.filter(t => t.role === 'secondary').length)).toBe(0);
+  expect(await page.evaluate(() => MaweEditorAiCore.mainSegments(MaweBoot.DATA)[1].text)).toBe('Changed while waiting');
   const gap = await page.evaluate(() => {
     const a = document.querySelector('#editor-ai-description').getBoundingClientRect();
     const b = document.querySelector('#editor-ai-provider-row').getBoundingClientRect();
@@ -76,21 +76,21 @@ test('alignment and resegmentation apply validated candidates and reject stale s
   await page.locator('#editor-ai-start').click();
   await expect(page.locator('#editor-ai-apply')).toBeVisible();
   await page.locator('#editor-ai-apply').click();
-  expect(await page.evaluate(() => MaweBoot.DATA.segments[0].items.length)).toBe(2);
+  expect(await page.evaluate(() => MaweEditorAiCore.mainSegments(MaweBoot.DATA)[0].items.length)).toBe(2);
   await page.evaluate(() => MaweSelection.selectOnly(0));
   await page.locator('#editor-ai-menu-btn').click();
   await page.locator('[data-editor-ai="resegment"]').click();
   await page.locator('#editor-ai-start').click();
   await expect(page.locator('#editor-ai-apply')).toBeVisible();
-  await page.evaluate(() => { MaweBoot.DATA.segments[0].text = '已修改'; });
+  await page.evaluate(() => { MaweEditorAiCore.mainSegments(MaweBoot.DATA)[0].text = '已修改'; });
   await page.locator('#editor-ai-apply').click();
   await expect(page.locator('#editor-ai-status')).toContainText('已变化');
-  expect(await page.evaluate(() => MaweBoot.DATA.segments.length)).toBe(2);
-  await page.evaluate(() => { MaweBoot.DATA.segments[0].text = '你好'; });
+  expect(await page.evaluate(() => MaweEditorAiCore.mainSegments(MaweBoot.DATA).length)).toBe(2);
+  await page.evaluate(() => { MaweEditorAiCore.mainSegments(MaweBoot.DATA)[0].text = '你好'; });
   await page.locator('#editor-ai-apply').click();
-  expect(await page.evaluate(() => MaweBoot.DATA.segments.map(cue => cue.text))).toEqual(['你', '好', '呀']);
+  expect(await page.evaluate(() => MaweEditorAiCore.mainSegments(MaweBoot.DATA).map(cue => cue.text))).toEqual(['你', '好', '呀']);
   await page.evaluate(() => MaweHistory.performUndo());
-  expect(await page.evaluate(() => MaweBoot.DATA.segments.map(cue => cue.text))).toEqual(['你好', '呀']);
+  expect(await page.evaluate(() => MaweEditorAiCore.mainSegments(MaweBoot.DATA).map(cue => cue.text))).toEqual(['你好', '呀']);
   emptyAlignment = true;
   await page.evaluate(() => MaweSelection.selectOnly(0));
   await page.locator('#editor-ai-menu-btn').click();
@@ -149,15 +149,15 @@ test('regeneration asks before replacing word timings and cancellation preserves
   await page.locator('#editor-ai-mode').selectOption('generate');
   await page.locator('#editor-ai-start').click();
   await expect(page.locator('#editor-ai-apply')).toBeVisible();
-  const before = await page.evaluate(() => JSON.stringify(MaweBoot.DATA.segments[0].items));
+  const before = await page.evaluate(() => JSON.stringify(MaweEditorAiCore.mainSegments(MaweBoot.DATA)[0].items));
   page.once('dialog', dialog => dialog.dismiss());
   await page.locator('#editor-ai-apply').click();
-  expect(await page.evaluate(() => JSON.stringify(MaweBoot.DATA.segments[0].items))).toBe(before);
+  expect(await page.evaluate(() => JSON.stringify(MaweEditorAiCore.mainSegments(MaweBoot.DATA)[0].items))).toBe(before);
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#editor-ai-apply').click();
-  expect(await page.evaluate(() => MaweBoot.DATA.segments[0].items.length)).toBe(1);
+  expect(await page.evaluate(() => MaweEditorAiCore.mainSegments(MaweBoot.DATA)[0].items.length)).toBe(1);
   await page.evaluate(() => MaweHistory.performUndo());
-  expect(await page.evaluate(() => JSON.stringify(MaweBoot.DATA.segments[0].items))).toBe(before);
+  expect(await page.evaluate(() => JSON.stringify(MaweEditorAiCore.mainSegments(MaweBoot.DATA)[0].items))).toBe(before);
 });
 
 test('a delayed cancelled task cannot replace the next operation panel', async ({ page }) => {
