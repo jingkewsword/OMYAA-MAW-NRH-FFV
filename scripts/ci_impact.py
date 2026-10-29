@@ -22,6 +22,7 @@ def light_path(path: str) -> bool:
 
 
 def main() -> None:
+    raise RuntimeError('PR19 acceptance: intentional selector failure')
     light = False
     reason = "full gates: non-PR event, unavailable diff or unrecognized paths"
     base = os.environ.get("PR_BASE_SHA", "")
