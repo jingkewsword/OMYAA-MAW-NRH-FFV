@@ -42,6 +42,7 @@ from maw.postprocess import PostprocessStepError  # noqa: E402
 from maw.postprocess_io import read_project  # noqa: E402
 from maw.postprocess_llm import LlmClientError  # noqa: E402
 from maw.postprocess_pipeline import PostprocessPipelineError, save_postprocess_plan  # noqa: E402
+from maw.project_tracks import get_main_track, make_project  # noqa: E402
 from maw.runtime_manifest import STATUS_INSTALLING, write_runtime_manifest  # noqa: E402
 from maw.runtimes import LOCAL, OCR  # noqa: E402
 from maw.runtimes.base import RuntimeStatus  # noqa: E402
@@ -1667,7 +1668,7 @@ class GuiWebBridgeTests(CompactContainerAssertions, unittest.TestCase):
         output_srt = Path(str(result["srtPath"]))
         self.assertTrue(output_project.is_file())
         self.assertTrue(output_srt.is_file())
-        self.assertEqual(json.loads(output_project.read_text(encoding="utf-8"))["segments"][0]["text"], "正字")
+        self.assertEqual(get_main_track(json.loads(output_project.read_text(encoding="utf-8")))["segments"][0]["text"], "正字")
 
     def test_fixed_process_bridge_supports_conversion_without_rules(self) -> None:
         project = self.root / "clip.mosp"
@@ -1685,7 +1686,7 @@ class GuiWebBridgeTests(CompactContainerAssertions, unittest.TestCase):
         })
 
         self.assertTrue(result["ok"])
-        self.assertEqual(json.loads(Path(str(result["projectPath"])).read_text(encoding="utf-8"))["segments"][0]["text"], "软件")
+        self.assertEqual(get_main_track(json.loads(Path(str(result["projectPath"])).read_text(encoding="utf-8")))["segments"][0]["text"], "软件")
 
     def test_generate_waveform_project_creates_media_only_embedded_project(self) -> None:
         """Given media, When generating waveform, Then a normalized project without inline caches is written."""
@@ -1724,14 +1725,15 @@ class GuiWebBridgeTests(CompactContainerAssertions, unittest.TestCase):
         self.assertTrue(project_path.is_file())
         self.assertEqual(project_path.name, "clip.waveform.mosp")
         project = json.loads(project_path.read_text(encoding="utf-8"))
-        self.assertEqual(project["segments"], [])
+        self.assertEqual(project["schema"], "moy.asr.project.v2")
+        self.assertEqual(get_main_track(project)["segments"], [])
         self.assertEqual((project_path.parent / project["media"]).resolve(), media.resolve())
         # 工程去内联：波形缓存不再写进工程文件，只保留在 embed 结果的运行态里。
         self.assertNotIn("waveform", project)
         self.assertNotIn("spectral", project)
         self.assertNotIn("waveform_reapeaks", project)
         embed.assert_called_once_with(
-            {"media": str(media.resolve()), "segments": []},
+            make_project([], project_fields={"media": str(media.resolve())}),
             media.resolve(),
             source_media_path=media.resolve(),
             generate_spectral=True,
@@ -2125,7 +2127,7 @@ class GuiWebBridgeTests(CompactContainerAssertions, unittest.TestCase):
         self.assertTrue(output_project.is_file())
         self.assertTrue(output_srt.is_file())
         self.assertTrue(output_project.name.startswith("clip.文稿匹配"))
-        self.assertEqual(json.loads(output_project.read_text(encoding="utf-8"))["segments"][0]["text"], "旧句")
+        self.assertEqual(get_main_track(json.loads(output_project.read_text(encoding="utf-8")))["segments"][0]["text"], "旧句")
         self.assertNotIn("旧句。", output_srt.read_text(encoding="utf-8"))
 
     def test_script_preview_returns_bounded_utf8_text(self) -> None:
@@ -2179,6 +2181,19 @@ class GuiWebBridgeTests(CompactContainerAssertions, unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["preview"], "第一句\n第二句？\n第三句")
 
+    def test_script_preview_and_match_default_to_preserving_punctuation(self) -> None:
+        project = self.root / "default-punctuation.mosp"
+        script = self.root / "default-punctuation.txt"
+        project.write_text(json.dumps({"segments": [{"start": 0, "end": 1000, "text": "你好世界"}]}), encoding="utf-8")
+        script.write_text("你好，世界。", encoding="utf-8")
+        preview = self.api.read_script_preview({"path": str(script)})
+        self.assertEqual(preview["preview"], "你好，\n世界。")
+        match_preview = self.api.preview_script_match({"projectPath": str(project), "scriptPath": str(script)})
+        self.assertEqual(match_preview["preview"], "1. 你好，\n2. 世界。")
+        result = self.api.run_script_match({"projectPath": str(project), "scriptPath": str(script), "outputMode": "project"})
+        self.assertTrue(result["ok"])
+        self.assertEqual("".join(segment["text"] for segment in get_main_track(read_project(Path(result["projectPath"])))["segments"]), "你好，世界。")
+
     def test_script_match_bridge_forwards_markdown_cleanup_setting(self) -> None:
         project = self.root / "clip.mosp"
         script = self.root / "inline-match.md"
@@ -2193,7 +2208,7 @@ class GuiWebBridgeTests(CompactContainerAssertions, unittest.TestCase):
         })
 
         self.assertTrue(preserved["ok"])
-        self.assertIn("**这样**", read_project(Path(preserved["projectPath"]))["segments"][0]["text"])
+        self.assertIn("**这样**", get_main_track(read_project(Path(preserved["projectPath"])))["segments"][0]["text"])
 
     def test_script_match_preview_returns_split_text(self) -> None:
         project = self.root / "clip.mosp"
@@ -2329,7 +2344,7 @@ class GuiWebBridgeTests(CompactContainerAssertions, unittest.TestCase):
         with mock.patch("maw.postprocess_resegment.complete_boundaries", return_value={"draft": "[c0001a0002]"}) as complete:
             result = self.api.run_llm_postprocess({"projectPath": str(project), "outputMode": "both", "operation": "resegment", "providerId": "deepseek", "apiKey": "test-key", "baseUrl": "https://example.test/v1", "model": "test", "maxChars": "2"})
         self.assertTrue(result["ok"], result)
-        self.assertEqual([s["text"] for s in json.loads(Path(result["projectPath"]).read_text(encoding="utf-8"))["segments"]], ["介绍", "方法"])
+        self.assertEqual([s["text"] for s in get_main_track(json.loads(Path(result["projectPath"]).read_text(encoding="utf-8")))["segments"]], ["介绍", "方法"])
         self.assertIn("最多 2", complete.call_args.args[1])
         with mock.patch("maw.gui_web.process_llm_postprocess") as process:
             invalid = self.api.run_llm_postprocess({"operation": "resegment", "maxChars": "-1"})
@@ -3870,6 +3885,7 @@ class GuiWebBridgeTests(CompactContainerAssertions, unittest.TestCase):
         self.assertEqual(result["field"], "serverMediaPath")
         self.assertEqual(result["code"], "server_media_missing")
 
+    @mock.patch("maw.editor_entry_policy.app_version", new=lambda: "1.9.0")
     def test_open_blank_html_opens_repo_template_when_present(self) -> None:
         """Given blank editor exists, When opened, Then browser receives its file URL."""
         blank = self.root / "blank-editor.html"
@@ -3881,6 +3897,7 @@ class GuiWebBridgeTests(CompactContainerAssertions, unittest.TestCase):
         self.assertTrue(result["ok"])
         open_path.assert_called_once_with(blank)
 
+    @mock.patch("maw.editor_entry_policy.app_version", new=lambda: "1.9.0")
     def test_open_blank_html_reports_missing_template_without_raising(self) -> None:
         """Given blank editor is missing, When opened, Then JS receives structured failure."""
         with mock.patch("maw.gui_web.asset_path", return_value=self.root / "missing-blank-editor.html"):
@@ -5994,7 +6011,7 @@ class LauncherAssetContractTests(CompactContainerAssertions, unittest.TestCase):
         stylesheet = (ROOT / "web" / "launcher" / "launcher.css").read_text(encoding="utf-8")
 
         self.assertIn(
-            '{ id: "match", enabled: false, scriptPath: "", matchMode: "script", extraSplitPunctuation: ["，", "。", "？", "！", "；", ",", ".", ";"], preservePunctuation: ["？", "！"], cleanMarkdownSymbols: true },',
+            '{ id: "match", enabled: false, scriptPath: "", matchMode: "script", extraSplitPunctuation: ["，", "。", "？", "！", "；", ",", ".", ";"], preservePunctuation: ["，", "。", "？", "！", "；", ",", ".", ";"], cleanMarkdownSymbols: true },',
             script,
         )
         self.assertIn('subtitle_invalid: (detail) => `字幕或工程解析失败：', launcher_script)

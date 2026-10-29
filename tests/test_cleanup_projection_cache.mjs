@@ -42,6 +42,33 @@ function assertEquivalent(cache, cues, gap) {
   for (const cue of cues) assert.deepEqual(cache.retainedCue(cue, gap), core.projectCleanupRetainedSegments([cue], gap)[0]);
 }
 
+test('diagnostic switch defaults on, bypasses only caching and clears both projection lifetimes', () => {
+  const { cue, gap } = fixture();
+  const { cache, counts } = cacheRuntime();
+  assert.equal(cache.isEnabled(), true);
+  const before = cache.retainedCue(cue, gap);
+  const exported = cache.exportSegments([cue], gap);
+  assert.equal(before.text, '甲丙');
+  const builds = { ...counts };
+  cache.setEnabled(false);
+  cache.setEnabled(true);
+  assert.deepEqual(cache.retainedCue(cue, gap), before);
+  assert.deepEqual(cache.exportSegments([cue], gap), exported);
+  assert.equal(counts.retainedBuilds, builds.retainedBuilds + 1);
+  assert.equal(counts.exportBuilds, builds.exportBuilds + 1);
+  for (const enabled of [false, true, false, true]) {
+    cache.setEnabled(enabled);
+    assert.equal(cache.isEnabled(), enabled);
+    assertEquivalent(cache, [cue], gap);
+    assert.equal(cache.retainedCue(cue, gap).text, '甲丙');
+  }
+  cache.setEnabled(false);
+  cue.items[1].text = '丁'; cue.text = '甲丁丙';
+  assertEquivalent(cache, [cue], gap);
+  cache.setEnabled(true);
+  assertEquivalent(cache, [cue], gap);
+});
+
 test('unchanged playback frames reuse both projections and rebuild a changed cue only', () => {
   const { cue, gap } = fixture();
   const second = structuredClone(cue);

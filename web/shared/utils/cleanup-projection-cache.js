@@ -56,6 +56,7 @@ function cueSnapshot(cue) {
 }
 
 export function createCleanupProjectionCache({ createRetainedProjector, createExportProjector }) {
+  let enabled = true;
   let gapReference;
   let provenanceSnapshot;
   let gapsSnapshot;
@@ -112,6 +113,7 @@ export function createCleanupProjectionCache({ createRetainedProjector, createEx
     // relevant, without inspecting the full gap input for unrelated cues.
     if (!gapRemove.provenance.sources.ai_cleanup.some((range) => range?.cleanup_scope
         && cue?.id === range.cleanup_scope.segment_id)) return cue;
+    if (!enabled) return createRetainedProjector(gapRemove)([cue])[0];
     syncGap(gapRemove);
     if (!retainedProjector) retainedProjector = createRetainedProjector(gapRemove);
     return projectCue(cue, retainedCues, retainedProjector);
@@ -119,6 +121,7 @@ export function createCleanupProjectionCache({ createRetainedProjector, createEx
 
   function exportSegments(segments, gapRemove) {
     const source = Array.isArray(segments) ? segments : [];
+    if (!enabled) return createExportProjector(gapRemove)(source);
     if (!hasCleanup(gapRemove)) return source;
     syncGap(gapRemove);
     if (!exportProjector) exportProjector = createExportProjector(gapRemove);
@@ -140,5 +143,9 @@ export function createCleanupProjectionCache({ createRetainedProjector, createEx
     return exportResult;
   }
 
-  return Object.freeze({ retainedCue, exportSegments });
+  function setEnabled(value) {
+    const next = value !== false;
+    if (next !== enabled) { reset(undefined); enabled = next; }
+  }
+  return Object.freeze({ retainedCue, exportSegments, setEnabled, isEnabled: () => enabled });
 }

@@ -24,7 +24,7 @@ Windows 沙箱的系统临时目录若不可写，可为**当前测试进程**�
 - 先 `rg -l '符号' web/editor web/shared`，再在选定文件用 `rg -n --max-columns 240 --max-columns-preview '符号' <文件>`。
 - 依赖问题需要显式查锁文件；bundle 问题先查清单、源码和 `.meta.json`，运行 `check:editor` 验证。必要时显式指定生成文件路径进行窄范围搜索。
 - Git 不使用 `.rgignore`。先看 `git diff --stat` / `git diff --name-status`，随后 `git diff -- <选定源码文件>`；暂存改动同理加 `--cached`。不要默认输出整份 diff，也不要读取完整便携 HTML。
-- bundle 冲突通过源码与清单解决后重建；不要手动合并生成 JS。`blank-editor.html` 仍只在发布或维护者要求时重建。
+- bundle 冲突通过源码与清单解决后重建；不要手动合并生成 JS。`blank-editor.html` 仅在 1.x 发布或维护者明确要求时重建；2.0+ 停止生成，保留历史文件。
 - `debug.log` 已从版本索引移除并忽略，本 worktree 的原文件保留；不会清理其他工作区的日志。
 
 ## 有界执行入口
@@ -68,7 +68,7 @@ e2e helper 仅保留最近 4096 字符的服务输出，stdout/stderr 分别解�
 | Python 业务逻辑 | 对应 unittest 模块 | 公共契约/导出变化时扩大到相关模块，最后一次全量 |
 | 编辑器 JS / 装配清单 | 相关 Node 用例 + build/check + typecheck | 宿主、选择范围、交互变化时增加相关浏览器 spec |
 | CSS / HTML / 交互 | 构建契约 + 对应 spec + 人工操作 | 多入口共享行为变化时扩大浏览器范围 |
-| 发布 | 统一重建便携 HTML，完整契约与回归矩阵 | 真实媒体、推理和听感仍单独验收 |
+| 发布 | 1.x 按需重建便携 HTML；2.0+ 核对退役产物缺席，完整契约与回归矩阵 | 真实媒体、推理和听感仍单独验收 |
 
 `pnpm test` 是 Chromium e2e；`pnpm run test:unit` 执行根目录全部 `.mjs` 测试，其中已有跨 Python 与浏览器测试，不能假定它们都零依赖。不要每改一个断言就跑全量。先复现一次，改代码后跑最小回归，必要时扩大；连续两次同类失败先分类原因，不循环重跑。
 
@@ -95,3 +95,11 @@ expected failure、unexpected success、退出码及完整日志位置；并行�
 `--full-log` 可指定日志位置，未指定时报告旁生成同名 `.log`。
 `--required` 将缺工具、缺依赖、缺夹具或 expected failure 视为失败；仅准确匹配的
 异平台测试 ID 和 skip 原因可豁免。空集合返回失败。分组是显式执行入口，不自动缩减 CI。
+
+## v2 清理投影缓存诊断（PR 10）
+
+本地编辑器开发者控制台可执行 `MaweExportSrt.setCleanupProjectionCacheEnabled(false)` 暂时关闭优化，执行 `MaweExportSrt.setCleanupProjectionCacheEnabled(true)` 恢复。`MaweExportSrt.isCleanupProjectionCacheEnabled()` 返回当前状态。默认开启，重载页面恢复默认；不进入普通设置、不写入工程、不在工程切换时改变诊断选择。
+
+关闭只绕过缓存，仍执行同一投影算法与 scope 分组；不是恢复为旧版本算法，也不关闭 AI 清理。切换时立即清空播放和导出缓存；当前句没有清理范围时的快捷返回保持不变。
+
+对照时使用同一工程、同一操作，分别记录冷启动与重复操作；不要把函数耗时等同于帧率或整体保存耗时。此开关与绑定索引开关独立。

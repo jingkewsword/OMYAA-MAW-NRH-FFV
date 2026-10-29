@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import {
+import { getMainTrack, getOverlayTrack, getExtensionTrack,
   cleanupTempDir, disableOnboarding, findFreePort, generateWaveformPayload,
   generateWav, makeTempDir, startServer,
 } from './helpers.mjs';
@@ -102,8 +102,8 @@ async function editCueThroughWordTiming(page, replacement) {
   await expect(editor).toHaveValue(INITIAL_TEXT);
   await editor.fill(replacement);
   await editor.blur();
-  await expect.poll(() => page.evaluate(() => MaweBoot.DATA.segments[0].text)).toBe(replacement);
-  return page.evaluate(() => JSON.parse(JSON.stringify(MaweBoot.DATA.segments[0])));
+  await expect.poll(() => page.evaluate(() => AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments[0].text)).toBe(replacement);
+  return page.evaluate(() => JSON.parse(JSON.stringify(AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments[0])));
 }
 
 async function saveAndReload(page) {
@@ -132,8 +132,8 @@ async function renderOutputs(page, timeMs) {
     MaweSettings.EDITOR_SETTINGS.assMode = false;
     return {
       ordinary, gapRemoved, ass, css, canvas,
-      overlay: MaweBoot.DATA.overlay_track.segments[0].text,
-      extension: MaweBoot.DATA.multi_subtitle.tracks[0].segments[0].text,
+      overlay: AsrEditorUtils.getOverlayTrack(MaweBoot.DATA).segments[0].text,
+      extension: AsrEditorUtils.getExtensionTrack(MaweBoot.DATA).segments[0].text,
     };
   }, timeMs);
 }
@@ -161,7 +161,7 @@ test('S3-T01 #220 edit of a scoped item revokes stale clipping on save and reope
   expect(edited.items.map((item) => item.text)).toEqual(['deleted ', 'substantially-rewritten ', 'kept']);
 
   const saved = await saveAndReload(page);
-  expect(saved.segments[0].items.map((item) => item.text))
+  expect(getMainTrack(saved).segments[0].items.map((item) => item.text))
     .toEqual(['deleted ', 'substantially-rewritten ', 'kept']);
   expect(saved.gap_remove.provenance.sources.ai_cleanup[0]).not.toHaveProperty('cleanup_scope');
 
@@ -178,7 +178,7 @@ test('S3-T02 editing an unscoped item keeps the scope until the user restores it
     .toEqual(['deleted ', 'words ', 'retained-expanded']);
 
   const saved = await saveAndReload(page);
-  expect(saved.segments[0].items.map((item) => item.text))
+  expect(getMainTrack(saved).segments[0].items.map((item) => item.text))
     .toEqual(['deleted ', 'words ', 'retained-expanded']);
   expect(saved.gap_remove.provenance.sources.ai_cleanup[0].cleanup_scope)
     .toEqual({ segment_id: 'main-001', item_start: 0, item_end: 2, text: 'deleted words ' });
@@ -218,9 +218,9 @@ test('S3-T02 editing an unscoped item keeps the scope until the user restores it
 
 async function trackRanges(page) {
   return page.evaluate(() => [
-    MaweBoot.DATA.segments,
-    MaweBoot.DATA.overlay_track.segments,
-    MaweBoot.DATA.multi_subtitle.tracks[0].segments,
+    AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments,
+    AsrEditorUtils.getOverlayTrack(MaweBoot.DATA).segments,
+    AsrEditorUtils.getExtensionTrack(MaweBoot.DATA).segments,
   ].map((segments) => segments.map((segment) => ({
     id: segment.id,
     start: segment.start,
@@ -284,8 +284,8 @@ test('S3-T03 multi-track drag fail-opens the moved scope and saves independent t
 
   const saved = await saveAndReload(page);
   expect(saved.gap_remove.provenance.sources.ai_cleanup[0]).not.toHaveProperty('cleanup_scope');
-  expect(saved.overlay_track.segments[0].text).toBe('overlay-only');
-  expect(saved.multi_subtitle.tracks[0].segments.map((segment) => segment.text))
+  expect(getOverlayTrack(saved).segments[0].text).toBe('overlay-only');
+  expect(getExtensionTrack(saved).segments.map((segment) => segment.text))
     .toEqual(['extension-only', 'neighbor-only']);
   const reopened = await renderOutputs(page, 2500);
   expectAllMainOutputs(reopened, 'deleted', 'words', 'kept');
@@ -326,7 +326,7 @@ test('S3-T04 playback reuses cleanup projections and observes direct edits, rest
   await page.evaluate(() => MaweCoreState.player.pause());
 
   await page.evaluate(() => {
-    const cue = MaweBoot.DATA.segments[0];
+    const cue = AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments[0];
     cue.text = 'deleted words expanded';
     cue.items[2].text = 'expanded';
   });
@@ -347,9 +347,10 @@ test('S3-T04 playback reuses cleanup projections and observes direct edits, rest
 
   const switched = await page.evaluate(() => {
     const project = JSON.parse(JSON.stringify(MaweBoot.DATA));
-    project.segments = [{ id: 'new-cue', start: 0, end: 5000, text: 'new project', items: [] }];
-    project.multi_subtitle = { enabled: false, tracks: [], bindings: [] };
-    project.overlay_track = { enabled: false, segments: [] };
+    project.tracks = [{ id: 'new-main', role: 'main', name: '新主轨', enabled: true,
+      segments: [{ id: 'new-cue', start: 0, end: 5000, text: 'new project', items: [] }] }];
+    project.bindings = [];
+    project.bilingual = { display_mode: 'main' };
     delete project.gap_remove;
     MaweProjectLoad.applyCanonicalProject(project, 'new-project.mosp');
     MaweDom.overlayToggle.checked = true;
@@ -391,4 +392,56 @@ test('S3-T05 unrelated current cues return immediately and re-enter cleanup afte
   });
   const outputs = await renderOutputs(page, 2500);
   expectAllMainOutputs(outputs, 'deleted', 'words', 'kept');
+});
+
+test('S3-T06 diagnostic on/off preserves preview, covered export paths and saved v2 content', async ({ page }) => {
+  expect(await page.evaluate(() => MaweExportSrt.isCleanupProjectionCacheEnabled())).toBe(true);
+  async function equivalent() {
+    await page.evaluate(() => MaweExportSrt.setCleanupProjectionCacheEnabled(false));
+    const off = await renderOutputs(page, 2500);
+    const exportOff = await page.evaluate(() => ({ secondary: MaweExportSrt.buildExtensionSrt(), bilingual: MaweExportSrt.buildBilingualSrt(), json: MaweJsonRepair.buildJson() }));
+    await page.evaluate(() => MaweExportSrt.setCleanupProjectionCacheEnabled(true));
+    expect(await renderOutputs(page, 2500)).toEqual(off);
+    expect(await page.evaluate(() => ({ secondary: MaweExportSrt.buildExtensionSrt(), bilingual: MaweExportSrt.buildBilingualSrt(), json: MaweJsonRepair.buildJson() }))).toEqual(exportOff);
+    expect(exportOff.json).not.toContain('cleanupProjectionCache');
+  }
+  await equivalent();
+  await page.evaluate(() => {
+    MaweHistory.pushGapRemoveUndo('restore for diagnostic');
+    MaweGapRemoveUi.commitManualGapRemoveChange(MaweGapRemoveData.getGapRemoveData(true), [{ start: 0, end: 1200, removed: false }]);
+  });
+  await equivalent();
+  await page.evaluate(() => MaweHistory.performUndo()); await equivalent();
+  await page.evaluate(() => MaweHistory.performRedo()); await equivalent();
+  const saved = await page.evaluate(async () => {
+    let text;
+    window.showSaveFilePicker = async () => ({ name: 'cleanup-v2.mosp', getFile: async () => new File([], 'cleanup-v2.mosp'),
+      createWritable: async () => ({ write: async blob => { text = await blob.text(); }, close: async () => {} }) });
+    await MaweProjectSave.saveProjectAsToFile(); return JSON.parse(text);
+  });
+  expect(saved.schema).toBe('moy.asr.project.v2');
+  await page.evaluate(saved => MaweProjectLoad.applyCanonicalProject(saved, 'cleanup-reopened.mosp'), saved);
+  await equivalent();
+  const timing = await page.evaluate(() => {
+    const original = MaweBoot.DATA.gap_remove;
+    const scope = original.provenance.sources.ai_cleanup[0];
+    MaweBoot.DATA.gap_remove = AsrEditorUtils.normalizeGapRemoveData({ provenance: { sources: { ai_cleanup:
+      Array.from({ length: 100 }, (_, i) => ({ start: scope.start + i * 6000, end: scope.end + i * 6000,
+        cleanup_scope: { ...scope.cleanup_scope, segment_id: i ? `other-${i}` : scope.cleanup_scope.segment_id } })) } } });
+    const samples = { off: [], on: [] };
+    try {
+      for (let round = 0; round < 6; round++) for (const enabled of round % 2 ? [true, false] : [false, true]) {
+        MaweExportSrt.setCleanupProjectionCacheEnabled(enabled);
+        MawePlaybackLoop.refreshSubtitlePreview(2500, 0);
+        const start = performance.now();
+        for (let frame = 0; frame < 10; frame++) MawePlaybackLoop.refreshSubtitlePreview(2500 + frame, 0);
+        if (round) samples[enabled ? 'on' : 'off'].push((performance.now() - start) / 10);
+      }
+    } finally {
+      MaweBoot.DATA.gap_remove = original;
+      MaweExportSrt.setCleanupProjectionCacheEnabled(true);
+    }
+    return Object.fromEntries(Object.entries(samples).map(([key, values]) => [key, values.sort((a, b) => a - b)[2]]));
+  });
+  console.log('cleanup browser preview 100 scopes median ms/frame', timing);
 });

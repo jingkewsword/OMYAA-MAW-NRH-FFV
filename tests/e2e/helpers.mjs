@@ -9,6 +9,11 @@ import { createServer } from 'node:net';
 import { randomBytes } from 'node:crypto';
 import { spawnServerProcess, stopServerProcess, serverHasExited, serverRequest } from './server-process.mjs';
 import { createOutputTail } from './output-tail.mjs';
+import { createUtilsModule as createProjectTracks } from '../../web/shared/utils/project-tracks.js';
+import { createUtilsModule as createSubtitleGroups } from '../../web/shared/utils/subtitle-groups.js';
+
+export const { getMainTrack, getExtensionTrack, getOverlayTrack } = createProjectTracks();
+export const { materializeTrackSegments } = createSubtitleGroups({ cloneJsonValue: structuredClone });
 
 // E2E tests exercise Python-backed editor servers and edit.py. Use the
 // repository's locked uv environment by default so the runner cannot silently
@@ -17,7 +22,7 @@ import { createOutputTail } from './output-tail.mjs';
 const configuredPython = String(process.env.MAW_E2E_PYTHON || '').trim();
 const PYTHON_RUNNER = configuredPython
   ? { command: configuredPython, prefixArgs: [] }
-  : { command: 'uv', prefixArgs: ['run', '--frozen', 'python'] };
+  : { command: 'uv', prefixArgs: ['run', '--no-sync', 'python'] };
 
 function pythonCommandArgs(args) {
   return [...PYTHON_RUNNER.prefixArgs, ...args];
@@ -192,13 +197,14 @@ export function testSegments() {
 // opt into this two-word shape only in split-specific scenarios.
 export async function makeFirstCueWordSplittable(page) {
   await page.evaluate(() => {
-    const segment = MaweBoot.DATA.segments[0];
+    const main = AsrEditorUtils.getMainTrack(MaweBoot.DATA);
+    const segment = main.segments[0];
     segment.text = 'Alpha Bravo';
     segment.items = [
       { start: segment.start, end: 4000, text: 'Alpha' },
       { start: 4000, end: segment.end, text: 'Bravo' },
     ];
-    MaweSettings.EDITOR_SETTINGS.mainSplitModeOverride = 'word';
+    main.split_mode_override = 'word';
     MaweCuePanel.renderAll({ waveform: 'full' });
   });
 }
@@ -310,11 +316,11 @@ export async function setProjectTrackEnabled(page, id, enabled) {
 }
 
 export function generateProjectJson(filePath) {
-  const project = {
+  const project = createProjectTracks().importProject({
     media: 'synthetic.wav',
     segments: testSegments(),
     waveform: generateWaveformPayload(DURATION_MS),
-  };
+  }).project;
   writeFileSync(filePath, JSON.stringify(project, null, 2), 'utf-8');
   return filePath;
 }
@@ -502,16 +508,15 @@ export async function startStaticServer(filePath, port) {
 }
 
 // ---------------------------------------------------------------------------
-// Build a portable blank editor from the current web/ sources (edit.py --blank).
-// The committed blank-editor.html is refreshed only before a release, so specs
-// that exercise the portable page must build the current sources instead of
-// copying a possibly stale artifact.
+// Render a browser contract fixture through shared renderer code. This keeps
+// local-host file APIs and save fallbacks covered after standalone entry retirement;
+// it does not invoke edit.py --blank or produce an application release artifact.
 // ---------------------------------------------------------------------------
-export function buildPortableBlankEditor(outputPath) {
+export function buildBrowserEditorFixture(outputPath) {
   const { command, prefixArgs } = PYTHON_RUNNER;
   execFileSync(
     command,
-    [...prefixArgs, 'edit.py', '--blank', '--output', outputPath],
+    [...prefixArgs, 'tests/helpers/render-editor-fixture.py', outputPath],
     { cwd: process.cwd(), windowsHide: true, stdio: ['ignore', 'pipe', 'inherit'] },
   );
   if (!existsSync(outputPath)) {

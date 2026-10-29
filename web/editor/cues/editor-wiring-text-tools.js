@@ -45,7 +45,7 @@ document.getElementById('replace-confirm')?.addEventListener('click', () => {
     useRegex: MaweFindReplace.useRegexCb.checked,
   };
   const preview = window.AsrEditorUtils.buildReplacementPreview(
-    MaweBoot.DATA.segments,
+    window.AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments,
     MaweFindReplace.getReplaceTargetIndexes(),
     MaweFindReplace.findInput.value,
     MaweFindReplace.replaceInput.value,
@@ -63,7 +63,7 @@ document.getElementById('replace-confirm')?.addEventListener('click', () => {
   return MaweCommands.run('批量替换', (command) => {
     let changedRows = 0, syncedRows = 0;
     preview.rows.forEach((row) => {
-      const segment = MaweBoot.DATA.segments[row.index];
+      const segment = window.AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments[row.index];
       if (!segment || segment.text !== row.before) return;
       const previousText = segment.text;
       segment.text = row.after;
@@ -169,23 +169,26 @@ MaweTextProcess.textProcessConfirm?.addEventListener('click', () => {
       return;
     }
     if (!mainDraftTexts) {
-      mainDraftTexts = MaweBoot.DATA.segments.map((segment) => String(segment?.text || ''));
+      mainDraftTexts = window.AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments.map((segment) => String(segment?.text || ''));
     }
     mainDraftTexts[row.index] = row.after;
   });
+  const reservedSegments = [...window.AsrEditorUtils.iterSegments(MaweBoot.DATA)];
   const nextMainSegments = mainDraftTexts
-    ? window.AsrEditorUtils.applyTimedTextEdit(MaweBoot.DATA.segments, mainDraftTexts,
-      { rule: MaweSettings.EDITOR_SETTINGS.assSpecialSymbolRule })
+    ? window.AsrEditorUtils.applyTimedTextEdit(window.AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments, mainDraftTexts,
+      { reservedSegments, rule: MaweSettings.EDITOR_SETTINGS.assSpecialSymbolRule })
     : null;
+  if (nextMainSegments) reservedSegments.push(...nextMainSegments);
   const nextExtensionSegments = [];
   for (const draft of extensionDrafts.values()) {
     const nextSegments = window.AsrEditorUtils.applyTimedTextEdit(draft.track.segments, draft.texts,
-      { rule: MaweSettings.EDITOR_SETTINGS.assSpecialSymbolRule });
+      { reservedSegments, rule: MaweSettings.EDITOR_SETTINGS.assSpecialSymbolRule });
     if (!nextSegments) {
       MaweHint.flashHint('无法应用文本处理：字幕行结构发生了变化', 'warning');
       return;
     }
     nextExtensionSegments.push({ track: draft.track, segments: nextSegments });
+    reservedSegments.push(...nextSegments);
   }
   if (mainDraftTexts && !nextMainSegments) {
     MaweHint.flashHint('无法应用文本处理：字幕行结构发生了变化', 'warning');
@@ -193,8 +196,8 @@ MaweTextProcess.textProcessConfirm?.addEventListener('click', () => {
   }
   return MaweCommands.run('文本处理', (command) => {
     if (nextMainSegments) {
-      MaweBoot.DATA.segments.splice(0, MaweBoot.DATA.segments.length, ...nextMainSegments);
-      MaweMultiSubtitleCore.markMainSegmentsDirty(MaweBoot.DATA.segments);
+      window.AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments.splice(0, window.AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments.length, ...nextMainSegments);
+      MaweMultiSubtitleCore.markMainSegmentsDirty(window.AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments);
     }
     nextExtensionSegments.forEach(({ track, segments }) => {
       track.segments.splice(0, track.segments.length, ...segments);
@@ -421,7 +424,6 @@ MaweDom.timedTextEditView?.addEventListener('click', (event) => {
   MaweDom.timedTextEditDraft.view = nextView;
   if ((MaweBoot.DATA.timed_text_edit_view === 'single' ? 'single' : 'rows') !== nextView) {
     MaweBoot.DATA.timed_text_edit_view = nextView;
-    MaweState.changes.timedTextEditViewDirty = true;
     MaweViewUpdates.invalidate({ save: true });
   }
   if (nextView === 'single') MaweDom.timedTextEditDraft.singleText = MaweDom.timedTextEditDraft.texts.join('\n');
@@ -505,7 +507,7 @@ MaweDom.timedTextEditApply?.addEventListener('click', () => {
   const nextSegments = window.AsrEditorUtils.applyTimedTextEdit(
     draft.sourceSegments,
     effectiveTexts,
-    { rule: MaweSettings.EDITOR_SETTINGS.assSpecialSymbolRule },
+    { reservedSegments: [...window.AsrEditorUtils.iterSegments(MaweBoot.DATA)], rule: MaweSettings.EDITOR_SETTINGS.assSpecialSymbolRule },
   );
   if (!nextSegments) {
     MaweHint.flashHint('无法应用文本修改：字幕行结构发生了变化', 'warning');
