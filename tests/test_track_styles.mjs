@@ -50,3 +50,18 @@ test('save to library requires explicit replacement for a conflicting name', () 
   assert.equal(h.resolveTrackStyle(project, track, result.library).status, 'linked');
   assert.equal(result.style.fontSize, 77);
 });
+
+test('editing a shared snapshot separates just the edited track and library deletion preserves it', () => {
+  const library = h.defaultAssStyleLibrary();
+  const project = fixture(), [main, secondary] = project.tracks;
+  h.applyTrackStyle(project, main, library.styles[1]);
+  secondary.style = copy(main.style);
+  h.updateTrackStyle(project, main, { fontSize: 77 });
+  assert.equal(h.resolveTrackStyle(project, main, library).style.fontSize, 77);
+  assert.equal(h.resolveTrackStyle(project, secondary, library).style.fontSize, library.styles[1].fontSize);
+  const changed = copy(library);
+  changed.styles = changed.styles.filter(style => style.id !== library.styles[1].id);
+  assert.equal(h.updateLinkedTrackStyles(project, library, changed), true);
+  assert.equal(h.resolveTrackStyle(project, secondary, changed).status, 'forked');
+  assert.equal(h.resolveTrackStyle(project, secondary, changed).style.fontSize, library.styles[1].fontSize);
+});

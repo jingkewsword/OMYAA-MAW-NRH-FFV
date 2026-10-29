@@ -147,7 +147,7 @@ function assStyleFormValue(field) {
   return field.value;
 }
 
-function updateAssStyleManagerLibrary(mutator, { persist = true } = {}) {
+function updateAssStyleManagerLibrary(mutator, { persist = true, recordProjectHistory = true } = {}) {
   const previous = ASS_STYLE_LIBRARY;
   const next = assStyleManagerClone(ASS_STYLE_LIBRARY);
   if (!next) return;
@@ -156,7 +156,7 @@ function updateAssStyleManagerLibrary(mutator, { persist = true } = {}) {
   setAssStyleLibrary(next, { persistLocal: true });
   const history = MaweHistory.captureSegmentsRecord('更新联动样式');
   if (window.AsrEditorUtils.updateLinkedTrackStyles(MaweBoot.DATA, previous, ASS_STYLE_LIBRARY)) {
-    MaweHistory.commitRecord(history);
+    if (recordProjectHistory) MaweHistory.commitRecord(history);
     MaweState.markProjectDirty();
   }
   if (persist) scheduleAssStyleLibrarySave();
@@ -560,9 +560,9 @@ function saveProjectStyleToLibrary(role) {
     if (result.reason !== 'conflict') MaweHint.flashHint('无法存回样式库：请检查同名样式或样式数量。', 'warning');
     return;
   }
+  updateAssStyleManagerLibrary(library => Object.assign(library, result.library), { recordProjectHistory: false });
   MaweHistory.commitRecord(history);
   MaweState.markProjectDirty();
-  updateAssStyleManagerLibrary(library => Object.assign(library, result.library));
   MaweHint.flashHint('工程样式已存回样式库', 'success');
 }
 document.getElementById('main-ass-style-save-library')?.addEventListener('click', () => saveProjectStyleToLibrary('main'));
