@@ -138,6 +138,7 @@ function applyCanonicalProject(data, filename, { repaired = false, loadGeneratio
     MaweCoreState.waveformEditor.setLoudnessStats(MaweBoot.DATA.loudness, { render: false });
   }
   MaweGapRemoveUi.updateGapRemoveUi();
+  window.MaweAssManagerWiring?.initializeProjectStyles?.();
   MaweCuePanel.renderAll({ waveform: 'full', preserveCueListScroll: false });
   MaweProjectSettings.syncControls();
   MaweStickerRoot.activateProjectRoot();
