@@ -186,7 +186,7 @@ jobs:
           assert report['exit_code'] == 0 and all(report[key] == 0 for key in ('failures', 'errors', 'expected_failures', 'unexpected_successes')), 'Python results contain unverified outcomes'
           assert all(any(item.startswith(module + '.') for item in selected) for module in modules), 'A cache test module was omitted'
           assert 'test_thumbnail_cache.ThumbnailCacheTests.test_symlink_registration_matches_resolved_source_namespace' in selected, 'Resolved-source namespace case was omitted'
-          assert all('test_reapeaks_fixture.GeneratedFixtureTests.test_' + source + '_generated_matches_fixture' in selected for source in ('tone30', 'tone_dual', 'tone_48k')), 'A real REAPER generation case was omitted'
+          assert all('test_reapeaks_fixture.' + ('LongMediaGeneratedFixtureTests' if source == 'tone30' else 'GeneratedFixtureTests') + '.test_' + source + '_generated_matches_fixture' in selected for source in ('tone30', 'tone_dual', 'tone_48k')), 'A real REAPER generation case was omitted'
           assert not any(re.search(r'(?<!\w)(?:' + '|'.join(map(re.escape, modules)) + r')(?!\w)', skip['id']) for skip in report['skips']), 'A cache case was skipped on Windows'
           print('All four cache modules executed in the full Windows run without skips')
           '@ | uv run --no-sync python -
