@@ -50,7 +50,7 @@ source: "docs/engineering/JSON_SCHEMA.md"
 | `preview_visible` | 可选布尔值，缺省为 `true`。仅当轨道已启用时控制预览，不改变导出选择 |
 | `export.enabled` | 可选布尔值，缺省为 `true`。仅当轨道已启用时控制字幕及所属表情的导出，不改变预览 |
 | `variant` | 可选字符串，缺省按 `plain` 处理。当前支持普通叠加轨；启用且选中导出的叠加轨使用未知类型时，字幕导出提示错误，不静默丢弃该轨 |
-| `styles` | 可选数组；每项是工程使用的 ASS 样式快照，包含工程内唯一 `id`、`name` 和与 ASS 样式库相同的样式参数。样式快照随工程保存，不依赖本机样式库 |
+| `styles` | 可选数组；每项是工程使用的 ASS 样式快照。`id` 为工程内唯一的非空字符串、最多 160 个 Unicode 码点且无首尾空格；`name` 为字符串。样式参数沿用 ASS 样式库的规范化规则，校验不要求逐项提供参数。快照随工程保存，不依赖本机样式库 |
 | `tracks[*].style` | 可选对象；`style_id` 引用工程 `styles` 中的样式 ID，`forked` 为可选布尔值，标记工程样式已与样式库分离 |
 | 轨道来源元数据 | `language`、`language_source`、`split_mode`、`timestamp_granularity`、`model`、`preserve_punctuation`、`source_name` 跟随具体轨；`split_mode_override` 保留旧主轨手动覆盖 |
 | cue ID 与时间 | cue ID 跨轨唯一；start/end 和 items 使用源媒体整数毫秒。允许合法零时长标点 item，cue 本身须 start < end |
