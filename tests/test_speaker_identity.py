@@ -1,6 +1,6 @@
 import unittest
 
-from maw.speaker_identity import asr_palette_size, distinct_speaker_ids, prepare_asr_speaker_segments
+from maw.speaker_identity import asr_palette_size, distinct_speaker_ids, prepare_asr_speaker_segments, validate_project_speakers
 from maw.speaker import apply_project_speaker_colors, speaker_color_summary
 
 
@@ -62,6 +62,35 @@ class SpeakerIdentityTests(unittest.TestCase):
         result = prepare_asr_speaker_segments(source, {"one": "spk-1"})
         self.assertEqual(result[0]["speaker"], "spk-1")
         self.assertNotIn("speaker", result[0]["items"][0])
+
+    def test_v2_identity_contract_preserves_distinct_people_with_same_name_and_color(self):
+        project = {"speakers": [{"id": "p1", "name": "主持人", "color": "#f9ca1f"},
+                                {"id": "p2", "name": "主持人", "color": "#f9ca1f"}],
+                   "tracks": [{"segments": [{"speaker": "p1"}, {"speaker": "p2"}, {"speaker": None}]}]}
+        self.assertEqual(validate_project_speakers(project), [])
+
+    def test_v2_identity_contract_rejects_dangling_ids_and_item_speakers(self):
+        project = {"speakers": [{"id": "p1", "name": "一", "color": "#f9ca1f"}],
+                   "tracks": [{"segments": [{"speaker": "missing", "items": [{"speaker": "p1"}]}]}]}
+        paths = {error["path"] for error in validate_project_speakers(project)}
+        self.assertEqual(paths, {"$.tracks[0].segments[0].speaker", "$.tracks[0].segments[0].items[0].speaker"})
+
+    def test_v2_identity_contract_rejects_duplicate_ids_and_invalid_display_values(self):
+        project = {"speakers": [{"id": "p1", "name": "一", "color": "#f9ca1f"},
+                                {"id": "p1", "name": "bad\nname", "color": "grey"}], "tracks": []}
+        paths = {error["path"] for error in validate_project_speakers(project)}
+        self.assertEqual(paths, {"$.speakers[1].id", "$.speakers[1].name", "$.speakers[1].color"})
+
+    def test_v2_identity_contract_reports_invalid_project_shape(self):
+        self.assertEqual([error["path"] for error in validate_project_speakers(None)], ["$"])
+        self.assertEqual([error["path"] for error in validate_project_speakers({})], ["$.speakers", "$.tracks"])
+
+    def test_unicode_only_whitespace_ids_are_not_valid_identities(self):
+        for identifier in ("\u0085", "\ufeff", "\u001c"):
+            with self.subTest(identifier=repr(identifier)):
+                project = {"speakers": [{"id": identifier, "name": "x", "color": "#f9ca1f"}], "tracks": []}
+                self.assertEqual([error["path"] for error in validate_project_speakers(project)], ["$.speakers[0].id"])
+                self.assertEqual(distinct_speaker_ids([{"speaker": identifier}]), [])
 
 
 if __name__ == "__main__":

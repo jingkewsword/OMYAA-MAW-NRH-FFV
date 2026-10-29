@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from maw.colors import COLOR_PALETTE
-from maw.speaker_identity import distinct_speaker_ids
+from maw.speaker_identity import distinct_speaker_ids, is_valid_speaker_id
 
 
 def speaker_color_summary(segments: list[dict]) -> dict:
@@ -26,7 +26,7 @@ def apply_project_speaker_colors(project: dict) -> dict:
     identifier = None
     for segment in segments:
         speaker = segment.get("speaker")
-        if not isinstance(speaker, str) or not speaker.strip():
+        if not is_valid_speaker_id(speaker):
             previous_speaker = None
             continue
         if speaker != previous_speaker:
