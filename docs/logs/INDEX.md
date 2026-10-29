@@ -14,6 +14,7 @@
 
 | 版本 / 范围 | 任务日期 | 主题与原文 | 说明 |
 | --- | --- | --- | --- |
+| 1.10.0-beta.2 之后 | 2026-10-30 | [本地按影响选测](release1.10.0-beta.2/261030_本地按影响选测/REVIEW_FINDINGS.md) | 第二批本地选测、真实消费者、required 报告与验收边界 |
 | 1.10.0-beta.2 之后 | 2026-10-30 | [测试归组与夹具分层](release1.10.0-beta.2/261030_测试归组夹具分层/REVIEW_FINDINGS.md) | tone30 归入 long-media、Bash 按需准备、同一全量报告兼容与独立复核 |
 | 1.10.0-beta.2 之后 | 2026-10-26 | [本地模型目录误判修复](release1.10.0-beta.2/261026_本地模型目录误判/本地模型目录误判修复.checklist.md) / [独立复核](release1.10.0-beta.2/261026_本地模型目录误判/REVIEW_FINDINGS.md) | 运行时根目录误判为已安装、切换模型串写 localModelPaths 两类修复；仓库根选择解析到可用修订层；新增清除自定义目录自救按钮，自动化与独立复核通过待人工验收 |
 | 1.10.0-beta.2 之后 | 2026-10-24 | [G10 状态域 ESM 修复与复核](release1.10.0-beta.2/261024_G10状态域ESM/REVIEW_FINDINGS.md) / [人工核对清单](release1.10.0-beta.2/261024_G10状态域ESM/G10状态域ESM.checklist.md) | rebase 后修复工程加载作用域错误，更新 ESM VM 测试装载并复验 |
