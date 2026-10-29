@@ -1359,3 +1359,4 @@ test('Z/X place selected or pointer-hit subtitle boundaries at the waveform poin
     { start: 25000, end: 30000 },
   ]);
 });
+
