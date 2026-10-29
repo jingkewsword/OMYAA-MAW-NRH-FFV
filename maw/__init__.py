@@ -6,3 +6,5 @@ import os
 # Apply before optional Hub imports, including standalone source CLI entrypoints.
 # Worker environments also enforce this policy for their child processes.
 os.environ["HF_HUB_DISABLE_XET"] = "1"
+
+# PR 19 isolated mixed-path CI acceptance; do not merge.
