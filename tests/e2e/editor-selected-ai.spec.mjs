@@ -100,3 +100,33 @@ test('alignment and resegmentation apply validated candidates and reject stale s
   await expect(page.locator('#editor-ai-start')).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+test('English AI panel preserves literal subtitle text in the candidate preview', async ({ page }) => {
+  await disableOnboarding(page);
+  await page.addInitScript(() => localStorage.setItem('mawe.language', 'en'));
+  await page.goto(server.url);
+  await page.waitForFunction(() => Boolean(window.MaweCoreState?.waveformEditor));
+  await page.evaluate(() => {
+    MaweProjectLoad.applyCanonicalProject({ schema: 'moy.asr.project.v1', media: '', segments: [
+      { id: 'a', start: 0, end: 500, text: '关闭', items: [
+        { text: '关', start: 0, end: 250 }, { text: '闭', start: 250, end: 500 },
+      ] },
+    ] }, 'test.mosp');
+    Object.assign(MaweBoot.SERVER_CONFIG, { bindingGeneration: 1, sourceMediaId: 'mock-binding' });
+    MaweSelection.selectOnly(0);
+  });
+  await page.route('**/api/editor-ai/start', route => route.fulfill({ json: { id: 'fake', state: 'running' } }));
+  await page.route('**/api/editor-ai/status', route => route.fulfill({ json: { id: 'fake', state: 'done', result: { groups: [['c0001a0001', 'c0001a0002']] } } }));
+  await page.locator('#editor-ai-menu-btn').click();
+  await expect(page.locator('[data-editor-ai="resegment"]')).toHaveText('Resegment subtitles');
+  await page.locator('[data-editor-ai="resegment"]').click();
+  await expect(page.locator('#editor-ai-title')).toHaveText('Resegment subtitles');
+  await page.locator('#editor-ai-start').click();
+  await expect(page.locator('#editor-ai-preview')).toHaveText('关闭');
+  await expect(page.locator('#editor-ai-status')).toContainText('Review the candidate');
+  await page.evaluate(() => window.MAWE_I18N.applyLanguage('zh', false));
+  await expect(page.locator('#editor-ai-status')).toContainText('请核对候选结果');
+  await page.evaluate(() => window.MAWE_I18N.applyLanguage('en', false));
+  await expect(page.locator('#editor-ai-status')).toContainText('Review the candidate');
+  await expect(page.locator('#editor-ai-preview')).toHaveText('关闭');
+});

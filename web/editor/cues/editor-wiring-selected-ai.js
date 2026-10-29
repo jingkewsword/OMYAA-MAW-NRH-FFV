@@ -4,10 +4,23 @@
   const panel = document.getElementById('editor-ai-panel');
   const $ = id => document.getElementById(`editor-ai-${id}`);
   const core = window.MaweEditorAiCore;
-  let operation = '', task = null;
+  let operation = '', task = null, resultStatus = null;
   MaweExportMenus.bindToolbarExportDropdown('editor-ai-dropdown', 'editor-ai-menu-btn', 'editor-ai-menu');
 
-  function text(message) { $('status').textContent = message; }
+  function text(message) { resultStatus = null; $('status').textContent = message; }
+  function showResultStatus(report, resultOperation, hasLines) {
+    const english = document.documentElement.lang === 'en';
+    const counts = resultOperation === 'align' ? (english
+      ? `Generated ${Number(report.alignedSegments) || 0}, skipped ${Number(report.skippedSegments) || 0}, failed ${Number(report.failedSegments) || 0}. `
+      : `生成 ${Number(report.alignedSegments) || 0} 条，跳过 ${Number(report.skippedSegments) || 0} 条，失败 ${Number(report.failedSegments) || 0} 条。`) : '';
+    const notice = resultOperation === 'translate' ? (english ? 'Replacing an existing translation removes its old word timestamps.' : '替换已有译文将清除其旧字词时间码。') : '';
+    text(hasLines ? counts + (english ? 'Review the candidate. Subtitles and related data will be checked again before applying. ' : '请核对候选结果。应用前会再次检查字幕与关联数据。') + notice
+      : counts + (english ? 'There is no result to apply.' : '没有可应用的结果。'));
+    resultStatus = { report, resultOperation, hasLines };
+  }
+  document.addEventListener('mawe:languagechange', () => {
+    if (resultStatus) showResultStatus(resultStatus.report, resultStatus.resultOperation, resultStatus.hasLines);
+  });
   function resetButtons() { $('start').hidden = false; $('cancel').hidden = true; $('apply').hidden = true; $('preview').hidden = true; }
   function binding(config) { return { requestToken: config.requestToken, bindingGeneration: config.bindingGeneration, sourceMediaId: config.sourceMediaId }; }
   async function request(action, payload) {
@@ -49,10 +62,7 @@
           }).join(''));
         $('preview').textContent = lines.join('\n\n'); $('preview').hidden = false;
         $('apply').hidden = !lines.length;
-        const report = active.result.report || {};
-        const counts = active.operation === 'align' ? `生成 ${Number(report.alignedSegments) || 0} 条，跳过 ${Number(report.skippedSegments) || 0} 条，失败 ${Number(report.failedSegments) || 0} 条。` : '';
-        const translationNotice = active.operation === 'translate' ? '替换已有译文将清除其旧字词时间码。' : '';
-        text(lines.length ? `${counts}请核对候选结果。应用前会再次检查字幕与关联数据。${translationNotice}` : `${counts}没有可应用的结果。`);
+        showResultStatus(active.result.report || {}, active.operation, Boolean(lines.length));
         if (!lines.length) { task = null; $('start').hidden = false; }
         return;
       } catch (error) { if (task === active) { text(error.message); task = null; $('start').hidden = false; $('cancel').hidden = true; } return; }
