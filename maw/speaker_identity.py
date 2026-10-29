@@ -37,6 +37,28 @@ def asr_palette_size(segments: Iterable[Mapping[str, Any]], *, current_size: int
     return 9 if current_size == 9 or len(distinct_speaker_ids(segments)) > 5 else 5
 
 
+def allocate_source_speaker_ids(
+    segments: Iterable[Mapping[str, Any]], *, reserved_ids: Iterable[str],
+) -> dict[str, str]:
+    """Allocate distinct project identities for an already-segmented ASR result.
+
+    Existing project IDs are reserved only; matching an opaque source ID does
+    not establish that speakers from separate sources are the same person.
+    """
+    used = set(reserved_ids)
+    mapping: dict[str, str] = {}
+    number = 1
+    for source_id in distinct_speaker_ids(segments):
+        candidate = f"spk-{number:03d}"
+        while candidate in used:
+            number += 1
+            candidate = f"spk-{number:03d}"
+        mapping[source_id] = candidate
+        used.add(candidate)
+        number += 1
+    return mapping
+
+
 def prepare_asr_speaker_segments(
     segments: Iterable[Mapping[str, Any]], source_to_project: Mapping[str, str],
 ) -> list[dict[str, Any]]:

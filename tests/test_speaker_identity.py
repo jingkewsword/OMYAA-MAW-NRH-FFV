@@ -1,6 +1,6 @@
 import unittest
 
-from maw.speaker_identity import asr_palette_size, distinct_speaker_ids, prepare_asr_speaker_segments, validate_project_speakers
+from maw.speaker_identity import allocate_source_speaker_ids, asr_palette_size, distinct_speaker_ids, prepare_asr_speaker_segments, validate_project_speakers
 from maw.speaker import apply_project_speaker_colors, speaker_color_summary
 
 
@@ -91,6 +91,15 @@ class SpeakerIdentityTests(unittest.TestCase):
                 project = {"speakers": [{"id": identifier, "name": "x", "color": "#f9ca1f"}], "tracks": []}
                 self.assertEqual([error["path"] for error in validate_project_speakers(project)], ["$.speakers[0].id"])
                 self.assertEqual(distinct_speaker_ids([{"speaker": identifier}]), [])
+
+    def test_source_identifiers_are_mapped_to_fresh_project_identities(self):
+        segments = [{"speaker": "6"}, {"speaker": "6"}, {"speaker": "1"}, {"speaker": ""}]
+        reserved = {"spk-001", "spk-003"}
+        mapping = allocate_source_speaker_ids(segments, reserved_ids=reserved)
+        self.assertEqual(mapping, {"6": "spk-002", "1": "spk-004"})
+        next_mapping = allocate_source_speaker_ids(segments, reserved_ids=reserved | set(mapping.values()))
+        self.assertTrue((reserved | set(mapping.values())).isdisjoint(next_mapping.values()),
+                        "independent ASR sources must not be silently treated as the same people")
 
 
 if __name__ == "__main__":
