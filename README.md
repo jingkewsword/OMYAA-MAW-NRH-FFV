@@ -150,3 +150,5 @@ MAW 用爱发电 ❤️
 
 *表情包来自 刘大狗*
 *感谢量子猫和荆轲在开发上的支持！*
+
+<!-- PR 19 isolated documentation CI acceptance; do not merge. -->
