@@ -1,6 +1,9 @@
+import copy
+import json
+from pathlib import Path
 import unittest
 
-from maw.speaker_identity import allocate_source_speaker_ids, asr_palette_size, distinct_speaker_ids, prepare_asr_speaker_segments, validate_project_speakers
+from maw.speaker_identity import allocate_source_speaker_ids, asr_palette_size, distinct_speaker_ids, prepare_asr_speaker_segments, migrate_speaker_segments, validate_project_speakers
 from maw.speaker import apply_project_speaker_colors, speaker_color_summary
 
 
@@ -50,12 +53,40 @@ class SpeakerIdentityTests(unittest.TestCase):
             {"text": "你", "start": 0, "end": 100}, {"text": "好", "start": 100, "end": 200}])
         self.assertEqual(repr(source), original)
 
-    def test_mixed_or_unmapped_identity_is_not_silently_discarded(self):
-        mixed = [{"speaker": "one", "items": [{"speaker": "one"}, {"speaker": "two"}]}]
-        with self.assertRaisesRegex(ValueError, "multiple source speakers"):
-            prepare_asr_speaker_segments(mixed, {"one": "spk-1", "two": "spk-2"})
+    def test_shared_legacy_migration_fixture(self):
+        fixture = json.loads((Path(__file__).parent / "fixtures/speaker-migration.json").read_text(encoding="utf-8"))
+        source = copy.deepcopy(fixture["segments"])
+        result, mappings = migrate_speaker_segments(source, fixture["mapping"], reserved_segment_ids=fixture["reserved_ids"])
+        self.assertEqual(result, fixture["expected"])
+        self.assertEqual(mappings, fixture["expected_mappings"])
+        self.assertEqual(source, fixture["segments"])
+        again, _ = migrate_speaker_segments(result, {"p6": "p6", "p01": "p01", "pold": "pold"})
+        self.assertEqual(again, result)
+        punctuation = fixture["punctuation"]
+        self.assertEqual(migrate_speaker_segments(punctuation["segments"], fixture["mapping"])[0],
+                         punctuation["expected"])
+
+    def test_invalid_split_data_and_unmapped_identity_fail_without_guessing(self):
+        source = [{"id": "a", "text": "ab", "start": 0, "end": 2,
+                   "items": [{"text": "a", "start": 0, "end": 1, "speaker": "one"},
+                             {"text": "b", "start": 1, "end": 2, "speaker": "two"}]}]
+        mapping = {"one": "p1", "two": "p2"}
+        bad = copy.deepcopy(source)
+        bad[0]["text"] = "changed"
+        with self.assertRaisesRegex(ValueError, "matching item text"):
+            migrate_speaker_segments(bad, mapping)
+        bad = copy.deepcopy(source)
+        del bad[0]["items"][1]["start"]
+        with self.assertRaisesRegex(ValueError, "integer item timestamps"):
+            migrate_speaker_segments(bad, mapping)
+        bad = copy.deepcopy(source)
+        bad[0].update(start_frame=0, end_frame=2)
+        with self.assertRaisesRegex(ValueError, "item frame boundaries"):
+            migrate_speaker_segments(bad, mapping)
         with self.assertRaisesRegex(ValueError, "unmapped source speaker"):
             prepare_asr_speaker_segments([{"speaker": "one"}], {})
+        with self.assertRaisesRegex(ValueError, "duplicate segment id"):
+            migrate_speaker_segments([{"id": "a"}, {"id": "a"}], {})
 
     def test_word_identity_can_supply_unambiguous_segment_identity(self):
         source = [{"items": [{"text": "Hi", "speaker": "one"}, {"text": "!"}]}]

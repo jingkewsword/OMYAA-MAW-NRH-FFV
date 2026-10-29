@@ -42,3 +42,109 @@ export function validateProjectSpeakers(project) {
   });
   return errors;
 }
+// Migration is intentionally separate from project loading and binding updates.
+// The mapping is indexed by input position so callers can update references.
+export function migrateSpeakerSegments(segments, sourceToProject, reservedSegmentIds = []) {
+  const valid = value => typeof value === 'string' && /[^\s\u0085\u001c-\u001f]/u.test(value);
+  const identity = value => {
+    if (value == null || (typeof value === 'string' && !valid(value))) return null;
+    if (typeof value !== 'string') throw new Error('invalid source speaker');
+    return value;
+  };
+  const source = structuredClone(segments);
+  const ids = source.map(segment => segment.id).filter(valid);
+  if (new Set(ids).size !== ids.length) throw new Error('duplicate segment id');
+  const used = new Set([...ids, ...reservedSegmentIds]);
+  const newId = base => {
+    let number = 1;
+    while (used.has(`${base}-speaker-${number}`)) number++;
+    const id = `${base}-speaker-${number}`;
+    used.add(id);
+    return id;
+  };
+  const result = [];
+  const mappings = [];
+  source.forEach((segment, index) => {
+    const items = segment.items ?? [];
+    if (!Array.isArray(items) || items.some(item => item === null || typeof item !== 'object' || Array.isArray(item))) {
+      throw new Error('items must be an array of objects');
+    }
+    const segmentSpeaker = identity(segment.speaker);
+    const runs = [];
+    let current = [];
+    let currentSpeaker = null;
+    for (const item of items) {
+      const speaker = identity(item.speaker);
+      if (current.length && speaker !== null && currentSpeaker !== null && speaker !== currentSpeaker) {
+        runs.push([current, currentSpeaker]);
+        current = [];
+        currentSpeaker = null;
+      }
+      current.push(item);
+      if (speaker !== null) currentSpeaker = speaker;
+    }
+    if (current.length) runs.push([current, currentSpeaker]);
+    if (!runs.length) runs.push([[], null]);
+    const split = runs.length > 1;
+    let textPieces;
+    if (split) {
+      if (typeof segment.text !== 'string' || items.some(item => typeof item.text !== 'string')) {
+        throw new Error('cannot split segment without matching item text');
+      }
+      const significant = char => !/[\s\u0085\u001c-\u001f\p{P}]/u.test(char);
+      const text = Array.from(segment.text);
+      if (text.filter(significant).join('') !== items.flatMap(item => Array.from(item.text)).filter(significant).join('')) {
+        throw new Error('cannot split segment without matching item text');
+      }
+      const cuts = [];
+      let cursor = 0;
+      for (const [run] of runs.slice(0, -1)) {
+        let count = run.flatMap(item => Array.from(item.text)).filter(significant).length;
+        while (cursor < text.length && count) {
+          if (significant(text[cursor])) count--;
+          cursor++;
+        }
+        while (cursor < text.length && !significant(text[cursor])) cursor++;
+        cuts.push(cursor);
+      }
+      textPieces = [0, ...cuts].map((start, i) => text.slice(start, [...cuts, text.length][i]).join(''));
+      const edges = [...runs.slice(1).map(([run]) => [run[0], 'start']),
+        ...runs.slice(0, -1).map(([run]) => [run.at(-1), 'end'])];
+      if (edges.some(([item, key]) => !Number.isInteger(item[key]))) {
+        throw new Error('cannot split segment without integer item timestamps');
+      }
+      const has = key => Object.hasOwn(segment, key);
+      if (has('start_frame') !== has('end_frame')) throw new Error('segment frame boundaries must be paired');
+      if (has('start_frame') && edges.some(([item, key]) => !Number.isInteger(item[`${key}_frame`]))) {
+        throw new Error('cannot split framed segment without item frame boundaries');
+      }
+    }
+    const oldId = segment.id ?? null;
+    const newIds = [];
+    runs.forEach(([run, runSpeaker], runIndex) => {
+      const out = structuredClone(segment);
+      if (split) {
+        if (runIndex || !valid(oldId)) out.id = newId(valid(oldId) ? oldId : `segment-${index + 1}`);
+        out.items = structuredClone(run);
+        out.text = textPieces[runIndex];
+        out.start = runIndex === 0 ? segment.start : run[0].start;
+        out.end = runIndex === runs.length - 1 ? segment.end : run.at(-1).end;
+        if (Object.hasOwn(segment, 'start_frame')) {
+          out.start_frame = runIndex === 0 ? segment.start_frame : run[0].start_frame;
+          out.end_frame = runIndex === runs.length - 1 ? segment.end_frame : run.at(-1).end_frame;
+        }
+      }
+      const speaker = split ? runSpeaker : (segmentSpeaker ?? runSpeaker);
+      if (speaker !== null) {
+        const projectId = Object.hasOwn(sourceToProject, speaker) ? sourceToProject[speaker] : null;
+        if (!valid(projectId)) throw new Error('unmapped source speaker');
+        out.speaker = projectId;
+      } else delete out.speaker;
+      for (const item of out.items ?? []) delete item.speaker;
+      result.push(out);
+      newIds.push(out.id ?? null);
+    });
+    mappings.push({ input_index: index, old_id: oldId, new_ids: newIds });
+  });
+  return { segments: result, mappings };
+}

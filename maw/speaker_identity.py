@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import re
+import unicodedata
 from collections.abc import Iterable, Mapping
 from typing import Any
 
@@ -67,42 +68,138 @@ def allocate_source_speaker_ids(
     return mapping
 
 
-def prepare_asr_speaker_segments(
+def migrate_speaker_segments(
     segments: Iterable[Mapping[str, Any]], source_to_project: Mapping[str, str],
-) -> list[dict[str, Any]]:
-    """Convert already segmented ASR cues to project identities without changing their timing.
+    *, reserved_segment_ids: Iterable[str] = (),
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Split legacy word identities, returning segments and per-input ID mapping.
 
-    A cue containing multiple source identities must first be split at reliable
-    word boundaries; this helper refuses to choose one or silently drop labels.
+    Callers must use the mapping to update bindings and groups when a cue splits.
+    The first run keeps its original ID; generated IDs avoid all input and
+    caller-reserved IDs. Blank item identities follow the previous known one;
+    leading blanks join the first known run. For an unsplit cue an existing
+    segment identity wins over an item identity.
+
+    Split only when text and boundary timestamps are available without guessing.
+    Segment frame boundaries require corresponding item frames at internal edges.
     """
-    result = copy.deepcopy(list(segments))
-    for segment in result:
-        items = segment.get("items", [])
+    source = copy.deepcopy(list(segments))
+    ids = [s.get("id") for s in source if is_valid_speaker_id(s.get("id"))]
+    if len(ids) != len(set(ids)):
+        raise ValueError("duplicate segment id")
+    used = set(ids) | set(reserved_segment_ids)
+    result: list[dict[str, Any]] = []
+    mappings: list[dict[str, Any]] = []
+
+    def identity(value: object) -> str | None:
+        if value is None or (isinstance(value, str) and not is_valid_speaker_id(value)):
+            return None
+        if not isinstance(value, str):
+            raise ValueError("invalid source speaker")
+        return value
+
+    def new_id(base: str) -> str:
+        number = 1
+        while f"{base}-speaker-{number}" in used:
+            number += 1
+        candidate = f"{base}-speaker-{number}"
+        used.add(candidate)
+        return candidate
+
+    for index, segment in enumerate(source):
+        items = segment.get("items")
         if items is None:
             items = []
         if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):
             raise ValueError("items must be an array of objects")
-        values = [segment.get("speaker"), *(item.get("speaker") for item in items)]
-        source_ids: set[str] = set()
-        for value in values:
-            if value is None or (isinstance(value, str) and not is_valid_speaker_id(value)):
-                continue
-            if not isinstance(value, str):
-                raise ValueError("invalid source speaker")
-            source_ids.add(value)
-        if len(source_ids) > 1:
-            raise ValueError("segment contains multiple source speakers")
-        if source_ids:
-            source_id = next(iter(source_ids))
-            project_id = source_to_project.get(source_id)
-            if not is_valid_speaker_id(project_id):
-                raise ValueError("unmapped source speaker")
-            segment["speaker"] = project_id
-        else:
-            segment.pop("speaker", None)
-        for item in items:
-            item.pop("speaker", None)
-    return result
+        segment_speaker = identity(segment.get("speaker"))
+        item_speakers = [identity(item.get("speaker")) for item in items]
+        runs: list[tuple[list[dict[str, Any]], str | None]] = []
+        current: list[dict[str, Any]] = []
+        current_speaker = None
+        for item, speaker in zip(items, item_speakers):
+            if current and speaker is not None and current_speaker is not None and speaker != current_speaker:
+                runs.append((current, current_speaker))
+                current, current_speaker = [], None
+            current.append(item)
+            if speaker is not None:
+                current_speaker = speaker
+        if current:
+            runs.append((current, current_speaker))
+        if not runs:
+            runs = [([], None)]
+        split = len(runs) > 1
+        if split:
+            if (not isinstance(segment.get("text"), str)
+                    or any(not isinstance(item.get("text"), str) for item in items)):
+                raise ValueError("cannot split segment without matching item text")
+            # Providers may omit spaces and punctuation from word tokens. Keep
+            # the original segment text and partition it at matched word edges.
+            def significant(char: str) -> bool:
+                return not (char.isspace() or char == "\ufeff" or unicodedata.category(char).startswith("P"))
+
+            text = segment["text"]
+            if ([c for c in text if significant(c)]
+                    != [c for item in items for c in item["text"] if significant(c)]):
+                raise ValueError("cannot split segment without matching item text")
+            cuts = []
+            cursor = count = 0
+            for run, _ in runs[:-1]:
+                count += sum(significant(c) for item in run for c in item["text"])
+                while cursor < len(text) and count:
+                    if significant(text[cursor]):
+                        count -= 1
+                    cursor += 1
+                while cursor < len(text) and not significant(text[cursor]):
+                    cursor += 1
+                cuts.append(cursor)
+            text_pieces = [text[start:end] for start, end in zip([0, *cuts], [*cuts, len(text)])]
+            edges = [(run[0], "start") for run, _ in runs[1:]] + [
+                (run[-1], "end") for run, _ in runs[:-1]
+            ]
+            if any(type(item.get(key)) is not int for item, key in edges):
+                raise ValueError("cannot split segment without integer item timestamps")
+            if ("start_frame" in segment) != ("end_frame" in segment):
+                raise ValueError("segment frame boundaries must be paired")
+            if "start_frame" in segment and any(
+                type(item.get(f"{key}_frame")) is not int for item, key in edges
+            ):
+                raise ValueError("cannot split framed segment without item frame boundaries")
+        old_id = segment.get("id")
+        output_ids: list[str | None] = []
+        for run_index, (run, run_speaker) in enumerate(runs):
+            out = copy.deepcopy(segment)
+            if split:
+                if run_index or not is_valid_speaker_id(old_id):
+                    out["id"] = new_id(old_id if is_valid_speaker_id(old_id) else f"segment-{index + 1}")
+                out["items"] = run
+                out["text"] = text_pieces[run_index]
+                out["start"] = segment["start"] if run_index == 0 else run[0]["start"]
+                out["end"] = segment["end"] if run_index == len(runs) - 1 else run[-1]["end"]
+                if "start_frame" in segment:
+                    out["start_frame"] = segment["start_frame"] if run_index == 0 else run[0]["start_frame"]
+                    out["end_frame"] = segment["end_frame"] if run_index == len(runs) - 1 else run[-1]["end_frame"]
+            speaker = run_speaker if split else (segment_speaker or run_speaker)
+            if speaker is not None:
+                project_id = source_to_project.get(speaker)
+                if not is_valid_speaker_id(project_id):
+                    raise ValueError("unmapped source speaker")
+                out["speaker"] = project_id
+            else:
+                out.pop("speaker", None)
+            for item in out.get("items") or []:
+                item.pop("speaker", None)
+            result.append(out)
+            output_ids.append(out.get("id"))
+        mappings.append({"input_index": index, "old_id": old_id, "new_ids": output_ids})
+    return result, mappings
+
+
+def prepare_asr_speaker_segments(
+    segments: Iterable[Mapping[str, Any]], source_to_project: Mapping[str, str],
+) -> list[dict[str, Any]]:
+    """Prepare an unbound ASR result; use migrate_speaker_segments for bindings."""
+    return migrate_speaker_segments(segments, source_to_project)[0]
 
 
 def validate_project_speakers(project: Mapping[str, Any]) -> list[dict[str, str]]:
