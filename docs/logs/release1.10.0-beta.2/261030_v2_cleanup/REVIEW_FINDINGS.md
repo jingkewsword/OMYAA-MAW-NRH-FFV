@@ -43,3 +43,5 @@ node node_modules/@playwright/test/cli.js test --config=tests/config/playwright.
 基线 PR 8 的 ce0fdc3b 远端 CI 并非全绿：Editor 59/63，含旧 DATA.segments 访问及保存后 dirty 断言；Windows Preview 出现 project 未定义。见 [Editor](https://github.com/jingkewsword/OMYAA-MAW-NRH-FFV/actions/runs/40919152565/job/123607350174) 与 [Windows](https://github.com/jingkewsword/OMYAA-MAW-NRH-FFV/actions/runs/40919152588/job/123607349745)。本次未扩修这些基线问题，也不将定向通过表述为整组通过。PR 8 后续变更需在最终集成时重新核验相关入口。
 
 审查中的非阻塞措辞建议已处理：测试标题限定实际覆盖入口，浏览器修订号与采样统计口径已明确。
+
+首次推送 17cf01cc 的远端 Node 测试出现 6 项 Resolve/OTIO 失败：隔离测试夹具只传入 AsrEditorUtils，没有传入新增缓存初始化所需的 AsrGapRemoveCore。已补入同一真实模块加载器提供的依赖，不改生产逻辑、不跳过或降低原有断言；定向复验该文件 6 项通过。
