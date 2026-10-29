@@ -1847,7 +1847,7 @@ test('swaps main and extension subtitles from the gear menu and supports undo', 
   const afterSwap = await page.evaluate(() => AsrEditorUtils.snapshotProjectContent(MaweBoot.DATA));
   // Track entities retain their own cue attributes when their roles change.
   expect(getMainTrack(afterSwap)).toEqual({ ...getExtensionTrack(beforeSwap), role: 'main', enabled: true });
-  expect(getExtensionTrack(afterSwap)).toEqual({ ...getMainTrack(beforeSwap), role: 'extension', enabled: true });
+  expect(getExtensionTrack(afterSwap)).toEqual({ ...getMainTrack(beforeSwap), role: 'secondary', enabled: true });
   expect(afterSwap.subtitle_groups).toEqual(beforeSwap.subtitle_groups);
 
   await page.keyboard.press('ControlOrMeta+z');
@@ -2276,6 +2276,41 @@ test('uses G to bind a single extension cue and labels extension context shortcu
   await expect(unboundExtension.locator('.time')).toHaveText('00:00.000 → 00:02.000');
   await page.keyboard.press('Shift+G');
   await expect(unboundExtension).toHaveClass(/unbound/);
+});
+
+test('background secondary selection restoration preserves the active cue', async ({ page }) => {
+  await importPair(page);
+  await page.locator('#multi-subtitle-import-extension').click();
+  await page.locator('#multi-subtitle-import-result-confirm').click();
+  const result = await page.evaluate(() => {
+    const selection = MaweState.selection;
+    const main = AsrEditorUtils.getMainTrack(MaweBoot.DATA);
+    const secondary = MaweMultiSubtitleCore.getActiveExtensionTrack();
+    selection.reset();
+    selection.add('main', 0);
+    selection.add('extension', 0, { activate: false });
+    const originalMain = selection.getCurrentCueRef();
+    secondary.segments.reverse();
+    MaweMultiSubtitleCore.sortExtensionTrackSegments(secondary);
+    const mainAfterSort = selection.getCurrentCueRef();
+    const secondaryRef = selection.getSelectedCueRefs().find(ref => ref.track_id === secondary.id);
+    selection.activateRef(secondaryRef);
+    secondary.segments.reverse();
+    MaweMultiSubtitleCore.sortExtensionTrackSegments(secondary);
+    const secondaryAfterSort = selection.getCurrentCueRef();
+    const snapshot = MaweMultiSubtitleCore.extensionTrackSelectionSnapshot(secondary);
+    secondary.segments = secondary.segments.filter(segment => segment.id !== secondaryRef.segment_id);
+    MaweMultiSubtitleCore.restoreExtensionTrackSelection(secondary, snapshot);
+    return { mainId: main.id, secondaryId: secondary.id, originalMain, mainAfterSort,
+      secondaryRef, secondaryAfterSort, afterRemoved: selection.getCurrentCueRef(),
+      selectedAfterRemoved: selection.getSelectedCueRefs() };
+  });
+  expect(result.mainAfterSort).toEqual(result.originalMain);
+  expect(result.originalMain.track_id).toBe(result.mainId);
+  expect(result.secondaryAfterSort).toEqual(result.secondaryRef);
+  expect(result.secondaryRef.track_id).toBe(result.secondaryId);
+  expect(result.afterRemoved).toEqual(result.originalMain);
+  expect(result.selectedAfterRemoved).toEqual([result.originalMain]);
 });
 
 test('normal extension clicks replace stale main selection with the clicked binding', async ({ page }) => {

@@ -367,11 +367,15 @@ export function initMaweMultiSubtitleCore() {
 
   function restoreExtensionTrackSelection(track, snapshot) {
   if (!track || !snapshot?.active) return;
+  // Sorting and follower reconciliation are background operations. Preserve
+  // whichever selected cue is current at restoration time.
+  const current = MaweState.selection.getCurrentCueRef();
   MaweState.selection.clear('extension');
   snapshot.selectedIds.forEach((id) => {
     const index = track.segments.findIndex((segment) => segment?.id === id);
-    if (index >= 0) MaweState.selection.add('extension', index);
+    if (index >= 0) MaweState.selection.add('extension', index, { activate: false });
   });
+  if (current) MaweState.selection.activateRef(current);
   if (snapshot.currentId && MaweCuePanelState.currentCuePanelKind === 'extension'
       && MaweCuePanelState.currentCuePanelTrackId === track.id) {
     MaweCuePanelState.currentCuePanelIdx = track.segments.findIndex((segment) => segment?.id === snapshot.currentId);
