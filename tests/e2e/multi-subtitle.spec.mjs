@@ -2911,7 +2911,7 @@ test('keeps the main range fixed when its extension follower hits another extens
   await page.mouse.move(targetX, centerY, { steps: 4 });
   await page.mouse.up();
 
-  await expect(page.locator('#hint-stack')).toContainText('挤压 1 条副字幕');
+  await expect(page.locator('#hint-stack')).toContainText('裁剪 1 条其他副字幕');
   const timing = await page.evaluate(() => ({
     main: [AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments[0].start, AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments[0].end],
     extension: AsrEditorUtils.getExtensionTrack(MaweBoot.DATA).segments.map((segment) => [segment.start, segment.end]),
@@ -4618,7 +4618,7 @@ test('Z/X edits the selected overlay cue and undo restores it without changing m
   };
   await page.goto(server.url);
   await dropFiles(page, [{ name: 'overlay-zx.json', type: 'application/json', base64: Buffer.from(JSON.stringify(project)).toString('base64') }]);
-  const block = page.locator('.waveform-cue-block[data-track="overlay"][data-idx="0"]');
+  const block = page.locator('.waveform-cue-block[data-track="overlay"][data-overlay-idx="0"]');
   await block.click();
   await moveWaveformPointerToTime(page, block, 2000);
   await page.keyboard.press('z');
@@ -4629,4 +4629,28 @@ test('Z/X edits the selected overlay cue and undo restores it without changing m
   await expect.poll(ranges).toEqual({ main: [[1000, 4000]], overlay: [[2000, 3800]] });
   await page.keyboard.press('ControlOrMeta+z');
   await expect.poll(ranges).toEqual({ main: [[1000, 4000]], overlay: [[1200, 3800]] });
+});
+
+
+test('binding auto-sync reports an extra subtitle removed and undo restores both', async ({ page }) => {
+  const project = {
+    segments: [{ id: 'main-bind-impact', start: 1000, end: 3000, text: 'main' }],
+    waveform: generateWaveformPayload(5000),
+    multi_subtitle: { schema: 'moy.asr.multi_subtitle.v1', enabled: true, display_mode: 'both',
+      tracks: [{ id: 'ext-bind-impact', role: 'extension', name: 'English', language: 'en', split_mode: 'word',
+        segments: [
+          { id: 'bound', start: 1200, end: 2000, text: 'bound' },
+          { id: 'covered', start: 2400, end: 2800, text: 'covered' },
+        ] }], bindings: [] },
+  };
+  await page.goto(server.url);
+  await dropFiles(page, [{ name: 'binding-impact.json', type: 'application/json', base64: Buffer.from(JSON.stringify(project)).toString('base64') }]);
+  await page.locator('.multi-cue-column.main').first().click();
+  await page.locator('.multi-cue-column.extension[data-ext-idx="0"]').first().click({ button: 'right' });
+  await page.locator('#ctxmenu .item').filter({ hasText: '与选中的主字幕绑定' }).click();
+  await expect(page.locator('#hint-stack')).toContainText('删除 1 条副字幕');
+  const ranges = () => page.evaluate(() => AsrEditorUtils.getExtensionTrack(MaweBoot.DATA).segments.map(s => [s.id, s.start, s.end]));
+  await expect.poll(ranges).toEqual([['bound', 1000, 3000]]);
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect.poll(ranges).toEqual([['bound', 1200, 2000], ['covered', 2400, 2800]]);
 });
