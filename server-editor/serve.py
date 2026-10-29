@@ -55,6 +55,7 @@ import edit  # noqa: E402
 from maw.console import configure_utf8_stdio  # noqa: E402
 from maw import quapeaks  # noqa: E402
 from maw.audio_loudness import LoudnessAnalyzer, validate_gain_db, volume_filter  # noqa: E402
+from maw.editor_ai_jobs import EditorAiJobs  # noqa: E402
 from maw.thumbnail_jobs import ThumbnailJobManager  # noqa: E402
 from maw.project_backups import backup_directory_candidates, write_backup  # noqa: E402
 from maw.app_paths import default_server_settings_path, legacy_server_settings_path  # noqa: E402
@@ -1796,6 +1797,7 @@ class EditorServer(ThreadingHTTPServer):
         self.ass_frame_lock = threading.Lock()
         self.gap_removed_video_lock = threading.Lock()
         self.media_jobs = MediaJobManager(self.gap_removed_video_lock)
+        self.editor_ai_jobs = EditorAiJobs()
         self.thumbnail_jobs = ThumbnailJobManager()
         self.loudness_analyzer = LoudnessAnalyzer()
         self.thumbnail_jobs.bind(project.source_media_path or project.media_path,
@@ -1818,6 +1820,7 @@ class EditorServer(ThreadingHTTPServer):
 
     def shutdown(self) -> None:
         try:
+            self.editor_ai_jobs.close()
             self.loudness_analyzer.close()
             self.media_jobs.close()
             self.thumbnail_jobs.close()
@@ -1826,6 +1829,7 @@ class EditorServer(ThreadingHTTPServer):
 
     def server_close(self) -> None:
         try:
+            self.editor_ai_jobs.close()
             self.loudness_analyzer.close()
             self.media_jobs.close()
             self.thumbnail_jobs.close()
@@ -1838,6 +1842,7 @@ class EditorServer(ThreadingHTTPServer):
 
     def _bind_project_locked(self, project: ServerProject) -> None:
         """Publish a new binding while settings_lock is held, even on reopen."""
+        self.editor_ai_jobs.invalidate()
         self.loudness_analyzer.invalidate()
         with self.media_jobs.lock:
             if self.media_jobs.active:
@@ -2951,7 +2956,9 @@ class EditorRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         path = urlsplit(self.path).path
-        if path in ("/api/thumbnails/demand", "/api/thumbnails/release"):
+        if path in ("/api/editor-ai/start", "/api/editor-ai/status", "/api/editor-ai/cancel"):
+            self.editor_ai_request(path)
+        elif path in ("/api/thumbnails/demand", "/api/thumbnails/release"):
             self.thumbnail_request(path, mutate=True)
         elif path == "/api/shutdown":
             self.shutdown_server()
@@ -3005,6 +3012,38 @@ class EditorRequestHandler(BaseHTTPRequestHandler):
             self.export_ograf()
         else:
             self.send_localized_error(HTTPStatus.NOT_FOUND, "未知 API")
+
+    def editor_ai_request(self, path: str) -> None:
+        """Only current binding and server-owned media may reach AI jobs."""
+        try:
+            host = self.headers.get("Host", "")
+            port = self.editor_server.server_address[1]
+            origin = self.headers.get("Origin")
+            if host not in (f"127.0.0.1:{port}", f"localhost:{port}") or (origin and origin != f"http://{host}"):
+                raise PermissionError("请求来源无效。")
+            request = self.read_json_request(max_bytes=512 * 1024)
+            self._check_request_token(request)
+            if any(key in request for key in ("path", "media_path", "source_media_path")):
+                raise ValueError("不能指定媒体路径。")
+            server = self.editor_server
+            with server.settings_lock:
+                server._check_project_binding_locked(request)
+                binding = (server.binding_generation, server.source_media_id)
+                if path.endswith("/start"):
+                    project = server.project
+                    if request.get("operation") == "align":
+                        # The current alignment backend uses FFmpeg's default
+                        # stream; do not silently align a different audio track.
+                        if project.audio_track != project.default_audio_track or request.get("audioTrack") != project.audio_track:
+                            raise ValueError("当前对齐仅支持媒体的默认音轨。")
+                    result = server.editor_ai_jobs.start(request, binding, project.source_media_path or project.media_path)
+                else:
+                    result = server.editor_ai_jobs.status(request.get("id"), binding, cancel=path.endswith("/cancel"))
+            self.send_json(HTTPStatus.OK, result)
+        except PermissionError as error:
+            self.send_json(HTTPStatus.FORBIDDEN, {"error": str(error)})
+        except (ValueError, TypeError, json.JSONDecodeError, ProjectBindingChangedError) as error:
+            self.send_json(HTTPStatus.BAD_REQUEST, {"error": str(error)})
 
     def thumbnail_request(self, path: str, *, mutate: bool = False, include_body: bool = True) -> None:
         """Opaque assets and current binding only; client paths are never accepted."""

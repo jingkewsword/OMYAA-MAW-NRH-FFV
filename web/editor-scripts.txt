@@ -137,6 +137,8 @@ editor/io/editor-wiring-export-actions.js
 editor/io/editor-sticker-burn-plan.js
 editor/io/editor-wiring-burn-video.js
 editor/ui/editor-wiring-toolbar-menus.js
+editor/cues/editor-ai-core.js
+editor/cues/editor-wiring-selected-ai.js
 editor/io/editor-wiring-project-inputs.js
 editor/media/editor-wiring-media-inputs.js
 editor/io/editor-wiring-sticker-root.js

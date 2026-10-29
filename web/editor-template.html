@@ -198,12 +198,33 @@ __WAVEFORM_CSS__
   <span class="sep"></span>
   <span class="info">当前 <b id="now">00:00.000</b></span>
   <span class="info">已选 <b id="sel-count">0</b></span>
+  <span class="dropdown" id="editor-ai-dropdown">
+    <button type="button" id="editor-ai-menu-btn" aria-haspopup="menu" aria-expanded="false">AI ▾</button>
+    <div class="dropdown-menu" id="editor-ai-menu" role="menu">
+      <button type="button" class="dropdown-item" data-editor-ai="translate" role="menuitem">翻译选中字幕</button>
+      <button type="button" class="dropdown-item" data-editor-ai="align" role="menuitem">生成字词时间码</button>
+      <button type="button" class="dropdown-item" data-editor-ai="resegment" role="menuitem">重新断句</button>
+    </div>
+  </span>
   <span class="toolbar-utility-group" role="group" aria-label="编辑器工具">
     <button type="button" id="project-settings-toggle" title="打开工程设置窗口" aria-expanded="false" aria-controls="project-settings-panel">工程设置</button>
 <button type="button" id="editor-settings-toggle" title="打开全局设置窗口" aria-expanded="false" aria-controls="editor-settings-panel">全局设置</button>
     <button type="button" id="help-toggle" title="查看鼠标操作与键盘快捷键" aria-expanded="false" aria-controls="help-panel">帮助</button>
   </span>
 </div>
+
+<aside id="editor-ai-panel" class="editor-ai-panel" role="dialog" aria-modal="false" aria-labelledby="editor-ai-title" hidden>
+  <div class="editor-ai-heading"><strong id="editor-ai-title">AI 处理</strong><button type="button" id="editor-ai-close" aria-label="关闭">×</button></div>
+  <p id="editor-ai-description"></p>
+  <label id="editor-ai-provider-row">服务商 <select id="editor-ai-provider"><option value="deepseek">DeepSeek</option><option value="qwen">Qwen</option><option value="zhipu">智谱</option><option value="custom">自定义</option></select></label>
+  <label id="editor-ai-target-row">翻译为 <select id="editor-ai-target"><option value="zh">中文</option><option value="en">英文</option></select></label>
+  <label id="editor-ai-model-row">对齐模型 <select id="editor-ai-model"><option value="qwen3-forced-aligner-0.6b">Qwen3 Forced Aligner</option><option value="firered-asr2-ctc">FireRedASR2 CTC</option></select></label>
+  <label id="editor-ai-mode-row">时间码 <select id="editor-ai-mode"><option value="fill">仅补缺</option><option value="generate">重新生成</option></select></label>
+  <label id="editor-ai-max-row">最大字数（0 为不限制） <input id="editor-ai-max" type="number" min="0" max="200" value="0"></label>
+  <p id="editor-ai-status" role="status"></p>
+  <pre id="editor-ai-preview" hidden></pre>
+  <div class="editor-ai-actions"><button type="button" id="editor-ai-start">开始处理</button><button type="button" id="editor-ai-cancel" hidden>取消任务</button><button type="button" id="editor-ai-apply" hidden>应用结果</button></div>
+</aside>
 
 <!-- 可拖动的非模态静音空隙工具窗 -->
 <aside class="gap-remove-panel" id="gap-remove-panel" role="dialog" aria-modal="false" aria-hidden="true" aria-labelledby="gap-remove-panel-title">
