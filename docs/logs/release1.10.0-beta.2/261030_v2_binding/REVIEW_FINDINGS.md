@@ -42,3 +42,13 @@ node node_modules/@playwright/test/cli.js test --config=tests/config/playwright.
 基线 PR 8 的 ce0fdc3b 远端 CI 并非全绿：Editor 59/63，含旧 DATA.segments 访问及保存后 dirty 断言；Windows Preview 出现 project 未定义。见 [Editor](https://github.com/jingkewsword/OMYAA-MAW-NRH-FFV/actions/runs/40919152565/job/123607350174) 与 [Windows](https://github.com/jingkewsword/OMYAA-MAW-NRH-FFV/actions/runs/40919152588/job/123607349745)。本次未扩修这些基线问题，也不将定向通过表述为整组通过。PR 8 后续变更需在最终集成时重新核验相关入口。
 
 审查中的非阻塞措辞建议已处理：测试标题限定实际覆盖入口，浏览器修订号与采样统计口径已明确。
+
+## 2026-10-30 基线 CI 修复同步
+
+PR 8 的 `f87c3c98` 已获 Editor、Windows Preview、Ruff 和两平台 Debug tooling 全部通过。本轮只同步该相关修复提交（原始来源 f87c3c9829cb79093eba80d8f92cc96eadc2b281），没有引入另一个说话人改动；无冲突，原优化及默认开启的诊断开关保留。
+
+保存前 v2 校验失败现在显示可定位/修复的错误提示，返回 false 并保持 dirty，不执行写入。失败夹具改用正确的 v2 轨道访问；常规保存测试使用 v2 输入，旧工程另存保护继续由独立迁移测试覆盖。
+
+本轮定向 Node 59/59，构建、新鲜度与类型检查通过。浏览器所选 9 个场景最终均通过：原有 ASS 定位/历史/保存、贴图范围、静态排版、保存错误定位与小/大重叠修复，以及本 PR 的诊断场景。首次两项因基础测试环境缺少 Pillow 失败，按 uv.lock 补充 Pillow 12.3.0 后仅重跑这两项，2/2 通过；没有以重跑冒充首轮整组通过，未跑全量。
+
+独立只读审查未发现 blocker/major：校验在写入和确认检查点前完成；绑定偏移仍使用当前 CueRef，清理缓存不参与原始工程保存。此前列出的基线 CI 问题已有对应修复；本 PR 新 head 的远端结果仍需单独核实。真实长媒体、原生选择器和最终依赖整合仍待人工验收。
