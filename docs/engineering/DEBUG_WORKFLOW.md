@@ -95,3 +95,11 @@ expected failure、unexpected success、退出码及完整日志位置；并行�
 `--full-log` 可指定日志位置，未指定时报告旁生成同名 `.log`。
 `--required` 将缺工具、缺依赖、缺夹具或 expected failure 视为失败；仅准确匹配的
 异平台测试 ID 和 skip 原因可豁免。空集合返回失败。分组是显式执行入口，不自动缩减 CI。
+
+## v2 清理投影缓存诊断（PR 10）
+
+本地编辑器开发者控制台可执行 `MaweExportSrt.setCleanupProjectionCacheEnabled(false)` 暂时关闭优化，执行 `MaweExportSrt.setCleanupProjectionCacheEnabled(true)` 恢复。`MaweExportSrt.isCleanupProjectionCacheEnabled()` 返回当前状态。默认开启，重载页面恢复默认；不进入普通设置、不写入工程、不在工程切换时改变诊断选择。
+
+关闭只绕过缓存，仍执行同一投影算法与 scope 分组；不是恢复为旧版本算法，也不关闭 AI 清理。切换时立即清空播放和导出缓存；当前句没有清理范围时的快捷返回保持不变。
+
+对照时使用同一工程、同一操作，分别记录冷启动与重复操作；不要把函数耗时等同于帧率或整体保存耗时。此开关与绑定索引开关独立。

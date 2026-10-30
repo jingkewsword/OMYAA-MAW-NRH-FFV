@@ -22,7 +22,8 @@ from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
-from maw.project import PROJECT_SCHEMA
+from maw.project import normalize_project
+from maw.project_tracks import get_main_track, make_project
 import edit
 
 
@@ -296,7 +297,7 @@ class LocalEditorServerTests(CompactContainerAssertions, unittest.TestCase):
         outside = self.root / "outside.mp4"
         outside.write_bytes(b"untrusted")
         project = server_editor.ServerProject(
-            data={"media": str(source), "segments": []}, json_path=self.project_path,
+            data=make_project([], project_fields={"media": str(source)}), json_path=self.project_path,
             media_path=source, sticker_root=None, stickers=[], source_media_path=source,
         )
         captured: dict[str, object] = {}
@@ -347,7 +348,7 @@ class LocalEditorServerTests(CompactContainerAssertions, unittest.TestCase):
         source = self.root / "bound.mp4"
         source.write_bytes(b"source")
         project = server_editor.ServerProject(
-            data={"media": str(source), "segments": []}, json_path=self.project_path,
+            data=make_project([], project_fields={"media": str(source)}), json_path=self.project_path,
             media_path=source, sticker_root=None, stickers=[], source_media_path=source,
         )
         with server_editor.EditorServer(("127.0.0.1", 0), project) as server:
@@ -709,17 +710,18 @@ class LocalEditorServerTests(CompactContainerAssertions, unittest.TestCase):
         self.assertNotEqual(png, plain.stdout)
 
     def test_version_backup_does_not_save_or_remember_snapshot(self) -> None:
+        self.project_path.write_text(json.dumps(normalize_project(json.loads(self.project_path.read_text(encoding='utf-8')))), encoding='utf-8')
         project = server_editor.load_project(
             self.project_path, None, str(self.stickers), no_waveform=True, peaks_per_second=100,
         )
         original = self.project_path.read_bytes()
         with server_editor.EditorServer(('127.0.0.1', 0), project) as server:
-            data = {'segments': [], 'language': 'en'}
+            data = make_project([], main_fields={'language': 'en'})
             target, backup = server.save_project(data, backup_limit=2, backup_only=True)
             self.assertEqual(target, self.project_path)
             self.assertEqual(self.project_path.read_bytes(), original)
             self.assertEqual(server.settings.recent_projects, ())
-            self.assertEqual(json.loads(backup.read_text(encoding='utf-8'))['language'], 'en')
+            self.assertEqual(get_main_track(json.loads(backup.read_text(encoding='utf-8')))['language'], 'en')
             server.save_project(data, backup_limit=2)
             self.assertEqual(len(list(backup.parent.glob('*.mosp-bak'))), 2)
             self.assertEqual([p.path for p in server.settings.recent_projects], [target])
@@ -1050,7 +1052,7 @@ class LocalEditorServerTests(CompactContainerAssertions, unittest.TestCase):
 
     def test_startup_page_shows_project_loading_overlay_before_javascript_runs(self) -> None:
         project = server_editor.ServerProject(
-            data={"segments": []},
+            data=make_project([]),
             json_path=self.root / "loading.mosp",
             media_path=None,
             sticker_root=None,
@@ -1075,12 +1077,11 @@ class LocalEditorServerTests(CompactContainerAssertions, unittest.TestCase):
     def test_build_server_page_defers_reapeaks_layers_to_waveform_endpoint(self) -> None:
         """延迟加载开启时页面不内联频谱 / reapeaks 层；关闭时（--no-waveform）仍保留内联。"""
         project = server_editor.ServerProject(
-            data={
-                "segments": [],
+            data=make_project([], project_fields={
                 "spectral": {"marker": "spectral-layer-payload"},
                 "waveform_reapeaks": {"marker": "reapeaks-wave-layer-payload"},
                 "loudness": {"marker": "loudness-layer-payload"},
-            },
+            }),
             json_path=self.root / "layered.mosp",
             media_path=None,
             sticker_root=None,
@@ -2809,6 +2810,7 @@ class LocalEditorServerTests(CompactContainerAssertions, unittest.TestCase):
                     thread.join(timeout=2)
 
     def test_server_saves_project_with_backup_and_rejects_unsafe_save_as(self) -> None:
+        self.project_path.write_text(json.dumps(normalize_project(json.loads(self.project_path.read_text(encoding='utf-8')))), encoding='utf-8')
         project = server_editor.load_project(
             self.project_path, None, str(self.stickers), no_waveform=True, peaks_per_second=100,
         )
@@ -2835,15 +2837,19 @@ class LocalEditorServerTests(CompactContainerAssertions, unittest.TestCase):
                     except urllib.error.HTTPError as error:
                         return error.code, json.loads(error.read())
 
-                saved_project = {
+                legacy_saved_project = {
                     "media": str(self.media),
                     "segments": [{"start": 0, "end": 1000, "text": "保存后的字幕"}],
                 }
-                normalized_saved_project = {
-                    "schema": PROJECT_SCHEMA,
-                    "media": self.media.name,
-                    "segments": [{"id": "main-001", "start": 0, "end": 1000, "text": "保存后的字幕"}],
-                }
+                status, result = post({"project": legacy_saved_project, "filename": None})
+                self.assertEqual(status, 400)
+                self.assertIn("$.speakers", result["error"])
+                self.assertEqual(self.project_path.read_bytes(), original)
+                saved_project = normalize_project(legacy_saved_project)
+                normalized_saved_project = make_project(
+                    [{"id": "main-cue-1", "start": 0, "end": 1000, "text": "保存后的字幕"}],
+                    project_fields={"media": self.media.name},
+                )
                 status, result = post({"project": saved_project, "filename": None})
                 self.assertEqual(status, 200)
                 self.assertTrue(result["ok"])
@@ -2871,12 +2877,38 @@ class LocalEditorServerTests(CompactContainerAssertions, unittest.TestCase):
                 server.shutdown()
                 thread.join(timeout=2)
 
+    def test_old_core_v2_save_requires_new_file_and_preserves_source(self) -> None:
+        old_core = normalize_project(json.loads(self.project_path.read_text(encoding="utf-8")))
+        for field in ("speakers", "annotation_mode", "palette_size", "speaker_shortcuts"):
+            old_core.pop(field)
+        self.project_path.write_text(json.dumps(old_core), encoding="utf-8")
+        original = self.project_path.read_bytes()
+        project = server_editor.load_project(
+            self.project_path, None, str(self.stickers), no_waveform=True, peaks_per_second=100,
+        )
+        self.assertTrue(project.requires_identity_upgrade)
+        self.assertEqual(self.project_path.read_bytes(), original)
+        with server_editor.EditorServer(("127.0.0.1", 0), project) as server:
+            for kwargs in ({}, {"filename": self.project_path.name}, {"backup_only": True, "backup_limit": 2}):
+                with self.subTest(kwargs=kwargs), self.assertRaises(server_editor.SaveProjectError):
+                    server.save_project(project.data, **kwargs)
+                self.assertEqual(self.project_path.read_bytes(), original)
+            target, _ = server.save_project(project.data, filename="identity-v2.mosp")
+            self.assertEqual(self.project_path.read_bytes(), original)
+            saved = json.loads(target.read_text(encoding="utf-8"))
+            self.assertIsInstance(saved["speakers"], list)
+            self.assertEqual(saved["palette_size"], 5)
+            self.assertFalse(server.project.requires_identity_upgrade)
+            server.save_project(saved)
+            self.assertEqual(self.project_path.read_bytes(), original)
+
     def test_save_keeps_runtime_caches_off_disk_and_intact_in_memory(self) -> None:
         """浏览器保存不带缓存：磁盘必须干净，运行态原生波形不得被清空。
 
         回归：save_project 曾把浏览器回传的 normalized_project 直接替换进
         运行态，保存→刷新后原生波形丢失、被 /api/waveform 的 REAPER 峰顶替。
         """
+        self.project_path.write_text(json.dumps(normalize_project(json.loads(self.project_path.read_text(encoding='utf-8')))), encoding='utf-8')
         waveform_payload = {
             "schema": "moy.asr.waveform.v1",
             "encoding": "i8-minmax-base64",
@@ -2921,11 +2953,11 @@ class LocalEditorServerTests(CompactContainerAssertions, unittest.TestCase):
                     waveform_payload, schema="moy.asr.loudness.v1", p95=0.3357, max=0.3357,
                 )
 
-                browser_payload = {
+                browser_payload = normalize_project({
                     "media": str(self.media),
                     "segments": [{"start": 0, "end": 1000, "text": "浏览器格式"}],
                     "media_metadata": {"selected_audio_track": 0},
-                }
+                })
                 status, _ = post({"project": browser_payload, "filename": None})
                 self.assertEqual(status, 200)
                 # 磁盘干净：内联缓存（含 loudness）不得落盘。
@@ -2945,9 +2977,9 @@ class LocalEditorServerTests(CompactContainerAssertions, unittest.TestCase):
                 for key in ("waveform", "spectral", "waveform_reapeaks"):
                     self.assertNotIn(key, server.project.data)
 
-                # 旧页面不带 selected_audio_track 字段时不得误清运行态缓存（防御路径）。
+                # 合法工程缺少 selected_audio_track 时不得误清运行态缓存。
                 server.project.data["waveform"] = waveform_payload
-                legacy_payload = {"media": str(self.media), "segments": []}
+                legacy_payload = make_project([], project_fields={"media": str(self.media)})
                 status, _ = post({"project": legacy_payload, "filename": None})
                 self.assertEqual(status, 200)
                 self.assertEqual(server.project.data["waveform"]["data"], "AQIDBA==")
@@ -2956,7 +2988,7 @@ class LocalEditorServerTests(CompactContainerAssertions, unittest.TestCase):
                 other = self.root / "other.wav"
                 other.write_bytes(b"audio")
                 status, _ = post({
-                    "project": {"media": str(other), "segments": []},
+                    "project": make_project([], project_fields={"media": str(other)}),
                     "filename": None,
                 })
                 self.assertEqual(status, 200)
@@ -2966,6 +2998,7 @@ class LocalEditorServerTests(CompactContainerAssertions, unittest.TestCase):
                 thread.join(timeout=2)
 
     def test_server_accepts_reconciled_extension_ranges_but_rejects_overlap(self) -> None:
+        self.project_path.write_text(json.dumps(normalize_project(json.loads(self.project_path.read_text(encoding='utf-8')))), encoding='utf-8')
         project = server_editor.load_project(
             self.project_path, None, str(self.stickers), no_waveform=True, peaks_per_second=100,
         )
@@ -3017,12 +3050,14 @@ class LocalEditorServerTests(CompactContainerAssertions, unittest.TestCase):
                         }],
                     },
                 }
+                valid_project = normalize_project(valid_project)
                 status, result = post(valid_project)
                 self.assertEqual(status, 200)
                 self.assertTrue(result["ok"])
 
                 invalid_project = json.loads(json.dumps(valid_project))
-                invalid_project["multi_subtitle"]["tracks"][0]["segments"][1]["start"] = 2999
+                secondary = next(track for track in invalid_project["tracks"] if track["role"] == "secondary")
+                secondary["segments"][1]["start"] = 2999
                 status, result = post(invalid_project)
                 self.assertEqual(status, 400)
                 self.assertFalse(result["ok"])
@@ -3070,10 +3105,9 @@ class LocalEditorServerTests(CompactContainerAssertions, unittest.TestCase):
                 }
                 # The browser normalizes a legacy project before asking the
                 # server to take it over, while the on-disk copy still has no
-                # IDs. The server must apply the same deterministic repair to
+                # IDs. The server must apply the same deterministic migration to
                 # both copies before comparing their subtitle content.
-                browser_project = json.loads(json.dumps(legacy_project))
-                browser_project["segments"][0]["id"] = "main-001"
+                browser_project = normalize_project(legacy_project)
 
                 # 失败矩阵：任何一项不满足都不得绑定工程路径。
                 notes = self.root / "notes.txt"
@@ -3124,18 +3158,21 @@ class LocalEditorServerTests(CompactContainerAssertions, unittest.TestCase):
                     self.project_path.resolve(),
                 )
 
-                # 接管后保存直接写回绑定的工程文件。
+                # 接管旧工程后须显式另存，不能覆盖原文件。
+                original = self.project_path.read_bytes()
                 edited = {"media": str(self.media), "segments": [{"start": 0, "end": 1000, "text": "接管后保存"}]}
                 status, result = post("/api/project", {"project": edited, "filename": None})
+                self.assertEqual(status, 400)
+                self.assertEqual(self.project_path.read_bytes(), original)
+                status, result = post("/api/project", {"project": edited, "filename": "converted.json"})
                 self.assertEqual(status, 200)
                 self.assertTrue(result["ok"])
                 self.assertEqual(
-                    json.loads(self.project_path.read_text(encoding="utf-8")),
-                    {
-                        "schema": PROJECT_SCHEMA,
-                        "media": self.media.name,
-                        "segments": [{"id": "main-001", "start": 0, "end": 1000, "text": "接管后保存"}],
-                    },
+                    json.loads((self.root / "converted.json").read_text(encoding="utf-8")),
+                    make_project(
+                        [{"id": "main-cue-1", "start": 0, "end": 1000, "text": "接管后保存"}],
+                        project_fields={"media": self.media.name},
+                    ),
                 )
             finally:
                 server.shutdown()
@@ -3145,7 +3182,7 @@ class LocalEditorServerTests(CompactContainerAssertions, unittest.TestCase):
 def _blank_project() -> "server_editor.ServerProject":
     """A minimal bind-only project; avoids scanning the developer sticker dir."""
     return server_editor.ServerProject(
-        {"segments": [], "media": "", "language": "", "model": ""}, None, None, None, [],
+        make_project([], project_fields={"media": ""}), None, None, None, [],
     )
 
 

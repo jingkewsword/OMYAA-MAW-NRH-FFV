@@ -9,11 +9,13 @@ from pathlib import Path
 from unittest import mock
 
 from maw.script_alignment import align_project_to_script
+from maw.project_tracks import make_project
 from maw.script_recording_workflow import (
     RecordingWorkflowError, evidence_errors, finalize_recording, input_signature, load_recording_inputs,
     map_joined_items, recommend_recording, review_recording, run_recording_job, run_source_items_job,
 )
 from maw.timestamp_alignment import TimedToken, TimestampAlignmentCancelled
+from tests.track_helpers import main_segments, main_track
 
 
 def cue(text, start, end):
@@ -94,7 +96,7 @@ class RecordingReviewTests(unittest.TestCase):
         review, selection, result = review_recording(raw, alignment, request_for(alignment))
         self.assertTrue(review["ready"])
         self.assertTrue(selection["keptExtras"])
-        self.assertTrue(any(c["text"] == "额外补充内容" and not c.get("disabled") for c in result["segments"]))
+        self.assertTrue(any(c["text"] == "额外补充内容" and not c.get("disabled") for c in main_segments(result)))
         self.assertEqual(raw, original)
 
     def test_mapping_restores_absolute_source_times(self):
@@ -116,7 +118,7 @@ class RecordingReviewTests(unittest.TestCase):
                 audio.writeframes(array("h", (round(6000*math.sin(i*.1)) for i in range(96000))).tobytes())
             raw = project([cue("你好世界", 1000, 3000), cue("补充说明", 4000, 5000)])
             raw["media"] = media.name
-            raw["segments"][0]["speaker"] = "speaker-1"
+            main_segments(raw)[0]["speaker"] = "speaker-1"
             path, script = root / "raw.mosp", root / "script.txt"
             path.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
             script.write_text("你好，世界。", encoding="utf-8")
@@ -132,14 +134,15 @@ class RecordingReviewTests(unittest.TestCase):
             final = json.loads(Path(result["projectPath"]).read_text(encoding="utf-8"))
             self.assertEqual(final["media"], "../audio.wav")
             self.assertEqual(load_recording_inputs(Path(result["projectPath"]), script)[2], media.resolve())
-            generated = [c for c in final["segments"] if c["id"].startswith("script-recording-")]
+            generated = [c for c in main_segments(final) if c["id"].startswith("script-recording-")]
             self.assertEqual(generated[0]["text"], "你好，世界。")
             self.assertEqual(generated[0]["items"][0]["start"], 1100)
-            self.assertEqual(generated[0]["speaker"], "speaker-1")
-            self.assertTrue(all(i["speaker"]=="speaker-1" for i in generated[0]["items"]))
-            self.assertEqual(final["timestamp_granularity"], "segment")  # Extra still lacks full items.
+            self.assertEqual(generated[0]["speaker"], "spk-001")
+            self.assertTrue(any(s["id"] == generated[0]["speaker"] for s in final["speakers"]))
+            self.assertTrue(all("speaker" not in i for i in generated[0]["items"]))
+            self.assertEqual(main_track(final)['timestamp_granularity'], "segment")  # Extra still lacks full items.
             self.assertEqual("".join(i["text"] for i in generated[0]["items"]), generated[0]["text"])
-            self.assertTrue(any(c["text"] == "补充说明" and not c.get("disabled") for c in final["segments"]))
+            self.assertTrue(any(c["text"] == "补充说明" and not c.get("disabled") for c in main_segments(final)))
             self.assertTrue(final["gap_remove"])
             self.assertEqual(json.loads(path.read_text(encoding="utf-8")), raw)
             report = json.loads(Path(result["reportPath"]).read_text())
@@ -187,7 +190,7 @@ class RecordingReviewTests(unittest.TestCase):
                 tokens.append(TimedToken(part["sourceText"],offset+100,offset+duration-100));offset+=duration
             backend=mock.Mock();backend.align.return_value=tokens
             output,_=finalize_recording(raw,alignment,request,media,backend=backend)
-            generated=next(c for c in output["segments"] if c["id"].startswith("script-recording"))
+            generated=next(c for c in main_segments(output) if c["id"].startswith("script-recording"))
             self.assertEqual([c["start"] for c in generated["items"]],[p["start"]+100 for p in slices])
             self.assertFalse(any(i["start"]<2000 and i["end"]>1100 for i in generated["items"]))
             backend.align.return_value=[TimedToken(script,100,offset-100)]
@@ -216,9 +219,9 @@ class RecordingReviewTests(unittest.TestCase):
         raw = project([cue("你好世界", 0, 1000)])
         raw["script_alignment"] = ["invalid"]
         self.assertTrue(evidence_errors(raw, True))
-        alignment = align_project_to_script(project(raw["segments"]), "你好世界")
+        alignment = align_project_to_script(project(main_segments(raw)), "你好世界")
         with self.assertRaisesRegex(RecordingWorkflowError, "静音切除"):
-            review_recording(project(raw["segments"]), alignment, request_for(alignment), gap_remove=[])
+            review_recording(project(main_segments(raw)), alignment, request_for(alignment), gap_remove=[])
 
     def test_wrong_existing_media_binding_is_rejected(self):
         from maw.script_recording_workflow import validate_media_binding
@@ -251,9 +254,9 @@ class RecordingReviewTests(unittest.TestCase):
             with mock.patch("maw.timestamp_alignment.create_alignment_backend",return_value=backend):
                 result=run_source_items_job(source,script,request,media=media)
             output=json.loads(Path(result["projectPath"]).read_text(encoding="utf-8"))
-            self.assertEqual(output["segments"][0]["text"],"你好世界")
-            self.assertEqual(output["segments"][0]["start"],500)
-            self.assertTrue(output["segments"][0]["items"])
+            self.assertEqual(main_segments(output)[0]["text"],"你好世界")
+            self.assertEqual(main_segments(output)[0]["start"],500)
+            self.assertTrue(main_segments(output)[0]["items"])
             self.assertEqual(output["media"], "../audio.wav")
             self.assertEqual(load_recording_inputs(Path(result["projectPath"]),script)[2],media.resolve())
             self.assertEqual(json.loads(Path(result["reportPath"]).read_text())["operation"],"source-items")
@@ -270,12 +273,50 @@ class RecordingReviewTests(unittest.TestCase):
             self.assertEqual(json.loads(source.read_text(encoding="utf-8")),raw)
             self.assertFalse(list(root.glob(".maw-recording-stage-*")))
 
+    def test_finalization_preserves_project_identity_and_cleared_assignment(self):
+        identity = {"id": "host-stable", "name": "主持人", "color": "#969fab", "vendor": {"keep": 1}}
+        with tempfile.TemporaryDirectory() as directory:
+            media = Path(directory) / "audio.wav"
+            with wave.open(str(media), "wb") as audio:
+                audio.setparams((1, 2, 16000, 0, "NONE", "not compressed"))
+                audio.writeframes(b"\0\0" * 16000)
+            for assignment in ({"speaker": "host-stable"}, {"speaker": None}, {}):
+                with self.subTest(assignment=assignment):
+                    raw = make_project([{**cue("你好", 0, 1000), **assignment}],
+                                       main_fields={"model": "qwen3-asr", "language": "zh"},
+                                       project_fields={"speakers": [identity], "annotation_mode": "speaker",
+                                                       "palette_size": 5, "speaker_shortcuts": {"1": "host-stable"}})
+                    before = copy.deepcopy(raw)
+                    alignment = align_project_to_script(raw, "你好。")
+                    backend = mock.Mock()
+                    backend.align.return_value = [TimedToken("你", 100, 400), TimedToken("好", 400, 900)]
+                    output, review = finalize_recording(raw, alignment, request_for(alignment), media, backend=backend)
+                    generated = next(c for c in main_segments(output) if c["id"].startswith("script-recording-"))
+                    self.assertTrue(review["ready"])
+                    self.assertEqual(generated.get("speaker"), assignment.get("speaker"))
+                    self.assertEqual(output["speakers"], before["speakers"])
+                    self.assertEqual(output["speaker_shortcuts"], before["speaker_shortcuts"])
+                    self.assertEqual(generated["text"], "你好。")
+                    self.assertEqual([(item["start"], item["end"]) for item in generated["items"]], [(100, 400), (400, 900)])
+                    self.assertTrue(all("speaker" not in item for item in generated["items"]))
+                    self.assertEqual(raw, before)
+
     def test_speaker_change_requires_script_split(self):
         raw=project([{**cue("你好",0,1000),"speaker":"a"},{**cue("世界",1100,2000),"speaker":"b"}])
         alignment=align_project_to_script(raw,"你好世界")
         review=review_recording(raw,alignment,request_for(alignment))[0]
         self.assertFalse(review["ready"])
         self.assertTrue(any("说话人" in b["reason"] for b in review["blockers"]))
+
+    def test_assigned_and_unassigned_sources_cannot_be_finalized_as_one_speaker(self):
+        raw = make_project([{**cue("你好", 0, 1000), "speaker": "a"}, cue("世界", 1100, 2000)])
+        before = copy.deepcopy(raw)
+        alignment = align_project_to_script(raw, "你好世界")
+        backend = mock.Mock()
+        with self.assertRaisesRegex(RecordingWorkflowError, "说话人不一致"):
+            finalize_recording(raw, alignment, request_for(alignment), Path("unused.wav"), backend=backend)
+        backend.align.assert_not_called()
+        self.assertEqual(raw, before)
 
     def test_retained_extra_inside_joined_script_envelope_refuses_finalization(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -291,7 +332,7 @@ class RecordingReviewTests(unittest.TestCase):
             with mock.patch("maw.script_recording_workflow.review_recording",return_value=(review,{},raw)):
                 with self.assertRaisesRegex(RecordingWorkflowError,"保留的额外字幕"):
                     finalize_recording(raw,{}, {},media,backend=backend)
-            self.assertEqual(raw["segments"][1]["text"],"保留补充")
+            self.assertEqual(main_segments(raw)[1]["text"],"保留补充")
 
     def test_long_source_offsets_nfd_and_later_line_failure_are_transactional(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -310,7 +351,7 @@ class RecordingReviewTests(unittest.TestCase):
             backend=mock.Mock();backend.align.side_effect=tokens
             result=run_recording_job(source,script,request,backend=backend)
             output=json.loads(Path(result["projectPath"]).read_text(encoding="utf-8"))
-            generated=[c for c in output["segments"] if c["id"].startswith("script-recording")]
+            generated=[c for c in main_segments(output) if c["id"].startswith("script-recording")]
             self.assertEqual([c["text"] for c in generated],lines)
             self.assertEqual([c["items"][0]["start"] for c in generated],[650100,652100])
             self.assertEqual(backend.align.call_args_list[0].args[1],"Café today.")
@@ -379,9 +420,9 @@ class RecordingReviewTests(unittest.TestCase):
                 result=run_source_items_job(source,script,request)
             output=json.loads(Path(result["projectPath"]).read_text(encoding="utf-8"))
             self.assertEqual(output["media_metadata"]["selected_audio_track"],1)
-            self.assertEqual(output["segments"][0]["start"],1000)
-            self.assertEqual(output["segments"][0]["items"][0]["start"],1100)
-            self.assertEqual(output["segments"][0]["items"][0]["end"],1900)
+            self.assertEqual(main_segments(output)[0]["start"],1000)
+            self.assertEqual(main_segments(output)[0]["items"][0]["start"],1100)
+            self.assertEqual(main_segments(output)[0]["items"][0]["end"],1900)
             self.assertEqual(json.loads(source.read_text(encoding="utf-8")),raw)
 
     def test_source_fill_cancel_during_decode_publishes_nothing(self):
