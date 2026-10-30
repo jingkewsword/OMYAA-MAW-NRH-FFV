@@ -706,6 +706,12 @@ test('shows disabled secondary export entries when bilingual mode has no second 
   await disableOnboarding(page);
   await stubSavePicker(page);
   await page.goto(server.url);
+  await page.evaluate(() => {
+    MaweBoot.DATA.multi_subtitle.enabled = false;
+    MaweBoot.DATA.multi_subtitle.tracks = [];
+    MaweBoot.DATA.multi_subtitle.bindings = [];
+    MaweDisplaySettings.updateMultiSubtitleUi();
+  });
   page.once('dialog', (dialog) => dialog.dismiss());
   await setProjectTrackEnabled(page, 'multi-subtitle-toggle', true);
   await page.locator('#subtitle-export-btn').click();

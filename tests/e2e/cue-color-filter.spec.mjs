@@ -147,6 +147,13 @@ test('detaches a cue from a color group while keeping its color and limiting the
 
 test('color filter button appears only for projects with colored subtitles', async ({ page }) => {
   await waitEditorReady(page);
+  await page.evaluate(() => {
+    for (const segment of MaweBoot.DATA.segments) {
+      delete segment.color;
+      delete segment.color_ref;
+    }
+    MaweCuePanel.renderAll({ waveform: 'none' });
+  });
   await expect(page.locator('#color-filter-btn')).toBeHidden();
   await paintFirstSegmentRed(page);
   await expect(page.locator('#color-filter-btn')).toBeVisible();
