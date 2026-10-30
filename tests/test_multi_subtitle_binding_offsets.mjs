@@ -3,9 +3,29 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { createUtilsModule as data } from '../web/shared/utils/data.js';
 import { createUtilsModule as multi } from '../web/shared/utils/multi-subtitle.js';
+import { assignProjectSpeaker, mergeProjectSpeakers } from '../web/shared/utils/speaker-identity.js';
 
 const fixture = () => JSON.parse(readFileSync(new URL('./fixtures/project-tracks/legacy-three-tracks.expected.json', import.meta.url), 'utf8'));
 const runtime = () => multi(data({}));
+
+test('same-name speakers stay distinct through binding sync, assignment, merge and history restore', () => {
+  const project = fixture();
+  project.speakers.push({ id: 'diag-a', name: '同名', color: '#969fab' }, { id: 'diag-b', name: '同名', color: '#969fab' });
+  const binding = project.bindings[0];
+  assignProjectSpeaker(project, [binding.source], 'diag-a');
+  assignProjectSpeaker(project, [binding.target], 'diag-b');
+  const history = structuredClone(project);
+  assert.deepEqual(compare(project).speakers, project.speakers);
+  const source = project.tracks.find(t => t.id === binding.source.track_id).segments.find(c => c.id === binding.source.segment_id);
+  const target = project.tracks.find(t => t.id === binding.target.track_id).segments.find(c => c.id === binding.target.segment_id);
+  runtime().rebuildBindingOffsets(project);
+  assert.equal(source.speaker, 'diag-a'); assert.equal(target.speaker, 'diag-b');
+  mergeProjectSpeakers(project, ['diag-b'], 'diag-a');
+  assert.equal(target.speaker, 'diag-a');
+  compare(project); compare(history);
+  assert.equal(runtime().swapMainAndExtensionSubtitle(project).swapped, true);
+  compare(project);
+});
 function compare(project) {
   const utils = runtime();
   utils.setBindingIndexEnabled(false);

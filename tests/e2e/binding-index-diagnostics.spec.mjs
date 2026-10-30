@@ -27,6 +27,18 @@ test('binding diagnostic preserves swap, undo/redo, save/reopen and switch resul
     return outputs[0].project;
   }
   await equivalent();
+  await page.evaluate(() => {
+    MaweBoot.DATA.speakers.push({ id: 'diag-a', name: '同名', color: '#969fab' }, { id: 'diag-b', name: '同名', color: '#969fab' });
+    const ref = MaweBoot.DATA.bindings[0].source;
+    MaweSpeakerLabels.assignIdentity([ref], 'diag-b');
+  });
+  await equivalent();
+  await page.evaluate(() => MaweSpeakerLabels.mergeIdentities(['diag-b'], 'diag-a'));
+  await equivalent();
+  expect(await page.evaluate(() => AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments[0].speaker)).toBe('diag-a');
+  await page.evaluate(() => MaweHistory.performUndo()); await equivalent();
+  expect(await page.evaluate(() => AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments[0].speaker)).toBe('diag-b');
+  await page.evaluate(() => MaweHistory.performRedo()); await equivalent();
   await page.evaluate(() => MaweMultiImport.swapMainAndExtensionSubtitles());
   await equivalent();
   await page.evaluate(() => MaweHistory.performUndo()); await equivalent();
