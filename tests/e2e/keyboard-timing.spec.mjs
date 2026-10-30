@@ -1226,6 +1226,22 @@ test('Shift+arrow keys snap selected subtitle boundaries to neighbors', async ({
 
 test('A/D adjusts a held subtitle block and a held shared boundary', async ({ page }) => {
   await loadAttachedCues(page, true);
+  page.on('console', (message) => { if (message.text().startsWith('ADTRACE')) console.log(message.text()); });
+  await page.evaluate(() => {
+    const cue = MaweBoot.DATA.segments[1];
+    let value = cue.end;
+    Object.defineProperty(cue, 'end', { configurable: true, enumerable: true, get: () => value, set: (next) => {
+      console.log('ADTRACE end', value, next, JSON.stringify({ panelKind: MaweCuePanelState.currentCuePanelKind, panelIndex: MaweCuePanelState.currentCuePanelIdx, panelStart: MaweDom.cuePanelStart.value, panelDuration: MaweDom.cuePanelDuration.value }), new Error().stack);
+      value = next;
+    } });
+    for (const type of ['keydown', 'pointerdown', 'pointerup']) {
+      window.addEventListener(type, (event) => {
+        const drag = MaweCoreState.waveformEditor?.drag;
+        console.log('ADTRACE event', type, event.key || '', JSON.stringify(MaweBoot.DATA.segments.map(({ start, end }) => [start, end])), JSON.stringify(drag && { kind: drag.kind, track: drag.track, index: drag.index, indices: drag.indices, started: drag.started }), JSON.stringify({ panelKind: MaweCuePanelState.currentCuePanelKind, panelIndex: MaweCuePanelState.currentCuePanelIdx, panelStart: MaweDom.cuePanelStart.value, panelDuration: MaweDom.cuePanelDuration.value }));
+      }, true);
+    }
+    console.log('ADTRACE settings', JSON.stringify(MaweSettings.EDITOR_SETTINGS));
+  });
   await toggleGlobalSettings(page);
   await openSettingsPage(page, 'special-edit');
   const step = page.locator('#cue-move-step');
