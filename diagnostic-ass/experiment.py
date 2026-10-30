@@ -1,4 +1,5 @@
 import hashlib, importlib.util, json, re, subprocess
+from decimal import Decimal
 from pathlib import Path
 from PIL import Image, ImageChops
 
@@ -26,6 +27,14 @@ def quantize(text, quantum):
         return r'\pos(' + ','.join(format(x, '.10g') for x in vals) + ')'
     return re.sub(r'\\pos\(([^)]*)\)', f, text)
 
+def exact_translate(source, padding):
+    translated = o.translate_ass(source, padding)
+    positions = iter(re.findall(r'\\pos\(([^)]*)\)', source))
+    def replace(match):
+        values = next(positions).split(',')
+        return r'\pos(' + ','.join(str(Decimal(v) + padding) for v in values) + ')'
+    return re.sub(r'\\pos\(([^)]*)\)', replace, translated)
+
 scaled = (root / 'scaled.ass').read_text(encoding='utf-8')
 report = {'input_sha256': {p.name: digest(p.read_bytes()) for p in [root/'scaled.ass', root/'grouped.ass', root/'standalone.ass', root/'original-native.png', root/'original-guard.png']}, 'cases': {}}
 report['environment'] = {'ffmpeg': subprocess.check_output(['ffmpeg','-version'], text=True).splitlines()[0], 'font': subprocess.check_output(['fc-match','Arial'], text=True).strip(), 'libass': subprocess.check_output(['dpkg-query','-W','libass9'], text=True).strip()}
@@ -41,6 +50,8 @@ for name, source in [('fractional', scaled), ('integer', quantize(scaled, 1)), (
         report['cases'][name][f'guard_{padding}'] = compare(native, guard.crop((padding,padding,1280+padding,720+padding)))
         report['cases'][name][f'guard_{padding}']['font'] = gfonts
     if name == 'fractional': report['cases'][name]['vs_original_native'] = compare(native, original)
+    exact, _ = render(name+'-guard-256-exact', exact_translate(source, 256), 1000, 1792, 1232)
+    report['cases'][name]['guard_256_exact'] = compare(native, exact.crop((256,256,1536,976)))
 
 group = (root/'grouped.ass').read_text(encoding='utf-8')
 stand = (root/'standalone.ass').read_text(encoding='utf-8')
