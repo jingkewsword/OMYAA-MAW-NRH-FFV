@@ -171,12 +171,11 @@ test('creates an empty secondary track on enable and imports subtitles optionall
   await dropFiles(page, [srtSpec('main.srt', mainSrt)]);
   const dialogs = [];
   page.on('dialog', async (dialog) => { dialogs.push(dialog.message()); await dialog.dismiss(); });
-  await expect(page.locator('#project-multi-subtitle-settings')).toBeHidden();
   await expect(page.locator('#multi-subtitle-toggle-label'))
     .toHaveAttribute('data-title', '开启后显示副字幕轨，可手动添加或导入第二条字幕。');
   await setProjectTrackEnabled(page, 'multi-subtitle-toggle', true);
-  await expect(page.locator('#project-multi-subtitle-settings')).not.toHaveAttribute('hidden');
   await openSettingsPage(page, 'multi-subtitle');
+  await expect(page.locator('#multi-subtitle-toggle')).toBeChecked();
   await expect(page.locator('#multi-subtitle-empty-hint')).toBeVisible();
   await closeSettingsPanels(page);
   const trackId = await page.evaluate(() => MaweMultiSubtitleCore.getActiveExtensionTrack().id);
@@ -205,7 +204,7 @@ test('creates an empty secondary track on enable and imports subtitles optionall
   });
   expect(importGap.above).toBeGreaterThanOrEqual(8);
   expect(importGap.horizontalGap).toBeGreaterThanOrEqual(8);
-  await page.locator('#project-multi-subtitle-settings').screenshot({ path: test.info().outputPath('empty-track-settings.png') });
+  await page.locator('#editor-settings-page-multi-subtitle').screenshot({ path: test.info().outputPath('empty-track-settings.png') });
   const chooserPromise = page.waitForEvent('filechooser');
   await page.locator('#multi-subtitle-import').click();
   const chooser = await chooserPromise;
@@ -216,7 +215,7 @@ test('creates an empty secondary track on enable and imports subtitles optionall
   expect(await page.evaluate(() => MaweMultiSubtitleCore.getActiveExtensionTrack().id)).toBe(trackId);
   expect(await page.evaluate(() => MaweMultiSubtitleCore.getActiveExtensionTrack().segments.length)).toBe(3);
   await page.locator('#undo-btn').click();
-  await openSettingsPage(page, 'project-tracks');
+  await openSettingsPage(page, 'multi-subtitle');
   await expect(page.locator('#multi-subtitle-empty-hint')).toBeVisible();
   await closeSettingsPanels(page);
   expect(await page.evaluate(() => MaweMultiSubtitleCore.getActiveExtensionTrack().segments.length)).toBe(0);
@@ -233,7 +232,7 @@ test('keeps the quick-import prompt when enabling an empty secondary track', asy
   const chooser = await chooserPromise;
   expect(prompt).toBe('是否导入第二条字幕？（后续也可以将字幕或工程拖入编辑器加载）');
   await expect(page.locator('#multi-subtitle-toggle')).toBeChecked();
-  await openSettingsPage(page, 'project-tracks');
+  await openSettingsPage(page, 'multi-subtitle');
   await expect(page.locator('#multi-subtitle-empty-hint')).toBeVisible();
   await closeSettingsPanels(page);
   const trackId = await page.evaluate(() => MaweMultiSubtitleCore.getActiveExtensionTrack().id);
@@ -273,7 +272,7 @@ test('saves an empty secondary track and supports manual creation, edits, undo a
   expect(empty.multi_subtitle.tracks).toHaveLength(1);
   expect(empty.multi_subtitle.tracks[0].segments).toEqual([]);
   await dropProject(empty);
-  await openSettingsPage(page, 'project-tracks');
+  await openSettingsPage(page, 'multi-subtitle');
   await expect(page.locator('#multi-subtitle-empty-hint')).toBeVisible();
   await closeSettingsPanels(page);
   await page.screenshot({ path: test.info().outputPath('empty-secondary-lane.png') });
@@ -505,7 +504,7 @@ test('light theme keeps the main waveform subtitle white and secondary subtitle 
   });
   expect(colors.main.background).toBe('rgba(255, 255, 255, 0.82)');
   // 初始播放位置命中主字幕活动态，使用亮色主题的活动字幕深色令牌。
-  expect(colors.main.color).toBe('rgb(31, 37, 48)');
+  expect(colors.main.color).toBe('rgb(29, 29, 32)');
   expect(colors.extension.background).toBe('rgba(238, 240, 244, 0.68)');
   expect(colors.extension.background).not.toBe(colors.main.background);
 });
@@ -4329,7 +4328,7 @@ test('ASS mode previews and exports extension cues with the shared extension sty
     };
   });
   // 副字幕共用样式库的「ASS 副字幕样式」：字号 64（主样式 86 的 64/86）、
-  // 默认黄色，跟随其样式预设固定在主字幕下方（MarginV 36）。
+  // 默认黄色，跟随其样式预设固定在主字幕下方（MarginV 100）。
   expect(result.trackDebug).toEqual(['ok', 'ok', 'ok']);
   expect(result.mainNative).toBe(86);
   expect(result.extensionNative).toBe(64);
@@ -4338,10 +4337,10 @@ test('ASS mode previews and exports extension cues with the shared extension sty
   // 底部对齐时主文本块在锚点上方：副字幕锚点低于主字幕锚点即为主下方。
   expect(result.extensionAnchor.y).toBeGreaterThan(result.mainAnchor.y);
   expect(result.extensionAnchor.x).toBeCloseTo(960, 3);
-  // 叠加字幕固定锚定在主字幕上方（88 + round(1.2 * 86) = 191）。
+  // 叠加字幕固定锚定在主字幕上方（180 + round(1.2 * 86) = 283）。
   expect(result.overlayAnchor.y).toBeLessThan(result.mainAnchor.y - result.mainHeight);
   // 导出：副字幕 Layer 1 + 独立 Extension 样式；叠加轨 Layer 2 + 固化
-  // 主样式 marginV 88 + 1.2 × 字号 86 = 191 的 Overlay 样式。
+  // 主样式 marginV 180 + 1.2 × 字号 86 = 283 的 Overlay 样式。
   const dialogueLines = result.ass.split('\n').filter((line) => line.startsWith('Dialogue:'));
   expect(dialogueLines).toHaveLength(3);
   expect(dialogueLines[1]).toMatch(/^Dialogue: 1,/);
@@ -4350,10 +4349,10 @@ test('ASS mode previews and exports extension cues with the shared extension sty
   expect(dialogueLines[2]).toContain(`\\pos(${result.overlayAnchor.x},${result.overlayAnchor.y})`);
   const extensionStyleLine = result.ass.split('\n').find((line) => line.startsWith('Style: Extension,'));
   expect(extensionStyleLine).toBeTruthy();
-  expect(extensionStyleLine).toMatch(/,10,10,36,1$/);
+  expect(extensionStyleLine).toMatch(/,10,10,100,1$/);
   const overlayStyleLine = result.ass.split('\n').find((line) => line.startsWith('Style: Overlay,'));
   expect(overlayStyleLine).toBeTruthy();
-  expect(overlayStyleLine).toMatch(/,10,10,191,1$/);
+  expect(overlayStyleLine).toMatch(/,10,10,283,1$/);
 
   const variants = await page.evaluate(() => {
     const main = ASS_STYLE_LIBRARY.styles.find((style) => style.id === 'ass');
@@ -4384,9 +4383,9 @@ test('ASS mode previews and exports extension cues with the shared extension sty
     expect(variant.overlay.alignment).toBe(overlayAlignment);
     const mainRow = windowRow(variant.main.alignment);
     const mainTop = variant.main.anchor.y - variant.main.height * mainRow / 2;
-    // 副字幕固定在其样式行位的预设位置（MarginV 36）；底部行位于主字幕下方。
+    // 副字幕固定在其样式行位的预设位置（MarginV 100）；底部行位于主字幕下方。
     const extRow = windowRow(variant.extensionAlignment);
-    const extExpectedY = [36, 540, 1080 - 36][extRow];
+    const extExpectedY = [100, 540, 1080 - 100][extRow];
     expect(variant.extension.anchor.y).toBeCloseTo(extExpectedY, 0);
     // 叠加字幕固定锚定在主字幕上方。
     expect(variant.overlay.anchor.y).toBeLessThan(mainTop);

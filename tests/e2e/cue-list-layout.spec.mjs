@@ -29,18 +29,19 @@ test.afterAll(async () => {
   cleanupTempDir(tempDir);
 });
 
-test('subtitle toolbar label returns after the pane is widened', async ({ page }, testInfo) => {
+test('subtitle toolbar label stays on one line when the pane is resized', async ({ page }, testInfo) => {
   await page.goto(server.url);
   const toolbar = page.locator('.cues-container > .cue-list-toolbar');
   const label = toolbar.locator(':scope > .layout-toolbar-label');
-  await toolbar.evaluate(element => { element.style.width = '180px'; });
-  await expect(label).toBeHidden();
-  await toolbar.evaluate(element => { element.style.width = '1100px'; });
-  await expect(label).toBeVisible();
-  await toolbar.evaluate(element => { element.style.width = '180px'; });
-  await expect(label).toBeHidden();
-  await toolbar.evaluate(element => { element.style.width = '1100px'; });
-  await expect(label).toBeVisible();
+  let labelWidth;
+  for (const width of [180, 1100, 180, 1100]) {
+    await toolbar.evaluate((element, value) => { element.style.width = `${value}px`; }, width);
+    await expect(label).toBeVisible();
+    await expect(label).toHaveCSS('white-space', 'nowrap');
+    const size = await label.boundingBox();
+    if (labelWidth === undefined) labelWidth = size.width;
+    else expect(size.width).toBeCloseTo(labelWidth, 1);
+  }
   await toolbar.screenshot({ path: testInfo.outputPath('subtitle-label-restored.png') });
 });
 

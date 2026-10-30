@@ -112,6 +112,7 @@ jsonEl.title = window.MAWE_I18N?.translateText?.(text) || text;
       return false;
     }
 if (MaweServerSave.projectSaveInFlight || MaweServerSave.projectCheckpointInFlight) return false;
+if (!prepareWaveformDragForSave(silent, backupOnly)) return false;
 flushInlineEditsForSave();
 const projectJson = MaweJsonRepair.buildJson();
 const fingerprint = projectSaveFingerprint();
@@ -168,6 +169,7 @@ const saveUrl = MaweBoot.SERVER_CONFIG.saveUrl;
     if (MaweState.projectLoadPending) return false;
     if (!MaweServerSave.projectFileHandle) return false;
 if (MaweServerSave.projectSaveInFlight || MaweServerSave.projectCheckpointInFlight) return false;
+if (!prepareWaveformDragForSave(silent)) return false;
 flushInlineEditsForSave();
 const projectJson = MaweJsonRepair.buildJson({ forFileExport: true });
 const fingerprint = projectSaveFingerprint();
@@ -190,9 +192,25 @@ markProjectSaved(handle.name, null, { silent, fingerprint, contentFingerprint })
 
 
 
+  // A waveform drag is still a preview, and the cue panel can show its old
+  // timing until the drag finishes. Never flush that panel over the preview.
+  function prepareWaveformDragForSave(silent, backupOnly = false) {
+    const waveform = MaweCoreState.waveformEditor;
+    const drag = waveform?.drag;
+    if (!drag) return true;
+    if (silent) {
+      // A skipped backup remains a backup; its own interval will retry it.
+      if (!backupOnly) MaweServerSave.scheduleAutoSaveFlush();
+      return false;
+    }
+    waveform.endCueDrag({ type: 'pointerup', pointerId: drag.pointerId, ...drag.lastPointerPosition });
+    return true;
+  }
+
   // 统一保存入口：句柄目标优先（最近一次新建/另存为选定的文件），否则写回服务器绑定工程。
   async function saveCurrentProject({ silent = false } = {}) {
     if (MaweState.projectLoadPending) return false;
+    if (!prepareWaveformDragForSave(silent)) return false;
     // A pointer preview is not committed subtitle truth. Timed autosave waits;
     // an explicit save first finishes this one history transaction.
     if (global.MaweAssCuePosition?.dragging) {
@@ -213,6 +231,7 @@ markProjectSaved(handle.name, null, { silent, fingerprint, contentFingerprint })
     const generation = MaweState.projectLoadGeneration;
     const current = () => epoch === MaweProjectLoad.projectBindingEpoch && generation === MaweState.projectLoadGeneration;
     if (MaweState.projectLoadPending) return false;
+    if (!prepareWaveformDragForSave(false)) return false;
     if (MaweInlineEdit.editingState) MaweInlineEdit.finishEdit(true);
     if (MaweInlineEdit.extensionEditingState) MaweInlineEdit.finishExtensionEdit(true);
     MaweCuePanel.commitCuePanelEdit();
