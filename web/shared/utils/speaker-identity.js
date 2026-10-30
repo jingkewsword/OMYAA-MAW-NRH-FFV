@@ -254,10 +254,10 @@ export function migrateSpeakerSegments(segments, sourceToProject, reservedSegmen
     const oldId = segment.id ?? null;
     const newIds = [];
     runs.forEach(([run, runSpeaker], runIndex) => {
-      const out = structuredClone(segment);
+      const out = JSON.parse(JSON.stringify(segment));
       if (split) {
         if (runIndex || !valid(oldId)) out.id = newId(valid(oldId) ? oldId : `segment-${index + 1}`);
-        out.items = structuredClone(run);
+        out.items = JSON.parse(JSON.stringify(run));
         out.text = textPieces[runIndex];
         out.start = runIndex === 0 ? segment.start : run[0].start;
         out.end = runIndex === runs.length - 1 ? segment.end : run.at(-1).end;

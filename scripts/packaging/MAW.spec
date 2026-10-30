@@ -197,6 +197,8 @@ datas = [
     (str(ROOT / "maw" / "text_conversion.py"), "ocr-runtime/maw"),
     (str(ROOT / "maw" / "project.py"), "ocr-runtime/maw"),
     (str(ROOT / "maw" / "project_tracks.py"), "ocr-runtime/maw"),
+    (str(ROOT / "maw" / "speaker_identity.py"), "ocr-runtime/maw"),
+    (str(ROOT / "maw" / "colors.py"), "ocr-runtime/maw"),
     (str(ROOT / "maw" / "project_mutations.py"), "ocr-runtime/maw"),
     (str(ROOT / "maw" / "project_boundary.py"), "ocr-runtime/maw"),
     (str(ROOT / "maw" / "subtitle_groups.py"), "ocr-runtime/maw"),
