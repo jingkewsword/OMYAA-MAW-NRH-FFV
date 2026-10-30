@@ -58,7 +58,9 @@ test('same name with different parameters stays forked and survives offline reop
     MaweAssManagerWiring.applyProjectStyleSelection('secondary', 'ass-extension');
     const project = JSON.parse(MaweJsonRepair.buildJson());
     const main = project.tracks.find(track => track.role === 'main');
-    project.styles.find(style => style.id === main.style.style_id).fontSize = 123;
+    const snapshot = project.styles.find(style => style.id === main.style.style_id);
+    snapshot.fontSize = 123;
+    snapshot.fontName = 'Snapshot Fixture';
     return project;
   });
   await page.route('**/api/ass-styles', route => route.abort());
@@ -69,11 +71,17 @@ test('same name with different parameters stays forked and survives offline reop
   expect(result).toBe(true);
   expect(await page.evaluate(() => MaweAssManagerWiring.projectStyleOptions('main').status)).toBe('forked');
   expect(await page.evaluate(() => MaweAssManagerWiring.projectStyleOptions('main').style.fontSize)).toBe(123);
+  const exportAss = () => page.evaluate(() => {
+    MaweSettings.EDITOR_SETTINGS.assMode = true;
+    return MaweExportSrt.buildAss();
+  });
+  expect(await exportAss()).toContain('Style: Default,Snapshot Fixture,');
   const before = await page.evaluate(() => Object.fromEntries(MaweBoot.DATA.tracks.map(track => [track.id, track.style?.style_id])));
   expect(await page.evaluate(() => MaweMultiImport.swapMainAndExtensionSubtitles())).toBe(true);
   const after = await page.evaluate(() => Object.fromEntries(MaweBoot.DATA.tracks.map(track => [track.id, track.style?.style_id])));
   expect(after).toEqual(before);
   expect(await page.evaluate(() => MaweAssManagerWiring.projectStyleOptions('secondary').style.fontSize)).toBe(123);
+  expect(await exportAss()).toContain('Style: Extension,Snapshot Fixture,');
 });
 
 test('new secondary and overlay tracks capture styles in the same undo transaction', async ({ page }) => {

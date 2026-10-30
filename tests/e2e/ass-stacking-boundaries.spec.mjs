@@ -120,10 +120,14 @@ async function configure(page, fixture) {
       const main = AsrEditorUtils.getMainTrack(MaweBoot.DATA);
       AsrEditorUtils.ensureStableSegmentIds(main.segments, main.id);
       const fixture = AsrEditorUtils.importProject({
-        segments: main.segments.map(({ id, start, end, text }) => ({ id, start, end, text })),
-        multi_subtitle: { enabled: true, tracks: [{ id: 'extension', segments:
-          f.extensionSegments || [{ id: 'extension', start: 0, end: 4000, text: f.extension || 'Secondary' }] }] },
+        segments: [],
+        multi_subtitle: { enabled: true, tracks: [{ id: 'extension', segments: [] }] },
       }).project;
+      // Renderer collision cases deliberately include same-track overlaps.
+      // Build valid track metadata first, then supply raw render inputs;
+      // project import still rejects those overlaps in ordinary projects.
+      AsrEditorUtils.getExtensionTrack(fixture).segments = f.extensionSegments
+        || [{ id: 'extension', start: 0, end: 4000, text: f.extension || 'Secondary' }];
       MaweBoot.DATA.tracks = MaweBoot.DATA.tracks.filter(track => track.role !== 'secondary')
         .concat(AsrEditorUtils.getTracksByRole(fixture, 'secondary'));
       MaweBoot.DATA.bilingual = fixture.bilingual;
@@ -145,9 +149,14 @@ async function configure(page, fixture) {
     }
     // Install fixture colours through the same migration used when opening v1
     // projects. Direct legacy fields are only views once the group table exists.
-    window.AsrEditorUtils.migrateSubtitleGroups(project);
-    window.AsrEditorUtils.refreshSubtitleGroupViews(project);
-    Object.assign(MaweBoot.DATA, project);
+    window.AsrEditorUtils.migrateSubtitleGroups(MaweBoot.DATA);
+    window.AsrEditorUtils.refreshSubtitleGroupViews(MaweBoot.DATA);
+    // Apply fixture presets to the project snapshots used by preview/export.
+    for (const track of MaweBoot.DATA.tracks) {
+      const styleId = track.role === 'secondary' ? 'ass-extension' : 'ass';
+      const style = ASS_STYLE_LIBRARY.styles.find(style => style.id === styleId);
+      if (style) AsrEditorUtils.applyTrackStyle(MaweBoot.DATA, track, style);
+    }
     Object.assign(MaweSettings.EDITOR_SETTINGS, { assMode: true, assEmphasisSyntax: 'both',
       assSpecialSymbolRule: 'both', assCommentEnabled: true, assLargeTextEnabled: true,
       exportSpeakerLabels: Boolean(f.speaker) });
@@ -442,7 +451,10 @@ test('solo inline italic and immediate targets agree before during and after the
   for (const target of [0, 1]) {
     await configure(page, { main: 'MAIN //MMMM// TAIL', extensionSegments: [], overlaySegments: [],
       animations: { t: { enabled: true, startMs: 100, endMs: 1100, tags: `\\i${target}` } } });
-    await page.evaluate(value => { ASS_STYLE_LIBRARY.styles.find(style => style.id === 'ass').italic = !value; }, target);
+    await page.evaluate(value => {
+      const track = AsrEditorUtils.getMainTrack(MaweBoot.DATA);
+      MaweBoot.DATA.styles.find(style => style.id === track.style.style_id).italic = !value;
+    }, target);
     for (const time of [50, 500, 1500]) {
       const frame = await capture(page, time);
       const label = `solo-italic-${target}-${time}`;
@@ -745,7 +757,8 @@ for (const diagnostic of ['raw 3D perspective', 'negative base spacing', 'negati
     });
     await configure(page, {});
     const expectedDiagnostic = await page.evaluate(kind => {
-      const main = ASS_STYLE_LIBRARY.styles.find(style => style.id === 'ass');
+      const track = AsrEditorUtils.getMainTrack(MaweBoot.DATA);
+      const main = MaweBoot.DATA.styles.find(style => style.id === track.style.style_id);
       const animations = ASS_STYLE_LIBRARY.assProfiles[0].animations;
       if (kind === 'raw 3D perspective') animations.t = { enabled: true, startMs: 0, endMs: 1000, accel: 1, tags: '\\frx30' };
       if (kind === 'negative base spacing') main.spacing = -100;

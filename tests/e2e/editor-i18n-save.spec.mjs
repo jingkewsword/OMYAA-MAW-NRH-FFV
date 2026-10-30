@@ -394,14 +394,14 @@ test('validation save error previews the item and jumps to its subtitle', async 
       contentType: 'application/json',
       body: JSON.stringify({
         ok: false,
-        error: '$.segments[1].items[1].start: must be >= previous item end',
+        error: '$.tracks[0].segments[1].items[1].start: must be >= previous item end',
       }),
     });
   });
 
   await page.keyboard.press('Control+s');
   const hint = page.locator('.hint-project-error');
-  await expect(hint).toContainText('$.segments[1].items[1].start: must be >= previous item end');
+  await expect(hint).toContainText('$.tracks[0].segments[1].items[1].start: must be >= previous item end');
   await expect(hint.locator('.hint-project-preview-value')).toHaveText('vo');
   await expect(hint.locator('.hint-project-action')).toHaveText('定位到第 2 条字幕');
 
@@ -426,7 +426,7 @@ test('small subtitle-segment overlap can be auto-repaired and saved again', asyn
         contentType: 'application/json',
         body: JSON.stringify({
           ok: false,
-          error: '$.segments[1].start: must be >= previous segment end',
+          error: '$.tracks[0].segments[1].start: must be >= previous segment end',
         }),
       });
       return;
@@ -469,7 +469,7 @@ test('larger subtitle-segment overlap requires an explicit repair direction', as
       contentType: 'application/json',
       body: JSON.stringify({
         ok: false,
-        error: '$.segments[1].start: must be >= previous segment end',
+        error: '$.tracks[0].segments[1].start: must be >= previous segment end',
       }),
     });
   });
