@@ -35,13 +35,14 @@
       if (new Set(cues.map(c => c.speaker || '')).size > 1) fail('不同说话人的字幕请分别断句。');
       if (cues.some(c => !Array.isArray(c.items) || !c.items.length || c.items.map(x => x.text).join('') !== c.text)) fail('断句需要完整覆盖原文的字词时间码。');
     }
-    return { trackId: mainTrack(project).id, trackSettings: clone(Object.fromEntries(Object.entries(mainTrack(project)).filter(([k]) => k !== 'segments' && k !== '_dirty'))), operation, indices: sorted, cues: clone(cues), multi: clone(multi), gap: clone(project.gap_remove || null), timebase: clone(project.timebase || null),
+    return { speakers: clone(project.speakers || null), trackId: mainTrack(project).id, trackSettings: clone(Object.fromEntries(Object.entries(mainTrack(project)).filter(([k]) => k !== 'segments' && k !== '_dirty'))), operation, indices: sorted, cues: clone(cues), multi: clone(multi), gap: clone(project.gap_remove || null), timebase: clone(project.timebase || null),
       groups: operation === 'resegment' ? clone(project.subtitle_groups || null) : null,
       order: operation === 'resegment' ? mainSegments(project).map(c => c.id) : null,
       neighbors: operation === 'resegment' ? clone([mainSegments(project)[sorted[0] - 1] || null, mainSegments(project)[sorted.at(-1) + 1] || null]) : null };
   }
 
   function ensureCurrent(project, snap) {
+    if (!equal(project.speakers || null, snap.speakers)) fail("说话人身份表已变化，请重新运行。");
     if (mainTrack(project).id !== snap.trackId || !equal(Object.fromEntries(Object.entries(mainTrack(project)).filter(([k]) => k !== 'segments' && k !== '_dirty')), snap.trackSettings)) fail('主字幕轨已变化，请重新运行。');
     const current = snap.cues.map(cue => mainSegments(project).find(c => c.id === cue.id));
     if (current.some((cue, i) => !cue || !equal(cue, snap.cues[i]))) fail('选中的字幕已变化，请重新运行。');

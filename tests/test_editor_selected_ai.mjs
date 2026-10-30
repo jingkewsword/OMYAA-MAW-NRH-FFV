@@ -147,3 +147,17 @@ test('AI preserves existing speakers and refuses cross-speaker resegmentation', 
   core.applyResegment(split, core.capture(split, [0], 'resegment'), [['c0001a0001'], ['c0001a0002']], id);
   assert.deepEqual(core.mainSegments(split).slice(0, 2).map(c => c.speaker), ['A', 'A']);
 });
+
+
+test('speaker identity table is preserved and changes invalidate pending AI', () => {
+  const data = project();
+  data.speakers = [{ id: 'person-1', name: 'Alice', color: '#ffcc00' }];
+  core.mainSegments(data)[0].speaker = 'person-1';
+  const original = JSON.stringify(data.speakers);
+  const snap = core.capture(data, [0], 'translate');
+  core.applyTranslation(data, snap, [{ id: 'a', text: 'Hi' }], 'en', id);
+  assert.equal(JSON.stringify(data.speakers), original);
+  const pending = core.capture(data, [0], 'align');
+  data.speakers[0].id = 'replacement';
+  assert.throws(() => core.ensureCurrent(data, pending), /身份表/);
+});
