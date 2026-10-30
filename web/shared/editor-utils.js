@@ -403,6 +403,7 @@ const {
 } = helpers;
 
 window.AsrEditorUtils = {
+  effectiveSegmentColor: helpers.effectiveSegmentColor,
   ...speakerIdentity,
   cloneJsonValue: helpers.cloneJsonValue,
   ...projectTracksHelpers,
