@@ -873,6 +873,9 @@ class PostprocessTests(unittest.TestCase):
 
     def test_mosp_resegment_uses_atom_boundaries_and_preserves_word_timings(self) -> None:
         project = sample_project(self.media)
+        # This fixture tests regrouped word timing within one identity; identity
+        # boundaries have separate rejection and batching regressions.
+        project_segments(project)[1]["speaker"] = project_segments(project)[0]["speaker"]
         project_segments(project)[1].pop("color", None)
         project_segments(project)[1]["items"] = [
             {"start": 1200, "end": 1600, "text": "下"},
@@ -922,6 +925,7 @@ class PostprocessTests(unittest.TestCase):
     def test_mosp_resegment_assigns_unique_ids_when_one_cue_splits(self) -> None:
         project = sample_project(self.media)
         segments = project_segments(project)
+        segments[1]["speaker"] = segments[0]["speaker"]
         segments[0]["id"] = "source-first"
         segments[1]["id"] = "source-second"
         segments[1]["items"] = [
