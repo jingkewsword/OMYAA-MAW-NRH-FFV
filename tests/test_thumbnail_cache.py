@@ -480,7 +480,7 @@ class ThumbnailCacheTests(unittest.TestCase):
     def test_source_replaced_while_extraction_rejects_registration(self):
         def changed(path, targets, **kw):
             result = self.extract(path, targets, **kw)
-            self.media.write_bytes(b"replacement")
+            self.media.write_bytes(self.media.read_bytes() + b"replacement")
             return result
         with self.assertRaises(ThumbnailError):
             c.get_or_extract_frames(self.media, [0], extractor=changed)
