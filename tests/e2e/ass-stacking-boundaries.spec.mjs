@@ -37,7 +37,10 @@ const cases = [
   { name: 'rotated left-aligned paint', alignment: 7, extensionAlignment: 1,
     marginV: 180, marginL: 0, angle: 30, times: [1000] },
   { name: 'scaled right-aligned paint', alignment: 9, extensionAlignment: 3,
-    marginV: 240, marginR: 0, scaleX: 160, scaleY: 160, times: [1000] },
+    // Keep this exact-pixel clipping fixture on integer anchors. At 160%,
+    // libass's subpixel quantization changes a glyph when adding a guard band.
+    // Fractional group fitting remains covered by the separate fit cases.
+    marginV: 240, marginR: 0, scaleX: 200, scaleY: 200, times: [1000] },
   { name: 'nonuniform scale and 90 degree rotation', marginV: 240,
     scaleX: 50, scaleY: 300, angle: 90, times: [1000] },
   { name: 'nonuniform scale and 30 degree rotation', marginV: 240,
@@ -799,14 +802,37 @@ test('exported layout slices preserve the original main cue nonlinear and fade c
     return { grouped, standalone: MaweExportSrt.buildAss() };
   });
   const rows = [];
+  // Timing is compared at identical placement. Automatic standalone layout
+  // and an explicit grouped anchor can have different libass subpixel paint,
+  // even after cropping to the glyph bounds. Other cases verify placement.
+  const mainOnly = sources.grouped.split('\n').filter(line =>
+    !line.startsWith('Dialogue:') || line.startsWith('Dialogue: 0,')).join('\n');
+  const millis = value => {
+    const [hours, minutes, seconds] = value.split(':').map(Number);
+    return Math.round((hours * 3600 + minutes * 60 + seconds) * 1000);
+  };
   for (const time of [750, 1750]) {
-    const grouped = libass(sources.grouped, time, testInfo, `candidate-clock-grouped-${time}`);
-    const original = libass(sources.standalone, time, testInfo, `candidate-clock-standalone-${time}`);
+    const activeSlices = mainOnly.split('\n').filter(line => line.startsWith('Dialogue: 0,'))
+      .map(line => line.split(',').slice(0, 9).concat(line.split(',').slice(9).join(',')))
+      .filter(fields => millis(fields[1]) <= time && time < millis(fields[2]));
+    expect(activeSlices, `one actual main slice is active at ${time}ms`).toHaveLength(1);
+    const active = activeSlices[0];
+    const layout = active[9].match(/^\{([^}]+)\}/)?.[0];
+    expect(layout, 'grouped static placement has an explicit position').toMatch(/\\pos\(/);
+    expect(layout, 'copy only static layout, never animated timing').not.toMatch(/\\(?:t|fade|fad|move)\(/);
+    const control = sources.standalone.replace(/^(Dialogue: [^\n]*?,,)(?=\{)/m, `$1${layout}`);
+    const restarted = mainOnly.replace(/\\t\([^,]+,[^,]+,2,/g, '\\t(0,1000,2,')
+      .replace(/\\fade\([^)]*\)/g, '\\fade(255,0,255,0,1000,1500,2000)');
+    const grouped = libass(mainOnly, time, testInfo, `candidate-clock-grouped-${time}`);
+    const original = libass(control, time, testInfo, `candidate-clock-standalone-${time}`);
+    const reset = libass(restarted, time, testInfo, `candidate-clock-restarted-${time}`);
     rows.push({ time, grouped: grouped.tracks.main, original: original.tracks.main });
     expect(grouped.tracks.main.painted, `main remains visible at ${time}ms`).toBeGreaterThan(30);
     expect(grouped.tracks.main.glyphSha256,
       `layout may move main, but must not restart its nonlinear transform/fade at ${time}ms`)
       .toBe(original.tracks.main.glyphSha256);
+    expect(reset.tracks.main.glyphSha256, `restarted actual slice clock differs at ${time}ms`)
+      .not.toBe(original.tracks.main.glyphSha256);
   }
   writeFileSync(testInfo.outputPath('candidate-clock-comparison.json'), JSON.stringify(rows, null, 2));
   // This fixture changes the visible top-edge group at 500/1500ms. Merely

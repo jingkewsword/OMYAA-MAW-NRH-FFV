@@ -2114,6 +2114,7 @@ test('nested export menus preserve pointer reachability and keyboard focus', asy
 });
 
 test('nested export menus keep the current submenu while the pointer crosses its aim corridor', async ({ page }) => {
+  await page.clock.install();
   await page.goto(server.url);
   const exportButton = page.locator('#extra-export-btn');
   const otioWrapper = page.locator('#extra-export-menu > .dropdown-submenu').first();
@@ -2130,6 +2131,8 @@ test('nested export menus keep the current submenu while the pointer crosses its
   expect(otioToggleBox).not.toBeNull();
   expect(dynamicToggleBox).not.toBeNull();
 
+  // Freeze only after layout and hover; real pointer events still follow the corridor.
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
   await page.mouse.move(
     otioToggleBox.x + otioToggleBox.width * 0.7,
     otioToggleBox.y + otioToggleBox.height / 2,
@@ -2139,10 +2142,10 @@ test('nested export menus keep the current submenu while the pointer crosses its
     dynamicToggleBox.y + dynamicToggleBox.height / 2,
     { steps: 12 },
   );
-  await page.waitForTimeout(40);
+  await page.clock.fastForward(40);
   await expect(page.locator('#extra-otio-menu')).toBeVisible({ timeout: 100 });
   await expect(page.locator('#extra-dynamic-menu')).toBeHidden();
-  await page.waitForTimeout(180);
+  await page.clock.fastForward(180);
   await expect(page.locator('#extra-dynamic-menu')).toBeVisible();
 });
 
