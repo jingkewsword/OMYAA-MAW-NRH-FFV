@@ -359,7 +359,10 @@ export function initMaweCuePanel() {
     const controls = document.getElementById('cue-ass-style-controls');
     const select = document.getElementById('cue-ass-style');
     if (!controls || !select) return;
-    controls.hidden = !segment;
+    // Reserve the row even without a selected cue: selection must not resize
+    // the video stage and change the coordinate system during a gesture.
+    controls.hidden = false;
+    select.disabled = !segment;
     const styles = window.MaweAssManagerWiring?.projectStyleOptions?.('main')?.styles || [];
     select.replaceChildren();
     const add = (value, text) => {
