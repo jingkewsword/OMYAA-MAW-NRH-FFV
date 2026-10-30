@@ -407,6 +407,19 @@ test('S3-T06 diagnostic on/off preserves preview, covered export paths and saved
   }
   await equivalent();
   await page.evaluate(() => {
+    MaweBoot.DATA.speakers.push({ id: 'diag-a', name: '同名', color: '#969fab' }, { id: 'diag-b', name: '同名', color: '#969fab' });
+    const track = AsrEditorUtils.getMainTrack(MaweBoot.DATA);
+    MaweSpeakerLabels.assignIdentity([{ track_id: track.id, segment_id: track.segments[0].id }], 'diag-b');
+  });
+  await equivalent();
+  expect(await page.evaluate(() => MaweExportSrt.cleanupMainSegments()[0].speaker)).toBe('diag-b');
+  await page.evaluate(() => MaweSpeakerLabels.mergeIdentities(['diag-b'], 'diag-a'));
+  await equivalent();
+  expect(await page.evaluate(() => MaweExportSrt.cleanupMainSegments()[0].speaker)).toBe('diag-a');
+  await page.evaluate(() => MaweHistory.performUndo()); await equivalent();
+  expect(await page.evaluate(() => MaweExportSrt.cleanupMainSegments()[0].speaker)).toBe('diag-b');
+  await page.evaluate(() => MaweHistory.performRedo()); await equivalent();
+  await page.evaluate(() => {
     MaweHistory.pushGapRemoveUndo('restore for diagnostic');
     MaweGapRemoveUi.commitManualGapRemoveChange(MaweGapRemoveData.getGapRemoveData(true), [{ start: 0, end: 1200, removed: false }]);
   });

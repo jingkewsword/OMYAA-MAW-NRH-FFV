@@ -116,10 +116,9 @@ def _source_speakers(project: Mapping[str, Any], slices: list[dict[str, Any]]) -
     labels = set()
     for part in slices:
         cue = source.get(str(part.get("sourceCueId")), {})
-        items = (cue.get("items") or [])[part.get("itemStart", 0):part.get("itemEnd")]
-        labels.update(str(item.get("speaker") or cue.get("speaker") or "") for item in items)
-        if not items:
-            labels.add(str(cue.get("speaker") or ""))
+        # normalize_project has already consumed legacy word labels. The chosen
+        # source cue owns identity, including an explicitly cleared assignment.
+        labels.add(str(cue.get("speaker") or ""))
     return labels
 
 
@@ -333,10 +332,14 @@ def finalize_recording(project: Mapping[str, Any], alignment: dict[str, Any], re
             tokens = aligner.align(joined, unicodedata.normalize("NFC", line["text"]), language=language)
             cue = tokens_to_script_segments([line["text"]], tokens, 0, duration)[0]
             cue["items"] = map_joined_items(cue["items"], ranges)
+            # Aligner output contributes text/timing only. review_recording
+            # rejects mixed source identities before alignment; preserve that
+            # selected segment identity without reviving provider word labels.
+            cue.pop("speaker", None)
+            for item in cue["items"]:
+                item.pop("speaker", None)
             if line["speaker"]:
                 cue["speaker"] = line["speaker"]
-                for item in cue["items"]:
-                    item["speaker"] = line["speaker"]
             cue["start"], cue["end"] = cue["items"][0]["start"], cue["items"][-1]["end"]
             generated.append(cue)
     _check_cancel(cancel_event)

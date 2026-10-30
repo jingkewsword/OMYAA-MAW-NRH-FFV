@@ -4,6 +4,7 @@ import vm from 'node:vm';
 import test from 'node:test';
 import { createUtilsModule } from '../web/shared/utils/gap-remove.js';
 import { createCleanupProjectionCache } from '../web/shared/utils/cleanup-projection-cache.js';
+import { assignProjectSpeaker, mergeProjectSpeakers } from '../web/shared/utils/speaker-identity.js';
 
 vm.runInThisContext(fs.readFileSync(new URL('../web/shared/gap-remove-core.js', import.meta.url), 'utf8'));
 const core = globalThis.AsrGapRemoveCore;
@@ -41,6 +42,33 @@ function assertEquivalent(cache, cues, gap) {
   assert.deepEqual(cache.exportSegments(cues, gap), utils.buildAiCleanupSegments(cues, gap));
   for (const cue of cues) assert.deepEqual(cache.retainedCue(cue, gap), core.projectCleanupRetainedSegments([cue], gap)[0]);
 }
+
+test('speaker assignment, clear, merge and history replacement never return stale projected identities', () => {
+  const { cue, gap } = fixture();
+  const project = { speakers: [{ id: 'a', name: '同名', color: '#969fab' }, { id: 'b', name: '同名', color: '#969fab' }],
+    tracks: [{ id: 'main', segments: [cue] }], speaker_shortcuts: { 1: 'a', 2: 'b' } };
+  const refs = [{ track_id: 'main', segment_id: cue.id }];
+  const { cache } = cacheRuntime();
+  for (const enabled of [true, false, true]) {
+    cache.setEnabled(enabled);
+    for (const id of ['a', 'b', null]) {
+      assignProjectSpeaker(project, refs, id);
+      assert.equal(cache.retainedCue(cue, gap).speaker, id);
+      assert.equal(cache.exportSegments([cue], gap)[0].speaker, id);
+      assert.equal(cache.retainedCue(cue, gap).text, '甲丙');
+    }
+  }
+  assignProjectSpeaker(project, refs, 'b');
+  cache.retainedCue(cue, gap); cache.exportSegments([cue], gap);
+  const history = structuredClone(project);
+  mergeProjectSpeakers(project, ['b'], 'a');
+  assert.equal(cache.retainedCue(cue, gap).speaker, 'a');
+  assert.equal(cache.exportSegments([cue], gap)[0].speaker, 'a');
+  const restored = history.tracks[0].segments[0];
+  assert.equal(cache.retainedCue(restored, gap).speaker, 'b');
+  assert.equal(cache.exportSegments([restored], gap)[0].speaker, 'b');
+  assertEquivalent(cache, [restored, cue], gap);
+});
 
 test('diagnostic switch defaults on, bypasses only caching and clears both projection lifetimes', () => {
   const { cue, gap } = fixture();
