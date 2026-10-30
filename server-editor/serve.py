@@ -79,10 +79,11 @@ from maw.postprocess_ffmpeg import (  # noqa: E402
 )
 from maw.project_boundary import import_project, prepare_project  # noqa: E402
 from maw.project import (  # noqa: E402
+    PROJECT_SCHEMA,
     ProjectValidationFailed,
     normalize_project,
-    repair_project_timing_ranges,
 )
+from maw.project_tracks import get_main_track, make_project  # noqa: E402
 from maw.project_io import (  # noqa: E402
     default_audio_track_from_metadata,
     enrich_project_media_metadata,
@@ -170,6 +171,8 @@ class ServerProject:
     audio_track: int = 0
     default_audio_track: int = 0
     import_changes: tuple[dict, ...] = ()
+    source_schema: str = PROJECT_SCHEMA
+    requires_identity_upgrade: bool = False
 
 
 ProjectLoadProgressCallback = Callable[[str, int], None]
@@ -1361,6 +1364,8 @@ def load_project(
     if imported.validation.project is None:
         raise ProjectValidationFailed(imported.validation.errors)
     data = imported.validation.project
+    source_schema = raw_data.get("schema", "moy.asr.project.v1")
+    requires_identity_upgrade = not isinstance(raw_data.get("speakers"), list)
     payload_audio_track = audio_track_from_payloads(
         data.get("waveform"),
         data.get("spectral"),
@@ -1401,6 +1406,8 @@ def load_project(
             audio_track=audio_track,
             default_audio_track=default_audio_track,
             import_changes=imported.changes,
+            source_schema=source_schema,
+            requires_identity_upgrade=requires_identity_upgrade,
         )
 
     resolution = resolve_project_media(json_path, data, explicit_media)
@@ -1526,6 +1533,8 @@ def load_project(
         audio_track=audio_track,
         default_audio_track=default_audio_track,
         import_changes=imported.changes,
+        source_schema=source_schema,
+        requires_identity_upgrade=requires_identity_upgrade,
     )
 
 
@@ -1534,7 +1543,7 @@ def load_blank_project(stickers_dir: str | None) -> ServerProject:
     sticker_root = Path(source).resolve() if source else None
     root_text, stickers = edit.scan_stickers(sticker_root) if sticker_root else ("", [])
     return ServerProject(
-        {"segments": [], "media": "", "language": "", "model": ""},
+        make_project([], main_fields={"language": "", "model": ""}, project_fields={"media": ""}),
         None,
         None,
         Path(root_text) if root_text else None,
@@ -1692,6 +1701,7 @@ def build_server_page(
             "startupError": startup_status.get("error", ""),
             "canSave": project.json_path is not None,
             "projectImportChanges": list(project.import_changes),
+            "requiresMigrationSaveAs": project.source_schema != PROJECT_SCHEMA or project.requires_identity_upgrade,
             "canPortableStickerExport": project.json_path is not None,
             "canOtozStickerExport": project.json_path is not None,
             "canOtozTimelineExport": project.json_path is not None,
@@ -1737,8 +1747,11 @@ def _attach_segments_match(server_project: dict, browser_project: dict) -> bool:
     Frame-mode projects keep their frame fields significant and are compared as
     supplied.
     """
-    server_segments = copy.deepcopy(server_project.get("segments"))
-    browser_segments = copy.deepcopy(browser_project.get("segments"))
+    if any(server_project.get(field) != browser_project.get(field)
+           for field in ("speakers", "annotation_mode", "palette_size", "speaker_shortcuts")):
+        return False
+    server_segments = copy.deepcopy(get_main_track(server_project)["segments"])
+    browser_segments = copy.deepcopy(get_main_track(browser_project)["segments"])
     if not isinstance(server_segments, list) or not isinstance(browser_segments, list):
         return server_segments == browser_segments
 
@@ -1855,6 +1868,7 @@ class EditorServer(ThreadingHTTPServer):
         return {
             "bindingGeneration": self.binding_generation,
             "sourceMediaId": self.source_media_id,
+            "requiresMigrationSaveAs": self.project.source_schema != PROJECT_SCHEMA or self.project.requires_identity_upgrade,
             "thumbnailBinding": f"{self.binding_generation}:{self.source_media_id}",
             # A valid persisted base cache means the Launcher stage ran with
             # thumbnails enabled; without one the editor keeps its display
@@ -2373,31 +2387,40 @@ class EditorServer(ThreadingHTTPServer):
             raise SaveProjectError("最大保存版本数必须为 1–1000 的整数")
         if backup_only and (backup_limit is None or filename is not None):
             raise SaveProjectError("备份必须使用当前绑定工程与有效的版本数")
+        if (self.project.source_schema == PROJECT_SCHEMA and not self.project.requires_identity_upgrade
+                and isinstance(self.project.data.get("speakers"), list) and not isinstance(project_data.get("speakers"), list)):
+            raise SaveProjectError("$.speakers: 保存请求缺少工程身份表，请使用支持说话人身份的编辑器重新打开工程")
         try:
-            repaired_project = copy.deepcopy(project_data)
-            # 保存时只自动修复字/词级取整冲突；真正的字幕段重叠仍交给严格校验，
-            # 避免把用户有意或误操作造成的段落重叠静默改写。
-            repair_project_timing_ranges(repaired_project, repair_segment_ranges=False)
-            normalized_project = normalize_project(repaired_project)
+            normalized_project = normalize_project(project_data)
         except ProjectValidationFailed as error:
             raise SaveProjectError(str(error)) from error
 
         target = self.project.json_path
         if filename is not None:
             target = safe_project_filename(target.parent, filename)
+        requires_migration = self.project.source_schema != PROJECT_SCHEMA or self.project.requires_identity_upgrade
+        if requires_migration:
+            if filename is None or target.resolve() == self.project.json_path.resolve() or backup_only:
+                raise SaveProjectError("旧格式工程需要另存为新的 v2 工程文件，原文件不会被覆盖")
+            if target.exists():
+                raise SaveProjectError("迁移目标已存在，请选择新的文件名")
         normalized_project = rebase_project_media(
             normalized_project, target, source_project_path=self.project.json_path,
         )
         if backup_only:
             return target, write_backup(target, normalized_project, backup_limit)
-        backup = write_project_json(target, normalized_project)
+        try:
+            backup = write_project_json(target, normalized_project, exclusive=requires_migration)
+        except FileExistsError as error:
+            raise SaveProjectError("迁移目标已存在，请选择新的文件名") from error
         if backup_limit is not None:
             backup = write_backup(target, normalized_project, backup_limit)
         # 磁盘副本已剥离；运行态不能跟着丢缓存，否则保存→刷新后原生
         # 波形被清空、被 /api/waveform 的 REAPER 峰静默顶替。同一媒体、
         # 同一音轨时把运行态缓存合并回新工程，媒体/音轨变化则失效。
         _restore_runtime_inline_caches(self.project.data, normalized_project)
-        saved_project = replace(self.project, data=normalized_project, json_path=target, import_changes=())
+        saved_project = replace(self.project, data=normalized_project, json_path=target,
+                                import_changes=(), source_schema=PROJECT_SCHEMA, requires_identity_upgrade=False)
         if target != self.project.json_path:
             self._bind_project_locked(saved_project)
         else:
@@ -2865,12 +2888,13 @@ def remember_project_media(target: Path, media_reference: str) -> None:
         if original.get("media") == media_reference:
             return
         original["media"] = media_reference
-        write_project_json(target, original, strip_caches=False)
+        write_project_json(target, original, strip_caches=False, preserve_format=True)
     except (OSError, ValueError) as error:
         raise ValueError(f"已找到媒体，但无法记住关联；原工程未更新，请检查写入权限后重试：{error}") from error
 
 
-def write_project_json(target: Path, project_data: dict, *, strip_caches: bool = True) -> Path | None:
+def write_project_json(target: Path, project_data: dict, *, strip_caches: bool = True, preserve_format: bool = False,
+                       exclusive: bool = False) -> Path | None:
     """Atomically write LF JSON and retain the immediately previous file as .bak.
 
     落盘前剥掉内联波形缓存：磁盘工程的波形真源在媒体旁的 ``.quapeaks`` /
@@ -2878,17 +2902,27 @@ def write_project_json(target: Path, project_data: dict, *, strip_caches: bool =
     ``strip_inline_caches`` 返回副本，调用方持有的运行态工程不受影响，
     页面波形不消失。
     """
+    validated = normalize_project(project_data)
+    portable = rebase_project_media(project_data if preserve_format else validated, target)
+    content = json.dumps(strip_inline_caches(portable) if strip_caches else portable, ensure_ascii=False, indent=2) + "\n"
     target.parent.mkdir(parents=True, exist_ok=True)
-    backup = target.with_suffix(f"{target.suffix}.bak") if target.exists() else None
+    backup = target.with_suffix(f"{target.suffix}.bak") if not exclusive and target.exists() else None
     if backup:
         backup.write_bytes(target.read_bytes())
     fd, temp_name = tempfile.mkstemp(prefix=f".{target.stem}.", suffix=".tmp", dir=target.parent)
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as output:
-            portable = rebase_project_media(project_data, target)
-            json.dump(strip_inline_caches(portable) if strip_caches else portable, output, ensure_ascii=False, indent=2)
-            output.write("\n")
-        os.replace(temp_name, target)
+            output.write(content)
+        if exclusive:
+            # Windows rename refuses an existing destination; POSIX rename
+            # would replace it, so publish through an exclusive hard link.
+            if os.name == "nt":
+                os.rename(temp_name, target)
+            else:
+                os.link(temp_name, target)
+                os.unlink(temp_name)
+        else:
+            os.replace(temp_name, target)
     except Exception:
         # 保留未完成的临时文件以便排障；不要静默删除用户可恢复的文件。
         raise

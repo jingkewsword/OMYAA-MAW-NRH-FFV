@@ -95,3 +95,11 @@ expected failure、unexpected success、退出码及完整日志位置；并行�
 `--full-log` 可指定日志位置，未指定时报告旁生成同名 `.log`。
 `--required` 将缺工具、缺依赖、缺夹具或 expected failure 视为失败；仅准确匹配的
 异平台测试 ID 和 skip 原因可豁免。空集合返回失败。分组是显式执行入口，不自动缩减 CI。
+
+## v2 绑定索引诊断（PR 9）
+
+本地编辑器开发者控制台可执行 `AsrEditorUtils.setBindingIndexEnabled(false)` 暂时关闭优化，执行 `AsrEditorUtils.setBindingIndexEnabled(true)` 恢复。`AsrEditorUtils.isBindingIndexEnabled()` 返回当前状态。默认开启，重载页面恢复默认；不进入普通设置、不写入工程、不在工程切换时改变诊断选择。
+
+关闭后仍按 v2 的 source/target CueRef 计算偏移，只是不建立局部索引。索引每次调用重建，不跨撤销或工程切换保留。
+
+对照时使用同一工程、同一操作，分别记录冷启动与重复操作；不要把函数耗时等同于帧率或整体保存耗时。此开关与清理投影缓存开关独立。
