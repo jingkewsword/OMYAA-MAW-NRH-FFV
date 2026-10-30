@@ -420,17 +420,6 @@ test('small subtitle-segment overlap can be auto-repaired and saved again', asyn
       return;
     }
     saveAttempts += 1;
-    if (saveAttempts === 1) {
-      await route.fulfill({
-        status: 400,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          ok: false,
-          error: '$.tracks[0].segments[1].start: must be >= previous segment end',
-        }),
-      });
-      return;
-    }
     await route.continue();
   });
 
@@ -445,6 +434,8 @@ test('small subtitle-segment overlap can be auto-repaired and saved again', asyn
   const hint = page.locator('.hint-project-error');
   await expect(hint.locator('.hint-project-conflict')).toContainText('重叠 1ms');
   await expect(hint.locator('.hint-project-repair-auto')).toContainText('自动修复');
+  // The canonical v2 validator rejects the overlap before any HTTP write.
+  expect(saveAttempts).toBe(0);
 
   const retry = page.waitForResponse((response) => (
     response.url().endsWith('/api/project') && response.request().method() === 'POST'
@@ -453,26 +444,12 @@ test('small subtitle-segment overlap can be auto-repaired and saved again', asyn
   expect((await retry).ok()).toBe(true);
   await expect.poll(() => page.evaluate(() => AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments[1].start)).toBe(50001);
   await expect(page.locator('.hint-card').last()).toContainText('保存成功！');
-  expect(saveAttempts).toBe(2);
+  expect(saveAttempts).toBe(1);
 });
 
 test('larger subtitle-segment overlap requires an explicit repair direction', async ({ page }) => {
   await disableOnboarding(page);
   await page.goto(server.url);
-  await page.route('**/api/project', async (route) => {
-    if (route.request().method() !== 'POST') {
-      await route.continue();
-      return;
-    }
-    await route.fulfill({
-      status: 400,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        ok: false,
-        error: '$.tracks[0].segments[1].start: must be >= previous segment end',
-      }),
-    });
-  });
   await page.evaluate(() => {
     // 同上：钉住毫秒时间基准，避免对齐到帧改写时间边界。
     MaweBoot.DATA.timebase = { unit: 'milliseconds', fps: 30 };

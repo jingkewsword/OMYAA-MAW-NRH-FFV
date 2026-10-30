@@ -119,15 +119,15 @@ async function configure(page, fixture) {
     {
       const main = AsrEditorUtils.getMainTrack(MaweBoot.DATA);
       AsrEditorUtils.ensureStableSegmentIds(main.segments, main.id);
+      // Exercise renderer collision handling with in-memory overlaps, without
+      // passing those deliberately invalid save timings through import validation.
       const fixture = AsrEditorUtils.importProject({
         segments: [],
         multi_subtitle: { enabled: true, tracks: [{ id: 'extension', segments: [] }] },
       }).project;
-      // Renderer collision cases deliberately include same-track overlaps.
-      // Build valid track metadata first, then supply raw render inputs;
-      // project import still rejects those overlaps in ordinary projects.
-      AsrEditorUtils.getExtensionTrack(fixture).segments = f.extensionSegments
-        || [{ id: 'extension', start: 0, end: 4000, text: f.extension || 'Secondary' }];
+      const secondary = AsrEditorUtils.getExtensionTrack(fixture);
+      secondary.segments = f.extensionSegments || [{ id: 'extension', start: 0, end: 4000, text: f.extension || 'Secondary' }];
+      AsrEditorUtils.ensureStableSegmentIds(secondary.segments, secondary.id);
       MaweBoot.DATA.tracks = MaweBoot.DATA.tracks.filter(track => track.role !== 'secondary')
         .concat(AsrEditorUtils.getTracksByRole(fixture, 'secondary'));
       MaweBoot.DATA.bilingual = fixture.bilingual;
