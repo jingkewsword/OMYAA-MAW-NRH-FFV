@@ -46,6 +46,9 @@ export function initMaweSearch() {
       if (matched && MaweColorFilter.colorFilterSelection && !MaweColorFilter.colorFilterSuspended()) {
         matched = MaweColorFilter.colorFilterSelection.has(MaweColorFilter.effectiveCueColorKey(mainSeg || extensionSeg || overlaySeg));
       }
+      if (matched && MaweColorFilter.speakerFilterSelection) {
+        matched = [mainSeg, extensionSeg, overlaySeg].some(segment => MaweColorFilter.speakerMatches(segment));
+      }
       const keepTemporaryVisible = filterOver
         && MaweSettings.EDITOR_SETTINGS.cueListKeepSplitVisible
         && MaweCueElements.cueElementHasTemporarySplitVisibility(el);

@@ -354,6 +354,39 @@ export function initMaweCuePanel() {
   const idx = target?.index ?? -1;
   const seg = target?.segment || null;
   const empty = !target;
+  let speakerField = MaweDom.cuePanel.querySelector('.cue-panel-speaker');
+  if (!speakerField) {
+    speakerField = document.createElement('label');
+    speakerField.className = 'cue-panel-speaker';
+    const text = document.createElement('span');
+    text.textContent = '说话人';
+    const select = document.createElement('select');
+    select.setAttribute('aria-label', '说话人');
+    select.addEventListener('change', () => {
+      const current = getCurrentCuePanelTarget();
+      if (!current) return;
+      const track = current.track || window.AsrEditorUtils.getMainTrack(MaweBoot.DATA);
+      const identity = select.value || null;
+      MaweCuePanel.commitCuePanelEdit();
+      MaweSpeakerLabels.assignIdentity([{ track_id: track.id, segment_id: current.segment.id }], identity);
+    });
+    speakerField.append(text, select);
+    MaweDom.cuePanelTarget.insertAdjacentElement('afterend', speakerField);
+  }
+  const speakerSelect = speakerField.querySelector('select');
+  speakerSelect.replaceChildren();
+  const unassigned = document.createElement('option');
+  unassigned.value = '';
+  unassigned.textContent = '未分配';
+  speakerSelect.appendChild(unassigned);
+  (MaweBoot.DATA.speakers || []).forEach(speaker => {
+    const option = document.createElement('option');
+    option.value = speaker.id;
+    option.textContent = `${speaker.name || '未命名说话人'}（${speaker.id}）`;
+    speakerSelect.appendChild(option);
+  });
+  speakerSelect.value = seg?.speaker || '';
+  speakerSelect.disabled = empty;
   MaweDom.cuePanel.classList.toggle('empty', empty);
   MaweDom.cuePanel.classList.toggle('extension-target', !empty && target.kind === 'extension');
   MaweDom.cuePanel.classList.toggle('overlay-target', !empty && target.kind === 'overlay');

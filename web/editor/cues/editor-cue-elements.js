@@ -9,6 +9,7 @@
 
   function updateCueColorPresentation(el, colorBar, seg) {
   if (!el || !colorBar || !seg) return;
+  const originalSegment = seg;
   seg = MaweMultiSubtitleCore.segmentPresentation(seg);
 
   // 颜色组可能在不重建字幕行的情况下从 head 变成 ref（或反过来）。
@@ -39,6 +40,18 @@
   delete colorBar.dataset.colorRefHeadIdx;
   el.classList.remove('has-color');
   el.style.removeProperty('--color-bar');
+
+  if (MaweBoot.DATA.annotation_mode === 'speaker') {
+    const speaker = window.AsrEditorUtils.resolveProjectSpeaker(MaweBoot.DATA, originalSegment);
+    if (speaker) {
+      colorBar.classList.add('has-color');
+      el.classList.add('has-color');
+      colorBar.style.setProperty('--color-bar', speaker.color);
+      el.style.setProperty('--color-bar', speaker.color);
+      colorBar.title = `说话人：${speaker.name || '未命名说话人'}（${speaker.id}）`;
+    } else colorBar.title = '说话人：未分配';
+    return;
+  }
 
   if (seg.color) {
     const value = MaweColors.colorCssValue(seg.color.name);
@@ -110,6 +123,17 @@
 
 
 
+  function buildSpeakerBadge(segment) {
+    const speaker = window.AsrEditorUtils.resolveProjectSpeaker(MaweBoot.DATA, segment);
+    const badge = document.createElement('span');
+    badge.className = 'cue-speaker-badge';
+    badge.textContent = speaker?.name || (speaker ? '未命名说话人' : '未分配');
+    badge.title = speaker ? `说话人：${badge.textContent}（${speaker.id}）` : '说话人：未分配';
+    if (speaker) badge.style.setProperty('--speaker-color', speaker.color);
+    else badge.classList.add('unassigned');
+    return badge;
+  }
+
   function buildCueEl(seg, idx, { extensionTrack = null, overlayTrack = false } = {}) {
   const isExtension = Boolean(extensionTrack);
   const isOverlay = Boolean(overlayTrack);
@@ -170,6 +194,7 @@
   el.appendChild(colorBar);
   el.appendChild(indexEl);
   el.appendChild(timeEl);
+  el.appendChild(buildSpeakerBadge(seg));
   el.appendChild(slotEl);
   el.appendChild(textEl);
   el.appendChild(cntEl);
@@ -205,7 +230,7 @@
     const indexEl = document.createElement('span');
     indexEl.className = 'index';
     indexEl.textContent = `${kind === 'main' ? '主字幕' : '副字幕'} ${index + 1}`;
-    header.append(indexEl, buildMultiTimeEl(segment));
+    header.append(indexEl, buildMultiTimeEl(segment), buildSpeakerBadge(segment));
     const text = document.createElement('span');
     text.className = 'text';
     setTextHtml(text, segment.text || '', MaweDom.searchEl.value);
