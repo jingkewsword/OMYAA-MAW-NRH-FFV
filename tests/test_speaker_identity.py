@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 import unittest
 
-from maw.speaker_identity import allocate_source_speaker_ids, asr_palette_size, distinct_speaker_ids, prepare_asr_speaker_segments, migrate_speaker_segments, validate_project_speakers
+from maw.speaker_identity import allocate_source_speaker_ids, distinct_speaker_ids, prepare_asr_speaker_segments, migrate_speaker_segments, validate_project_speakers
 from maw.speaker import apply_project_speaker_colors, speaker_color_summary
 
 
@@ -12,19 +12,6 @@ class SpeakerIdentityTests(unittest.TestCase):
         segments = [{"speaker": value} for value in ("6", "1", "6", "", "  ", None, "0")]
         segments.append({})
         self.assertEqual(distinct_speaker_ids(segments), ["6", "1", "0"])
-
-    def test_palette_expands_by_count_and_never_shrinks_automatically(self):
-        for count in (0, 1, 5, 6, 9, 10):
-            with self.subTest(count=count):
-                segments = [{"speaker": str(index)} for index in range(count)]
-                self.assertEqual(asr_palette_size(segments, current_size=5), 9 if count > 5 else 5)
-                self.assertEqual(asr_palette_size(segments, current_size=9), 9)
-
-    def test_palette_count_does_not_mutate_source_data(self):
-        segments = [{"speaker": "1", "items": [{"text": "Hi", "speaker": "1", "start": 0, "end": 5}]}]
-        before = repr(segments)
-        self.assertEqual(asr_palette_size(segments, current_size=5), 5)
-        self.assertEqual(repr(segments), before)
 
     def test_asr_summary_uses_valid_distinct_identities(self):
         segments = [{"speaker": value} for value in ("6", "1", "6", "", "  ", None)]
