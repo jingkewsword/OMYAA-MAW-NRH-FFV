@@ -69,3 +69,25 @@ for time in (750, 1000, 1250):
     report['cases'][f'clock_{time}'] = {'group_vs_same': compare(a,b), 'group_vs_restart': compare(a,c), 'font': fonts}
 (out/'report.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
 print(json.dumps(report, indent=2))
+
+# A binary-exact 2x scale retains the right-edge clipping case without
+# requiring fractional viewport translation to be raster-invariant.
+candidate = (root / 'scaled-exact-factor.ass').read_text(encoding='utf-8')
+base, _ = render('candidate-2x-native', candidate, 1000)
+report['cases']['candidate_2x'] = {}
+for padding in (128, 256, 512):
+    guard, _ = render(f'candidate-2x-guard-{padding}', o.translate_ass(candidate,padding),1000,1280+2*padding,720+2*padding)
+    report['cases']['candidate_2x'][f'guard_{padding}'] = compare(base,guard.crop((padding,padding,1280+padding,720+padding)))
+clip = re.sub(r'\\pos\(([^,]+),([^)]*)\)', lambda m: r'\pos('+str(Decimal(m[1])+80)+','+m[2]+')', candidate)
+clip_path=out/'candidate-2x-clipped.ass'
+clip_path.write_text(clip,encoding='utf-8')
+report['cases']['candidate_2x_clip_negative'] = o.inspect(clip_path,1000,out/'candidate-2x-clipped',padding=256)
+for time in (750,1750):
+    actual=(root/f'candidate-clock-grouped-{time}.ass').read_text(encoding='utf-8')
+    control=(root/f'candidate-clock-standalone-{time}.ass').read_text(encoding='utf-8')
+    restarted=(root/f'candidate-clock-restarted-{time}.ass').read_text(encoding='utf-8')
+    a,_=render(f'fixture-clock-grouped-{time}',actual,time)
+    b,_=render(f'fixture-clock-control-{time}',control,time)
+    c,_=render(f'fixture-clock-restarted-{time}',restarted,time)
+    report['cases'][f'fixture_clock_{time}']={'same':compare(a,b),'restart':compare(a,c)}
+(out/'report.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
