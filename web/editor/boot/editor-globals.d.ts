@@ -46,6 +46,7 @@ interface ProjectSegment {
   disabled?: boolean;
   speaker?: string;
   assOverride?: AssCueOverride;
+  assStyle?: Record<string, any>;
   color_group_id?: string;
   sticker_group_id?: string;
   _dirty?: boolean;

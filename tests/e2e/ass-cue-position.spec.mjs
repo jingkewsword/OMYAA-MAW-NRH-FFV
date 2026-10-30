@@ -620,15 +620,20 @@ test('shaken cue matches Canvas, Server libass and exported frame boxes at sampl
   expect(frame.ass.split('\n').filter(line => line.startsWith('Dialogue: 0,') && line.includes('MMMM')).length).toBe(Math.ceil(2000 / 60));
 });
 
-test('scaled main cue matches Canvas, Server libass and exported frame boxes', async ({ page }, info) => {
-  const frame = await page.evaluate(({ paintedBox }) => {
+for (const cueStyle of [false, true]) test(`scaled main cue${cueStyle ? ' with independent style' : ''} matches Canvas, Server libass and exported frame boxes`, async ({ page }, info) => {
+  const frame = await page.evaluate(({ paintedBox, cueStyle }) => {
     AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments[0].text = 'MMMM';
     AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments[0].assOverride = { scale: 1.22 };
+    if (cueStyle) {
+      const track = AsrEditorUtils.getMainTrack(MaweBoot.DATA);
+      track.segments[0].assStyle = { ...MaweBoot.DATA.styles.find(style => style.id === track.style.style_id),
+        fontSize: 120, alignment: 8 };
+    }
     MawePlaybackLoop.refreshSubtitlePreview(1000, 0);
     const canvas = document.querySelector('.ass-preview-canvas');
     return { box: (0, eval)(`(${paintedBox})`)(canvas), ass: MaweExportSrt.buildAss() };
-  }, { paintedBox: paintedBox.toString() });
-  expect(frame.ass).toContain(String.raw`\fs36.6`);
+  }, { paintedBox: paintedBox.toString(), cueStyle });
+  expect(frame.ass).toContain(cueStyle ? String.raw`\fs48.8` : String.raw`\fs36.6`);
   await page.evaluate(() => MaweAssFrame.renderAssFrame());
   await expect(page.locator('#ass-frame-window-status')).toHaveText('渲染完成');
   const serverBox = await page.evaluate(paintedBox => {

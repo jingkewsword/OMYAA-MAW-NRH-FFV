@@ -163,3 +163,51 @@ test('importing a project as secondary copies its style and reference metadata',
   expect(imported.style.vendor).toEqual({ snapshot: true });
   expect(imported.style.fontSize).toBe(119);
 });
+
+for (const role of ['main', 'secondary', 'overlay']) test(`cue style selector overrides ${role}, undoes, reopens and clears to track style`, async ({ page }) => {
+  const setup = await page.evaluate(role => {
+    const track = MaweBoot.DATA.tracks.find(track => track.role === role);
+    track.enabled = true;
+    const cue = track.segments[0];
+    cue.assOverride = { pos: { x: 640, y: 360 }, scale: 1.2 };
+    const style = ASS_STYLE_LIBRARY.styles.find(style => style.id === 'ass-extension');
+    Object.assign(style, { fontName: 'Arial', fontSize: 103, primaryColor: '#123456' });
+    MaweSettings.EDITOR_SETTINGS.assMode = true;
+    MaweDom.overlayToggle.checked = true; MaweDom.extensionOverlayToggle.checked = true;
+    MaweCuePanel.setCuePanelTarget(role === 'secondary' ? 'extension' : role, 0, track.id);
+    MaweHistory.editorHistory.clear();
+    return { id: cue.id, trackId: track.id, styles: JSON.parse(JSON.stringify(MaweBoot.DATA.styles)) };
+  }, role);
+  await page.locator('#cue-ass-style').selectOption('ass-extension');
+  const read = () => page.evaluate(id => {
+    const cue = MaweBoot.DATA.tracks.flatMap(track => track.segments).find(cue => cue.id === id);
+    MawePlaybackLoop.refreshSubtitlePreview(cue.start + 1, 0);
+    const item = MaweAssPreview.stackPlan.slices.flatMap(slice => slice.items).find(item => item.segment.id === id);
+    return { style: cue.assStyle, pos: cue.assOverride, rendered: item?.style.fontSize,
+      styles: MaweBoot.DATA.styles, ass: MaweExportSrt.buildAss(), undo: MaweHistory.editorHistory.undoLength() };
+  }, setup.id);
+  let current = await read();
+  expect(current.style.fontSize).toBe(103);
+  expect(current.rendered).toBe(103);
+  expect(current.styles).toEqual(setup.styles);
+  expect(current.ass).toContain(`Style: Cue_${role === 'secondary' ? 'extension' : role}_0,Arial,103,`);
+  expect(current.pos).toEqual({ pos: { x: 640, y: 360 }, scale: 1.2 });
+  expect(current.undo).toBe(1);
+  await page.evaluate(() => MaweHistory.performUndo());
+  expect((await read()).style).toBeUndefined();
+  await page.evaluate(() => MaweHistory.performRedo());
+  expect((await read()).rendered).toBe(103);
+  const saved = await page.evaluate(() => JSON.parse(MaweJsonRepair.buildJson()));
+  await page.reload();
+  await page.waitForFunction(() => window.MaweMultiImport);
+  await page.evaluate(async ({ saved, role, trackId }) => {
+    await MaweMultiImport.openProjectFile(new File([JSON.stringify(saved)], 'cue-style.mosp', { type: 'application/json' }), { suppressMediaPrompt: true });
+    MaweCuePanel.setCuePanelTarget(role === 'secondary' ? 'extension' : role, 0, trackId);
+  }, { saved, role, trackId: setup.trackId });
+  expect((await read()).rendered).toBe(103);
+  await page.locator('#cue-ass-style').selectOption('');
+  current = await read();
+  expect(current.style).toBeUndefined();
+  expect(current.pos).toEqual({ pos: { x: 640, y: 360 }, scale: 1.2 });
+  expect(current.ass).not.toContain(`Style: Cue_${role === 'secondary' ? 'extension' : role}_0,`);
+});

@@ -749,6 +749,7 @@ v1 输入的 `multi_subtitle` 是可选双语结构；v2 将副轨迁移为 `sec
 | `text` | `string` | **必填** | 字幕显示文本。可含 `\n` 表示换行（在编辑器里渲染为 `<br>`） |
 | `items` | `array<object>` | 推荐填 | 字级时间戳数组。用于「双击拆分时按字分配时间」。可填 `[]`，此时拆分会按字符比例估算时间点 |
 | `disabled` | `bool` | 否 | 禁用该字幕；预览、隐藏禁用项和默认导出会跳过它 |
+| `assStyle` | `object` | 否 | 当前句独立 ASS 样式快照，字段与样式库样式一致；省略时继承轨道样式。无外部 ID 引用，离线、换轨和导入保留；不改变 `assOverride` 定位与缩放 |
 | `assOverride` | `object` | 否 | 主字幕/叠加字幕逐句 ASS 覆盖：可独立保存 PlayRes 坐标与整体缩放；见下方契约 |
 | `speaker` | `string` | 否 | 说话人标签（非空字符串）。保存供应商返回的 opaque ID（如 Soniox 的 `"1"`/`"2"`），不转换为整数或姓名。仅当该段所有带语音 items 都是同一 speaker 时才写入；缺少该字段的旧工程继续有效 |
 | `sticker` | `object\|null` | 否 | 表情包 head 信息。见第四节 |

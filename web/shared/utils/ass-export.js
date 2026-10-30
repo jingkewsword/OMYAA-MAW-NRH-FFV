@@ -213,9 +213,23 @@ export function createUtilsModule(dependencies) {
       ? normalizeSpeakerLabelSeparator(options.speakerLabelSeparator)
       : DEFAULT_SPEAKER_LABEL_SEPARATOR;
     const events = [];
+    const cueStyleLines = [];
     const stackItems = [];
     const addStackItem = (role, segment, index, context, start, end, style, size, styleName, speakerName, fade, originalText, shake = false) => {
       const colorName = effectiveColorName(segment, context);
+      if (segment.assStyle) {
+        style = normalizeAssStyle(segment.assStyle, ASS_DEFAULT_ASS_STYLE, 'cue');
+        style.fontName = canonicalizeAssFontName(style.fontName);
+        if (assColorGroupsSupported && ASS_COLOR_STYLE_NAMES.includes(colorName)) {
+          style = assStyleVariant(style, colorStyles.find(entry => entry.name === colorName)?.value || '#ffffff', colorStyle);
+        }
+        size = normalizeAssFontSize(style.fontSize * resolution.height / ASS_REFERENCE_PLAY_RES_Y);
+        styleName = `Cue_${role}_${index}`;
+        cueStyleLines.push(assStyleLine(style, styleName, size));
+        originalText = assEventText({ segment, text: fade.text, speakerName, speakerLabelSeparator,
+          colorName, colorStyles, style, fontSize: size, colorStyle, speakerLabels,
+          assMode, emphasisSyntax, inlineOptions });
+      }
       const speakerColor = colorStyle === 'text' || colorStyle === 'speaker'
         ? colorStyles.find(entry => entry.name === colorName)?.value || style.primaryColor : style.primaryColor;
       const runs = assInlineStyleRuns(fade.text, emphasisSyntax, inlineOptions);
@@ -545,6 +559,7 @@ export function createUtilsModule(dependencies) {
       '',
       '[V4+ Styles]',
       `Format: ${ASS_STYLE_FORMAT}`,
+      ...cueStyleLines,
       ...(assMode
         ? [
           assStyleLine(baseStyle, 'Default', fontSize),

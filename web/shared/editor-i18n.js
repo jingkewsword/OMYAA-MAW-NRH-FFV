@@ -9,6 +9,13 @@
   // The editor keeps one source template. Exact UI strings are translated at
   // the DOM boundary; project content is excluded from traversal below.
   const EN_TEXT = {
+    '单句 ASS 样式': 'Cue ASS style',
+    'SRT 渲染样式': 'SRT rendering style',
+    'ASS 默认样式': 'Default ASS style',
+    'ASS 副字幕样式': 'Secondary ASS style',
+    '继承轨道样式': 'Inherit track style',
+    '修改单句 ASS 样式': 'Change cue ASS style',
+    '选择样式库中的样式，仅覆盖当前字幕；清除后继承轨道样式。': 'Choose a library style for this cue only; clear it to inherit the track style.',
     '字幕轨道状态': 'Subtitle track state',
     '关闭轨道会同时停止预览和导出，字幕数据会保留。': 'Disabling a track stops preview and export while preserving its subtitles.',
     '主字幕轨始终启用': 'The main subtitle track is always enabled',
@@ -1631,7 +1638,7 @@
   ].join(',');
   const SKIP_SELECTOR = [
     // Reference text includes the project name, but its title is a UI hint.
-    '.cue .sticker-slot .sref', '#cue-panel-sticker .ref',
+    '.cue .sticker-slot .sref', '#cue-panel-sticker .ref', '[data-cue-style-name]',
     PROJECT_TEXT_SELECTOR, '#cue-panel-text', '#overlay', '#sticker-overlay-layer',
     '#media-name', '#json-name', '#sticker-grid', '.hint-project-preview-value', '[data-marker-project-content]', 'script', 'style'
   ].join(',');

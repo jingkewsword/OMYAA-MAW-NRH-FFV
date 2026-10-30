@@ -73,6 +73,7 @@ export function createUtilsModule() {
       if (integer(segment.start) && integer(segment.end) && previousEnd !== null && segment.start < previousEnd) add(`${field}.start`, 'must be >= previous segment end');
       if (integer(segment.end) && (!legacy || (integer(segment.start) && segment.end > segment.start))) previousEnd = segment.end;
       if (typeof segment.text !== 'string') add(`${field}.text`, 'must be a string');
+      if (own(segment, 'assStyle') && !object(segment.assStyle)) add(`${field}.assStyle`, 'must be an object');
       if (own(segment, 'disabled') && typeof segment.disabled !== 'boolean') add(`${field}.disabled`, 'must be a boolean');
       if (own(segment, 'speaker') && (typeof segment.speaker !== 'string' || !segment.speaker.trim())) add(`${field}.speaker`, 'must be a non-empty string');
       if (own(segment, 'start_frame') !== own(segment, 'end_frame')) add(field, 'start_frame and end_frame must be provided together');

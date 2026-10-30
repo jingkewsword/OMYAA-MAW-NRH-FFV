@@ -250,20 +250,40 @@ def render_project_ass(
         project,
         project_cleanup_retained_segments(raw_segments, project.get("gap_remove")),
     )
+    cue_style_lines: list[str] = []
+
+    def cue_event(segment, *, prefix="", layer=0):
+        snapshot = segment.get("assStyle")
+        if isinstance(snapshot, Mapping):
+            style = dict(snapshot)
+            color_name = _effective_color_name(segment, groups)
+            palette = dict(COLOR_PALETTE)
+            if color_style in {"text", "stroke"} and color_name in palette:
+                style["primaryColor" if color_style == "text" else "outlineColor"] = palette[color_name]
+            name = f"Cue_{len(cue_style_lines)}"
+            cue_style_lines.append(ass_style_line(style, name=name))
+            return _main_event(segment, groups, color_style="none", prefix=name, layer=layer)
+        return _main_event(segment, groups, color_style=color_style, prefix=prefix, layer=layer)
+
     events = [
         event
         for segment in main_segments
         if isinstance(segment, Mapping) and segment.get("disabled") is not True
         and isinstance(segment.get("text"), str) and segment["text"].strip()
-        and (event := _main_event(segment, groups, color_style=color_style)) is not None
+        and (event := cue_event(segment)) is not None
     ]
 
     overlay_segments = overlay["segments"] if overlay else []
     overlay_lines, overlay_events = _overlay_events(
-        overlay_segments, groups=groups, color_style=color_style, family=family, size=size, color=color,
+        [segment for segment in overlay_segments if not isinstance(segment, Mapping) or "assStyle" not in segment],
+        groups=groups, color_style=color_style, family=family, size=size, color=color,
         snapshot=resolve_track_style(project, overlay) if overlay else None,
     )
     events.extend(overlay_events)
+    events.extend(event for segment in overlay_segments
+                  if isinstance(segment, Mapping) and "assStyle" in segment and segment.get("disabled") is not True
+                  and isinstance(segment.get("text"), str) and segment["text"].strip()
+                  and (event := cue_event(segment, layer=2)) is not None)
     secondary_lines: list[str] = []
     if secondary:
         secondary_style = resolve_track_style(project, secondary) or _stroke_base_style(family, size, color)
@@ -276,8 +296,7 @@ def render_project_ass(
         events.extend(event for segment in secondary["segments"]
                       if isinstance(segment, Mapping) and segment.get("disabled") is not True
                       and isinstance(segment.get("text"), str) and segment["text"].strip()
-                      and (event := _main_event(segment, groups, color_style=color_style,
-                                                prefix="Secondary ", layer=1)) is not None)
+                      and (event := cue_event(segment, prefix="Secondary ", layer=1)) is not None)
     if not events:
         raise ProjectSubtitleError("工程中没有可用的字幕条目，无法烧录。")
 
@@ -307,6 +326,7 @@ def render_project_ass(
             header.append(ass_style_line(variant, name=name.upper()))
     header.extend(overlay_lines)
     header.extend(secondary_lines)
+    header.extend(cue_style_lines)
     return "\n".join([*header, "", "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text", *events, ""])
 
 

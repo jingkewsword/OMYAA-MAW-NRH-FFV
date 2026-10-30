@@ -2843,6 +2843,7 @@ class LocalEditorServerTests(CompactContainerAssertions, unittest.TestCase):
                 }
                 normalized_saved_project = make_project(
                     [{"id": "main-cue-1", "start": 0, "end": 1000, "text": "保存后的字幕"}],
+                    main_fields={"preview_visible": True, "export": {"enabled": True}, "variant": "plain"},
                     project_fields={"media": self.media.name},
                 )
                 status, result = post({"project": saved_project, "filename": None})
@@ -3139,6 +3140,7 @@ class LocalEditorServerTests(CompactContainerAssertions, unittest.TestCase):
                     json.loads((self.root / "converted.json").read_text(encoding="utf-8")),
                     make_project(
                         [{"id": "main-cue-1", "start": 0, "end": 1000, "text": "接管后保存"}],
+                        main_fields={"preview_visible": True, "export": {"enabled": True}, "variant": "plain"},
                         project_fields={"media": self.media.name},
                     ),
                 )

@@ -4,6 +4,7 @@ import io
 import json
 import tempfile
 import unittest
+from tests.compact_assertions import CompactContainerAssertions
 from pathlib import Path
 
 from maw.postprocess_io import render_srt, write_artifacts
@@ -18,7 +19,23 @@ def project():
     return value
 
 
-class PythonTrackOutputTests(unittest.TestCase):
+class PythonTrackOutputTests(CompactContainerAssertions, unittest.TestCase):
+    def test_cue_snapshots_override_each_track_without_library(self):
+        from maw.project import normalize_project, ProjectValidationFailed
+        p = project()
+        for index, track in enumerate(p['tracks']):
+            track['segments'][0]['assStyle'] = {'fontName': f'CueFont{index}', 'fontSize': 81 + index}
+        before = copy.deepcopy(p)
+        output = render_project_ass(p, title='cue styles', play_resolution=(1920, 1080), mode='main_and_extension')
+        for index in range(3):
+            self.assertIn(f',CueFont{index},{81 + index},', output)
+        self.assertEqual(p, before)
+        self.assertEqual(normalize_project(p), p)
+        for invalid in (None, [], 'preset'):
+            p['tracks'][0]['segments'][0]['assStyle'] = invalid
+            with self.assertRaises(ProjectValidationFailed):
+                normalize_project(p)
+
     def test_export_switches_apply_to_srt_and_ass_not_preview(self):
         for enabled in (False, True):
             for export in (False, True):
