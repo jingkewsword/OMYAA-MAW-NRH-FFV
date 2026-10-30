@@ -177,12 +177,23 @@ test('colored subtitle indexes remain readable against tinted rows', async ({ pa
 
 test('clicking a row shows only that color; checkboxes multi-select; clear restores all', async ({ page }) => {
   await waitEditorReady(page);
+  // 每个用例共享服务端工程；明确构造一条彩色、两条无色字幕，
+  // 避免共享工程残留的颜色组及 color_ref 改变筛选结果。
+  await page.evaluate(() => {
+    MaweBoot.DATA.segments.splice(0, MaweBoot.DATA.segments.length,
+      { start: 0, end: 1000, text: 'one', items: [] },
+      { start: 1000, end: 2000, text: 'two', items: [] },
+      { start: 2000, end: 3000, text: 'three', items: [] });
+  });
   await paintFirstSegmentRed(page);
   const total = await page.evaluate(() => MaweBoot.DATA.segments.length);
+  expect(total).toBe(3);
 
   await page.locator('#color-filter-btn').click();
   const rows = page.locator('#color-filter-menu .color-filter-item');
   await expect(rows).toHaveCount(2); // 默认 + 红
+  await expect(rows.first().locator('.color-count')).toHaveText('2');
+  await expect(rows.nth(1).locator('.color-count')).toHaveText('1');
 
   // 点击“红”这一行（非 checkbox 区域）= 只显示该颜色。
   await rows.nth(1).locator('.color-name').click();
