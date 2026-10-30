@@ -86,6 +86,7 @@
   $('close').addEventListener('click', () => { panel.hidden = true; void cancelTask(); });
   $('cancel').addEventListener('click', () => { void cancelTask().then(() => text('任务已取消。')); });
   $('start').addEventListener('click', async () => {
+    let active = null;
     try {
       const config = MaweBoot.SERVER_CONFIG;
       if (!config?.requestToken || !Number.isInteger(config.bindingGeneration) || !config.sourceMediaId) throw new Error('此功能需要本地服务器编辑器。');
@@ -97,7 +98,7 @@
         .flatMap(b => [b.target.segment_id]));
       if (MaweState.selection.indices('overlay').size || [...MaweSelection.selectedExtensionIdxs].some(index => !pairedIds.has(track?.segments[index]?.id))) throw new Error('请只选择主字幕及其联动副字幕。');
       const snapshot = core.capture(MaweBoot.DATA, [...MaweSelection.selectedIdxs], operation);
-      const active = { config, binding: binding(config), snapshot, operation, mode: $('mode').value, target: $('target').value, epoch: window.MaweProjectLoad?.projectBindingEpoch };
+      active = { config, binding: binding(config), snapshot, operation, mode: $('mode').value, target: $('target').value, epoch: window.MaweProjectLoad?.projectBindingEpoch };
       task = active;
       $('start').hidden = true; $('cancel').hidden = false; $('apply').hidden = true; $('preview').hidden = true;
       text('正在处理，您可以继续编辑。');
@@ -110,7 +111,7 @@
       active.id = result.id;
       if (task !== active || !currentBinding(active)) { if (currentBinding(active)) await request('cancel', { ...active.binding, id: active.id }); return; }
       void poll(active);
-    } catch (error) { task = null; resetButtons(); text(error.message); }
+    } catch (error) { if (active && task !== active) return; task = null; resetButtons(); text(error.message); }
   });
   $('apply').addEventListener('click', () => {
     const active = task;

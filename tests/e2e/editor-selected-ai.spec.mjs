@@ -213,3 +213,34 @@ test('a delayed cancelled task cannot replace the next operation panel', async (
   await expect(page.locator('#editor-ai-apply')).toBeHidden();
   await expect(page.locator('#editor-ai-preview')).toBeHidden();
 });
+
+
+test('late failed start does not clear a newer running task', async ({ page }) => {
+  await disableOnboarding(page); await page.goto(server.url);
+  await page.waitForFunction(() => Boolean(window.MaweCoreState?.waveformEditor));
+  await page.evaluate(() => {
+    MaweProjectLoad.applyCanonicalProject({ schema: 'moy.asr.project.v1', media: '', segments: [{ id: 'a', start: 0, end: 500, text: 'Hello' }] }, 'test.mosp');
+    Object.assign(MaweBoot.SERVER_CONFIG, { bindingGeneration: 1, sourceMediaId: 'mock-binding' });
+    MaweSelection.selectOnly(0);
+  });
+  let releaseOld, releaseNew, starts = 0;
+  await page.route('**/api/editor-ai/start', async route => {
+    starts++;
+    if (starts === 1) { await new Promise(resolve => { releaseOld = resolve; }); await route.fulfill({ status: 400, json: { error: 'old failed' } }); }
+    else await route.fulfill({ json: { id: 'new', state: 'running' } });
+  });
+  await page.route('**/api/editor-ai/status', async route => {
+    await new Promise(resolve => { releaseNew = resolve; });
+    await route.fulfill({ json: { id: 'new', state: 'done', result: { translations: [{ id: 'a', text: '新结果' }] } } });
+  });
+  await page.locator('#editor-ai-menu-btn').click(); await page.locator('[data-editor-ai="translate"]').click();
+  await page.locator('#editor-ai-start').click();
+  await expect.poll(() => Boolean(releaseOld)).toBe(true);
+  await page.locator('#editor-ai-cancel').click();
+  await page.locator('#editor-ai-start').click();
+  await expect.poll(() => Boolean(releaseNew)).toBe(true);
+  const oldResponse = page.waitForResponse(r => r.url().endsWith('/api/editor-ai/start') && r.status() === 400);
+  releaseOld(); await oldResponse;
+  releaseNew();
+  await expect(page.locator('#editor-ai-apply')).toBeVisible({ timeout: 3000 });
+});
