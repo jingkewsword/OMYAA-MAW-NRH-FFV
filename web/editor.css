@@ -4701,3 +4701,24 @@
   .ass-cue-scale-handle.dragging { background: var(--text-primary); }
 
   .player-stage.ass-stage-ready #overlay .ass-cue-drag-target { visibility: visible; }
+.editor-ai-panel {
+  position: fixed;
+  top: 112px;
+  right: 16px;
+  z-index: 1000;
+  width: min(380px, calc(100vw - 32px));
+  max-height: calc(100vh - 130px);
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid var(--border, #777);
+  border-radius: 8px;
+  background: var(--bg, #222);
+  box-shadow: 0 6px 24px #0005;
+}
+.editor-ai-panel[hidden] { display: none; }
+.editor-ai-heading, .editor-ai-actions { display: flex; align-items: center; gap: 8px; }
+.editor-ai-heading { justify-content: space-between; }
+.editor-ai-panel label { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; }
+.editor-ai-panel label[hidden] { display: none; }
+.editor-ai-panel p, .editor-ai-actions, .editor-ai-panel pre { margin-top: 10px; }
+.editor-ai-panel pre { max-height: 180px; overflow: auto; white-space: pre-wrap; }
