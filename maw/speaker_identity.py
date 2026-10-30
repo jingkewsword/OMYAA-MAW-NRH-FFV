@@ -44,6 +44,13 @@ def distinct_speaker_ids(segments: Iterable[Mapping[str, Any]]) -> list[str]:
     return result
 
 
+def asr_palette_size(segments: Iterable[Mapping[str, Any]], *, current_size: int) -> int:
+    """Expand the saved palette on a new ASR result without shrinking it."""
+    if current_size not in (5, 9):
+        raise ValueError("current_size must be 5 or 9")
+    return 9 if current_size == 9 or len(distinct_speaker_ids(segments)) > 5 else 5
+
+
 def allocate_source_speaker_ids(
     segments: Iterable[Mapping[str, Any]], *, reserved_ids: Iterable[str],
 ) -> dict[str, str]:
