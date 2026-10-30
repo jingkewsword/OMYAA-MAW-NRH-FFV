@@ -43,15 +43,17 @@
 
   if (MaweBoot.DATA.annotation_mode === 'speaker') {
     const speaker = window.AsrEditorUtils.resolveProjectSpeaker(MaweBoot.DATA, originalSegment);
+    colorBar.dataset.speakerProjectContent = '';
     if (speaker) {
       colorBar.classList.add('has-color');
       el.classList.add('has-color');
       colorBar.style.setProperty('--color-bar', speaker.color);
       el.style.setProperty('--color-bar', speaker.color);
-      colorBar.title = `说话人：${speaker.name || '未命名说话人'}（${speaker.id}）`;
-    } else colorBar.title = '说话人：未分配';
+      colorBar.title = speakerDescription(speaker);
+    } else colorBar.title = speakerDescription(null);
     return;
   }
+  delete colorBar.dataset.speakerProjectContent;
 
   if (seg.color) {
     const value = MaweColors.colorCssValue(seg.color.name);
@@ -123,16 +125,47 @@
 
 
 
+  function speakerUi(zh, en) { return window.MAWE_I18N?.language === 'en' ? en : zh; }
+
+  function speakerName(speaker) {
+    return speaker ? (speaker.name || speakerUi('未命名说话人', 'Unnamed speaker'))
+      : speakerUi('未分配', 'Unassigned');
+  }
+
+  function speakerDescription(speaker) {
+    const name = speakerName(speaker);
+    const prefix = speakerUi('说话人：', 'Speaker: ');
+    return speaker ? `${prefix}${name}（${speaker.id}）` : `${prefix}${name}`;
+  }
+
+  function refreshSpeakerBadge(badge, speaker) {
+    badge.textContent = speakerName(speaker);
+    badge.title = speakerDescription(speaker);
+    badge.classList.toggle('unassigned', !speaker);
+    if (speaker) badge.style.setProperty('--speaker-color', speaker.color);
+    else badge.style.removeProperty('--speaker-color');
+  }
+
   function buildSpeakerBadge(segment) {
     const speaker = window.AsrEditorUtils.resolveProjectSpeaker(MaweBoot.DATA, segment);
     const badge = document.createElement('span');
     badge.className = 'cue-speaker-badge';
-    badge.textContent = speaker?.name || (speaker ? '未命名说话人' : '未分配');
-    badge.title = speaker ? `说话人：${badge.textContent}（${speaker.id}）` : '说话人：未分配';
-    if (speaker) badge.style.setProperty('--speaker-color', speaker.color);
-    else badge.classList.add('unassigned');
+    badge.dataset.speakerProjectContent = '';
+    if (speaker) badge.dataset.speakerId = speaker.id;
+    refreshSpeakerBadge(badge, speaker);
     return badge;
   }
+
+  document.addEventListener('mawe:languagechange', () => {
+    document.querySelectorAll('.cue-speaker-badge').forEach(badge => {
+      const speaker = (MaweBoot.DATA.speakers || []).find(entry => entry.id === badge.dataset.speakerId) || null;
+      refreshSpeakerBadge(badge, speaker);
+      if (MaweBoot.DATA.annotation_mode === 'speaker') {
+        const bar = badge.parentElement?.querySelector(':scope > .color-bar');
+        if (bar) bar.title = speakerDescription(speaker);
+      }
+    });
+  });
 
   function buildCueEl(seg, idx, { extensionTrack = null, overlayTrack = false } = {}) {
   const isExtension = Boolean(extensionTrack);
@@ -498,6 +531,9 @@
   global.MaweCueElements = Object.freeze({
     updateCueColorPresentation,
     updateCueStickerPresentation,
+    speakerUi,
+    speakerName,
+    speakerDescription,
     buildCueEl,
     buildMultiTimeEl,
     buildMultiCueColumn,

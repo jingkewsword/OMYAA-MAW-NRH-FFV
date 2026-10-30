@@ -186,10 +186,18 @@ export function createUtilsModule(dependencies) {
       ? normalizeAssFontSize(baseStyle.fontSize * resolution.height / ASS_REFERENCE_PLAY_RES_Y)
       : normalizeAssFontSize(baseStyle.fontSize);
     const title = normalizeAssHeaderValue(options.title ?? options.projectName);
-    const colorStyles = normalizeAssColorStyles(options.colorStyles);
     const speakerProject = options.speakerProject ?? getProject?.();
+    const availableColorStyles = normalizeAssColorStyles(options.colorStyles);
+    // Keep legacy five-color ASS byte-stable. A collapsed palette still exports
+    // any extra color that an actual cue uses, without emitting unused variants.
+    const colorStyles = availableColorStyles.filter((_, index) => index < 5 || speakerProject?.palette_size === 9);
     const colorNameFor = (segment, context) => {
-      if (speakerProject?.annotation_mode !== 'speaker') return effectiveColorName(segment, context, speakerProject);
+      if (speakerProject?.annotation_mode !== 'speaker') {
+        const name = effectiveColorName(segment, context, speakerProject);
+        const available = availableColorStyles.find(entry => entry.name === name);
+        if (available && !colorStyles.some(entry => entry.name === name)) colorStyles.push(available);
+        return name;
+      }
       const color = effectiveSegmentColor(speakerProject, segment, context);
       if (!color) return null;
       const name = `speaker_${color.value.slice(1)}`;

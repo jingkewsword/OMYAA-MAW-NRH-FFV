@@ -87,15 +87,38 @@ class SpeakerPythonExportTests(unittest.TestCase):
 
     def test_extended_category_colors_export_when_palette_is_collapsed(self):
         for name, color in COLOR_PALETTE_ALL[5:]:
-            with self.subTest(color=name):
-                source = project()
-                source["annotation_mode"] = "color"
-                source["subtitle_groups"]["color"][0]["value"]["name"] = name
-                ass = render(source)
-                self.assertEqual(events(ass)[0][3], name.upper())
-                self.assertEqual(styles(ass)[name.upper()][3], ass_color(color))
-                self.assertEqual(events(ass)[2][3], name.upper())
-                self.assertNotIn("#", render_srt(source))
+            for mode in ("text", "stroke"):
+                with self.subTest(color=name, mode=mode):
+                    source = project()
+                    source["annotation_mode"] = "color"
+                    source["preview"]["subtitle"]["ass_color_style"] = mode
+                    source["subtitle_groups"]["color"][0]["value"]["name"] = name
+                    source["tracks"][1]["segments"][0]["color_group_id"] = "red-group"
+                    ass = render(source)
+                    sheet = styles(ass)
+                    self.assertEqual(events(ass)[0][3], name.upper())
+                    self.assertEqual(sheet[name.upper()][3 if mode == "text" else 5], ass_color(color))
+                    self.assertEqual(events(ass)[2][3], name.upper())
+                    self.assertEqual(events(ass)[3][3], f"Overlay {name.upper()}")
+                    self.assertEqual(sheet[f"Overlay {name.upper()}"][3 if mode == "text" else 5], ass_color(color))
+                    for unused, _ in COLOR_PALETTE_ALL[5:]:
+                        if unused != name:
+                            self.assertNotIn(unused.upper(), sheet)
+                            self.assertNotIn(f"Overlay {unused.upper()}", sheet)
+                    self.assertNotIn("#", render_srt(source))
+
+    def test_category_style_table_stays_five_until_extended_colors_are_enabled_or_used(self):
+        source = project()
+        source["annotation_mode"] = "color"
+        source["subtitle_groups"]["color"].append({"id": "unused", "value": {"name": "gray"}})
+        for mode in ("text", "stroke"):
+            for size in (5, 9):
+                with self.subTest(mode=mode, palette=size):
+                    source["preview"]["subtitle"]["ass_color_style"] = mode
+                    source["palette_size"] = size
+                    names = [name.upper() for name, _ in COLOR_PALETTE_ALL[:size]]
+                    self.assertEqual(list(styles(render(source))),
+                                     ["Default", *names, "Overlay", *(f"Overlay {name}" for name in names)])
 
     def test_speaker_color_style_colors_only_the_escaped_prefix(self):
         source = project()

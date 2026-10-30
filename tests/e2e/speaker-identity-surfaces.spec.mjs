@@ -92,3 +92,32 @@ test('main context assignment acts on the selected cues without changing other t
   const identities = await page.evaluate(() => Object.fromEntries(MaweBoot.DATA.tracks.map(t => [t.id, t.segments.map(s => s.speaker ?? null)])));
   expect(identities).toEqual({ main: ['a', 'b', 'a'], secondary: ['b'], overlay: ['a'] });
 });
+
+test('English speaker controls preserve project names and translate unassigned on language changes', async ({ page }) => {
+  await openProject(page);
+  await page.evaluate(() => {
+    MaweBoot.DATA.speakers[0].name = '删除';
+    MaweBoot.DATA.speaker_shortcuts['1'] = 'a';
+    MaweBoot.DATA.annotation_mode = 'speaker';
+    MaweCuePanel.renderAll({ waveform: 'none' });
+    MaweCuePanel.setCuePanelTarget('main', 0);
+    window.MAWE_I18N.applyLanguage('en');
+  });
+  await expect(page.locator('.cue-speaker-badge').filter({ hasText: '删除' })).toHaveCount(2);
+  await expect(page.locator('.cue-speaker-badge.unassigned')).toHaveText('Unassigned');
+  await expect(page.locator('.cue-panel-speaker select option[value="a"]')).toHaveText('删除（a）');
+  await expect(page.locator('.cue-panel-speaker select option[value=""]')).toHaveText('Unassigned');
+  await page.locator('#color-filter-btn').click();
+  await expect(page.locator('.speaker-filter-item .color-name').filter({ hasText: '删除（a）' })).toHaveCount(1);
+  await page.keyboard.press('Escape');
+  await page.evaluate(() => MaweContextMenus.showContextMenu(100, 100, 0));
+  await expect(page.locator('.speaker-context-slot-name').first()).toHaveText('删除');
+  await page.locator('.speaker-context-menu .ctxmenu-submenu-toggle').click();
+  await expect(page.locator('.speaker-context-menu .ctxmenu-submenu-list button').filter({ hasText: '删除（a）' })).toHaveCount(1);
+  await page.evaluate(() => window.MAWE_I18N.applyLanguage('zh'));
+  await expect(page.locator('.cue-speaker-badge.unassigned')).toHaveText('未分配');
+  await page.evaluate(() => window.MAWE_I18N.applyLanguage('en'));
+  await expect(page.locator('.cue-speaker-badge.unassigned')).toHaveText('Unassigned');
+  await expect(page.locator('.speaker-context-slot-name').first()).toHaveText('删除');
+  await expect(page.locator('.cue-panel-speaker select option[value="a"]')).toHaveText('删除（a）');
+});

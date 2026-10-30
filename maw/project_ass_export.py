@@ -25,7 +25,7 @@ from maw.ass_styles import (
     ass_style_line,
     default_ass_font_name,
 )
-from maw.colors import COLOR_PALETTE_ALL
+from maw.colors import COLOR_PALETTE, COLOR_PALETTE_ALL
 from maw.speaker_export import export_speaker_name, speaker_display_color, speaker_label_separator
 from maw.postprocess_ai_cleanup_items import cleaned_srt_segments
 from maw.project import normalize_project, ProjectValidationFailed
@@ -90,6 +90,19 @@ def _ass_color_style(value: object) -> str:
 def _effective_color_name(segment: Mapping[str, object], groups: Mapping[str, object]) -> str | None:
     value = groups.get(str(segment.get("color_group_id") or ""))
     return str(value.get("name") or "") or None if isinstance(value, Mapping) else None
+
+
+def _export_color_palette(project: Mapping[str, object], groups: Mapping[str, object],
+                          segments: list[object]) -> tuple[tuple[str, str], ...]:
+    if project.get("palette_size") == 9:
+        return COLOR_PALETTE_ALL
+    used = {
+        _effective_color_name(segment, groups) for segment in segments
+        if isinstance(segment, Mapping) and segment.get("disabled") is not True
+    } if project.get("annotation_mode") != "speaker" else set()
+    # Keep legacy five-colour output stable; collapsing the palette must still
+    # retain styles referenced by existing extended-colour cues.
+    return (*COLOR_PALETTE, *(entry for entry in COLOR_PALETTE_ALL[len(COLOR_PALETTE):] if entry[0] in used))
 
 
 def escape_ass_text(text: object) -> str:
@@ -186,7 +199,7 @@ def _main_event(segment: Mapping[str, object], groups: Mapping[str, object], *, 
 
 def _overlay_events(
     segments: list[object], *, groups: Mapping[str, object], color_style: str, family: str, size: int, color: str,
-    project: Mapping[str, object], speaker_styles: Mapping[str, str],
+    project: Mapping[str, object], speaker_styles: Mapping[str, str], palette: tuple[tuple[str, str], ...],
 ) -> tuple[list[str], list[str]]:
     events: list[str] = []
     enabled = [s for s in segments if isinstance(s, Mapping) and s.get("disabled") is not True]
@@ -217,10 +230,10 @@ def _overlay_events(
             ass_style_line(
                 _overlay_base_style(family, size, value, margin_v), name=f"Overlay {name.upper()}",
             )
-            for name, value in COLOR_PALETTE_ALL
+            for name, value in palette
         )
     elif color_style == "stroke":
-        for name, value in COLOR_PALETTE_ALL:
+        for name, value in palette:
             variant = _overlay_base_style(family, size, color, margin_v)
             variant["outlineColor"] = value
             lines.append(ass_style_line(variant, name=f"Overlay {name.upper()}"))
@@ -271,9 +284,10 @@ def render_project_ass(
     for overlay in get_tracks_by_role(project, "overlay"):
         if overlay["enabled"]:
             overlay_segments.extend(overlay["segments"])
+    palette = _export_color_palette(project, groups, [*main_segments, *overlay_segments])
     overlay_lines, overlay_events = _overlay_events(
         overlay_segments, groups=groups, color_style=color_style, family=family, size=size, color=color,
-        project=project, speaker_styles=speaker_styles,
+        project=project, speaker_styles=speaker_styles, palette=palette,
     )
     events.extend(overlay_events)
     if not events:
@@ -295,9 +309,9 @@ def render_project_ass(
         _inline_style_line("Default", family, size, color),
     ]
     if color_style == "text":
-        header.extend(_inline_style_line(name.upper(), family, size, value) for name, value in COLOR_PALETTE_ALL)
+        header.extend(_inline_style_line(name.upper(), family, size, value) for name, value in palette)
     elif color_style == "stroke":
-        for name, value in COLOR_PALETTE_ALL:
+        for name, value in palette:
             variant = _stroke_base_style(family, size, color)
             variant["outlineColor"] = value
             header.append(ass_style_line(variant, name=name.upper()))

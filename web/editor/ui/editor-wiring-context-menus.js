@@ -82,8 +82,8 @@ function showOverlayContextMenu(x, y, index) {
     const swatch = document.createElement('span');
     const identity = MaweBoot.DATA.speakers?.find(s => s.id === MaweBoot.DATA.speaker_shortcuts?.[String(colorIndex + 1)]);
     const speakerMode = MaweBoot.DATA.annotation_mode === 'speaker';
-    const name = identity?.name || (identity ? '未命名说话人' : '空槽');
-    swatch.title = speakerMode ? `${name}${identity ? `（${identity.id}）` : ''}（按 ${colorIndex + 1}）` : `${c.label}色（按 ${colorIndex + 1}）`;
+    const name = identity ? MaweCueElements.speakerName(identity) : MaweCueElements.speakerUi('空槽', 'Empty slot');
+    swatch.title = speakerMode ? `${name}${identity ? `（${identity.id}）` : ''}${MaweCueElements.speakerUi(`（按 ${colorIndex + 1}）`, ` (press ${colorIndex + 1})`)}` : `${c.label}色（按 ${colorIndex + 1}）`;
     swatch.style.cssText = `width:22px;height:22px;border-radius:50%;background:${speakerMode && identity ? identity.color : c.value};border:1px solid rgba(255,255,255,.25);cursor:pointer;display:inline-block;box-sizing:border-box;flex:0 0 auto;`;
     swatch.addEventListener('mouseenter', () => swatch.style.transform = 'scale(1.15)');
     swatch.addEventListener('mouseleave', () => swatch.style.transform = '');
@@ -98,9 +98,13 @@ function showOverlayContextMenu(x, y, index) {
       else assignOverlayColor([index], c.name);
     });
     if (speakerMode) {
+      swatch.dataset.speakerProjectContent = '';
+      swatch.dataset.speakerContextSlot = String(colorIndex + 1);
       const slot = document.createElement('span');
       slot.className = 'speaker-context-slot';
       const label = document.createElement('span');
+      label.className = 'speaker-context-slot-name';
+      label.dataset.speakerProjectContent = '';
       label.textContent = name;
       slot.append(swatch, label);
       swatches.appendChild(slot);

@@ -88,7 +88,7 @@ export function initMaweSpeakerLabels() {
     Object.entries(MaweDom.subtitleSpeakerLabelInputs).forEach(([color, input]) => {
       if (input) {
         input.disabled = true;
-        input.title = '请在说话人管理中修改姓名';
+        input.title = ui('请在说话人管理中修改姓名', 'Edit names in the speaker manager');
       }
       if (input && document.activeElement !== input) input.value = settings.names[color] || '';
     });

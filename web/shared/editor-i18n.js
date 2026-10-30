@@ -424,6 +424,11 @@
     '拖入工程或 SRT/LRC 字幕后显示字幕列表': 'Drop a project or SRT/LRC subtitles to display subtitles',
     '松开以加载工程、媒体或 SRT/LRC 字幕': 'Drop to load a project, media, or SRT/LRC subtitles',
     '自动保存': 'Auto-save', '保存间隔': 'Auto-save interval', '秒': 'sec', '说话人': 'Speaker',
+    '未分配': 'Unassigned', '未命名说话人': 'Unnamed speaker', '说话人：未分配': 'Speaker: Unassigned',
+    '按说话人筛选': 'Filter by speaker', '清除说话人过滤': 'Clear speaker filter',
+    '按颜色筛选': 'Filter by color', '分配说话人': 'Assign speaker', '清除说话人': 'Clear speaker',
+    '选择此人在当前轨道的全部字幕': "Select this speaker's subtitles in this track",
+    '分配说话人槽位': 'Assign speaker slot', '空槽': 'Empty slot', '中调整。': '.',
     '强调色': 'Accent Color', '自定义颜色': 'Custom color', '自定义': 'Custom', '橙色': 'Orange', '品牌色（默认）': 'Brand (default)',
     '显示说话人名称': 'Show speaker names',
     '预览显示说话人': 'Show speakers in preview',
@@ -1601,7 +1606,7 @@
   // and read-only previews. Translate their surrounding controls and labels.
   const PROJECT_TEXT_SELECTOR = [
     '.cue .text', '.multi-cue-column .text', '.waveform-cue-label',
-    '.timed-text-edit-diff-part', '#timed-text-edit-search-mirror', '[data-word-project-content]',
+    '.timed-text-edit-diff-part', '#timed-text-edit-search-mirror', '[data-word-project-content]', '[data-speaker-project-content]',
     '.multi-subtitle-split-char',
     '.multi-subtitle-split-preview-left', '.multi-subtitle-split-preview-right',
     '.cue .sticker-slot .sname', '.cue .sticker-slot img', '#sticker-preview-name',

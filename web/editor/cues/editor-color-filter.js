@@ -16,6 +16,7 @@ export function initMaweColorFilter() {
   // 工程中存在彩色字幕时，在过滤输入框右侧显示 🎨 按钮：
   // 点击行（非 checkbox）= 只显示该颜色；勾选 checkbox = 多选；清除 = 全部显示。
   const COLOR_FILTER_DEFAULT_KEY = '__default__';
+  const ui = text => window.MAWE_I18N?.translateText?.(text) || text;
 
 
   const colorFilterDropdown = document.getElementById('color-filter-dropdown');
@@ -113,7 +114,7 @@ export function initMaweColorFilter() {
     colorFilterMenu.replaceChildren();
     const speakerHeading = document.createElement('div');
     speakerHeading.className = 'dropdown-item';
-    speakerHeading.textContent = '按说话人筛选';
+    speakerHeading.textContent = ui('按说话人筛选');
     colorFilterMenu.appendChild(speakerHeading);
     const tracks = [window.AsrEditorUtils.getMainTrack(MaweBoot.DATA), MaweMultiSubtitleCore.getActiveExtensionTrack(), getOverlayTrack()].filter(Boolean);
     const segments = [...new Set(tracks)].flatMap(track => track.segments || []);
@@ -122,7 +123,7 @@ export function initMaweColorFilter() {
       const id = segment.speaker ?? null;
       speakerCounts.set(id, (speakerCounts.get(id) || 0) + 1);
     });
-    const identities = [{ id: null, name: '未分配' }, ...(MaweBoot.DATA.speakers || [])];
+    const identities = [{ id: null }, ...(MaweBoot.DATA.speakers || [])];
     if (speakerFilterSelection) {
       const available = new Set(identities.map(speaker => speaker.id));
       const kept = new Set([...speakerFilterSelection].filter(id => available.has(id)));
@@ -146,8 +147,11 @@ export function initMaweColorFilter() {
       if (speaker.color) dot.style.background = speaker.color;
       const name = document.createElement('span');
       name.className = 'color-name';
-      name.textContent = speaker.id === null ? speaker.name : `${speaker.name || '未命名说话人'}（${speaker.id}）`;
-      label.title = `${name.textContent}：${count} 条字幕`;
+      name.dataset.speakerProjectContent = '';
+      name.textContent = speaker.id === null ? MaweCueElements.speakerName(null) : `${MaweCueElements.speakerName(speaker)}（${speaker.id}）`;
+      label.dataset.speakerProjectContent = '';
+      label.title = window.MAWE_I18N?.language === 'en'
+        ? `${name.textContent}: ${count} subtitles` : `${name.textContent}：${count} 条字幕`;
       const total = document.createElement('span');
       total.className = 'color-count';
       total.textContent = String(count);
@@ -162,14 +166,14 @@ export function initMaweColorFilter() {
     const clearSpeakers = document.createElement('button');
     clearSpeakers.type = 'button';
     clearSpeakers.className = 'dropdown-item';
-    clearSpeakers.textContent = '清除说话人过滤';
+    clearSpeakers.textContent = ui('清除说话人过滤');
     clearSpeakers.hidden = !speakerFilterSelection;
     clearSpeakers.addEventListener('click', () => setSpeakerFilterSelection(null));
     colorFilterMenu.appendChild(clearSpeakers);
     if (colorFilterSuspended()) return;
     const colorHeading = document.createElement('div');
     colorHeading.className = 'dropdown-item';
-    colorHeading.textContent = '按颜色筛选';
+    colorHeading.textContent = ui('按颜色筛选');
     colorFilterMenu.appendChild(colorHeading);
     keys.forEach((key) => {
       colorFilterMenu.appendChild(buildColorFilterItem(key, usage.get(key) || 0));
@@ -177,14 +181,14 @@ export function initMaweColorFilter() {
     const selectFilteredBtn = document.createElement('button');
     selectFilteredBtn.type = 'button';
     selectFilteredBtn.className = 'dropdown-item color-filter-select-all';
-    selectFilteredBtn.textContent = '全选过滤结果';
+    selectFilteredBtn.textContent = ui('全选过滤结果');
     selectFilteredBtn.hidden = !colorFilterSelection;
     selectFilteredBtn.addEventListener('click', () => selectAllFilteredCues());
     colorFilterMenu.appendChild(selectFilteredBtn);
     const clearBtn = document.createElement('button');
     clearBtn.type = 'button';
     clearBtn.className = 'dropdown-item color-filter-clear';
-    clearBtn.textContent = '清除颜色过滤';
+    clearBtn.textContent = ui('清除颜色过滤');
     clearBtn.hidden = !colorFilterSelection;
     clearBtn.addEventListener('click', () => setColorFilterSelection(null));
     colorFilterMenu.appendChild(clearBtn);
@@ -244,7 +248,7 @@ export function initMaweColorFilter() {
     if (value) dot.style.background = value;
     const nameEl = document.createElement('span');
     nameEl.className = 'color-name';
-    nameEl.textContent = colorFilterLabelFor(key);
+    nameEl.textContent = ui(colorFilterLabelFor(key));
     const countEl = document.createElement('span');
     countEl.className = 'color-count';
     countEl.textContent = String(count);
@@ -267,6 +271,10 @@ export function initMaweColorFilter() {
     colorFilterUsageCache = collectProjectColorUsage();
     syncColorFilterControls();
   }
+
+  document.addEventListener('mawe:languagechange', () => {
+    if (window.MaweBoot?.DATA && window.MaweMultiSubtitleCore) renderColorFilterMenu();
+  });
 
 
 

@@ -347,13 +347,8 @@ export function initMaweCuePanel() {
 
 
 
-  function renderCurrentCuePanel() {
+  function syncCuePanelSpeakerField(target) {
   if (!MaweDom.cuePanel) return;
-  const target = getCurrentCuePanelTarget();
-  window.MaweAssCuePosition?.sync();
-  const idx = target?.index ?? -1;
-  const seg = target?.segment || null;
-  const empty = !target;
   let speakerField = MaweDom.cuePanel.querySelector('.cue-panel-speaker');
   if (!speakerField) {
     speakerField = document.createElement('label');
@@ -377,16 +372,30 @@ export function initMaweCuePanel() {
   speakerSelect.replaceChildren();
   const unassigned = document.createElement('option');
   unassigned.value = '';
-  unassigned.textContent = '未分配';
+  unassigned.dataset.speakerProjectContent = '';
+  unassigned.textContent = MaweCueElements.speakerName(null);
   speakerSelect.appendChild(unassigned);
   (MaweBoot.DATA.speakers || []).forEach(speaker => {
     const option = document.createElement('option');
     option.value = speaker.id;
-    option.textContent = `${speaker.name || '未命名说话人'}（${speaker.id}）`;
+    option.dataset.speakerProjectContent = '';
+    option.textContent = `${MaweCueElements.speakerName(speaker)}（${speaker.id}）`;
     speakerSelect.appendChild(option);
   });
-  speakerSelect.value = seg?.speaker || '';
-  speakerSelect.disabled = empty;
+  speakerSelect.value = target?.segment?.speaker || '';
+  speakerSelect.disabled = !target;
+  }
+
+  document.addEventListener('mawe:languagechange', () => syncCuePanelSpeakerField(getCurrentCuePanelTarget()));
+
+  function renderCurrentCuePanel() {
+  if (!MaweDom.cuePanel) return;
+  const target = getCurrentCuePanelTarget();
+  window.MaweAssCuePosition?.sync();
+  const idx = target?.index ?? -1;
+  const seg = target?.segment || null;
+  const empty = !target;
+  syncCuePanelSpeakerField(target);
   MaweDom.cuePanel.classList.toggle('empty', empty);
   MaweDom.cuePanel.classList.toggle('extension-target', !empty && target.kind === 'extension');
   MaweDom.cuePanel.classList.toggle('overlay-target', !empty && target.kind === 'overlay');

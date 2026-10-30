@@ -196,7 +196,9 @@ export function initMaweContextMenus() {
       const item = document.createElement('button');
       item.type = 'button';
       item.className = 'item';
-      item.textContent = `${speaker.name || '未命名说话人'}（${speaker.id}）`;
+      item.dataset.speakerProjectContent = '';
+      item.dataset.speakerContextIdentity = speaker.id;
+      item.textContent = `${MaweCueElements.speakerName(speaker)}（${speaker.id}）`;
       item.addEventListener('click', () => {
         MaweDom.ctxmenu.classList.remove('show');
         MaweSpeakerLabels.assignIdentity(refs, speaker.id);
@@ -243,6 +245,23 @@ export function initMaweContextMenus() {
     });
     MaweDom.ctxmenu.appendChild(selectAll);
   }
+
+  function refreshSpeakerContextLanguage() {
+    MaweDom.ctxmenu.querySelectorAll('[data-speaker-context-identity]').forEach(item => {
+      const speaker = (MaweBoot.DATA.speakers || []).find(entry => entry.id === item.dataset.speakerContextIdentity);
+      if (speaker) item.textContent = `${MaweCueElements.speakerName(speaker)}（${speaker.id}）`;
+    });
+    MaweDom.ctxmenu.querySelectorAll('[data-speaker-context-slot]').forEach(swatch => {
+      const slot = Number(swatch.dataset.speakerContextSlot);
+      const speaker = (MaweBoot.DATA.speakers || []).find(entry => entry.id === MaweBoot.DATA.speaker_shortcuts?.[String(slot)]);
+      const name = speaker ? MaweCueElements.speakerName(speaker) : MaweCueElements.speakerUi('空槽', 'Empty slot');
+      swatch.title = `${name}${speaker ? `（${speaker.id}）` : ''}${MaweCueElements.speakerUi(`（按 ${slot}）`, ` (press ${slot})`)}`;
+      const label = swatch.parentElement?.querySelector('.speaker-context-slot-name');
+      if (label) label.textContent = name;
+    });
+  }
+
+  document.addEventListener('mawe:languagechange', refreshSpeakerContextLanguage);
 
 
   function showContextMenu(x, y, idx, waveformTimeMs = null, { splitTextMode = null } = {}) {
@@ -324,8 +343,8 @@ export function initMaweContextMenus() {
       const sw = document.createElement('span');
       const identity = MaweBoot.DATA.speakers?.find(s => s.id === MaweBoot.DATA.speaker_shortcuts?.[String(colorIndex + 1)]);
       const speakerMode = MaweBoot.DATA.annotation_mode === 'speaker';
-      const name = identity?.name || (identity ? '未命名说话人' : '空槽');
-      sw.title = speakerMode ? `${name}${identity ? `（${identity.id}）` : ''}（按 ${colorIndex + 1}）` : `${c.label}（按 ${colorIndex + 1}）`;
+      const name = identity ? MaweCueElements.speakerName(identity) : MaweCueElements.speakerUi('空槽', 'Empty slot');
+      sw.title = speakerMode ? `${name}${identity ? `（${identity.id}）` : ''}${MaweCueElements.speakerUi(`（按 ${colorIndex + 1}）`, ` (press ${colorIndex + 1})`)}` : `${c.label}（按 ${colorIndex + 1}）`;
       sw.style.cssText = `width:22px;height:22px;border-radius:50%;background:${speakerMode && identity ? identity.color : c.value};border:1px solid rgba(255,255,255,.25);cursor:pointer;display:inline-block;box-sizing:border-box;flex:0 0 auto;`;
       sw.addEventListener('mouseenter', () => sw.style.transform = 'scale(1.15)');
       sw.addEventListener('mouseleave', () => sw.style.transform = '');
@@ -335,9 +354,13 @@ export function initMaweContextMenus() {
         MaweStickerPicker.assignColor(targets, c.name);
       });
       if (speakerMode) {
+        sw.dataset.speakerProjectContent = '';
+        sw.dataset.speakerContextSlot = String(colorIndex + 1);
         const slot = document.createElement('span');
         slot.className = 'speaker-context-slot';
         const label = document.createElement('span');
+        label.className = 'speaker-context-slot-name';
+        label.dataset.speakerProjectContent = '';
         label.textContent = name;
         slot.append(sw, label);
         swatches.appendChild(slot);

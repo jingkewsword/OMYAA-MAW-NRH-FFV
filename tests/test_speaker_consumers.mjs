@@ -99,3 +99,24 @@ test('category display follows configured runtime palette while identity display
     assert.equal(u.effectiveSegmentColor(project, segment).value, '#123456');
   } finally { context.window.MaweColors = previous; }
 });
+
+test('ASS preserves five-color output while including enabled or actually used extended styles', () => {
+  const main = [{ id: 'plain', start: 0, end: 1000, text: 'Main' }];
+  const overlay = [{ id: 'over', start: 0, end: 1000, text: 'Overlay' }];
+  const baseline = u.buildAssPayload(main, { overlaySegments: overlay });
+  for (const name of ['ORANGE', 'CYAN', 'MAGENTA', 'GRAY']) assert.doesNotMatch(baseline, new RegExp(`Style: (?:Overlay )?${name},`));
+  const enabled = u.buildAssPayload(main, { overlaySegments: overlay, speakerProject: { annotation_mode: 'color', palette_size: 9, speakers: [] } });
+  for (const name of ['ORANGE', 'CYAN', 'MAGENTA', 'GRAY']) assert.match(enabled, new RegExp(`Style: ${name},`));
+  const collapsed = u.buildAssPayload(main, { overlaySegments: [{ ...overlay[0], color: { name: 'cyan' } }],
+    speakerProject: { annotation_mode: 'color', palette_size: 5, speakers: [] } });
+  assert.match(collapsed, /Style: CYAN,/);
+  assert.match(collapsed, /Style: Overlay CYAN,/);
+  assert.match(collapsed, /Dialogue: 2,[^\n]*,Overlay CYAN,/);
+  for (const name of ['ORANGE', 'MAGENTA', 'GRAY']) assert.doesNotMatch(collapsed, new RegExp(`Style: (?:Overlay )?${name},`));
+  const identities = fixture();
+  identities.speakers.push({ id: 'unused', name: 'Unused', color: '#abcdef' });
+  const identityAss = u.buildAssPayload(identities.tracks[0].segments, { speakerProject: identities });
+  assert.match(identityAss, /Style: SPEAKER_123456,/);
+  assert.match(identityAss, /Style: SPEAKER_969FAB,/);
+  assert.doesNotMatch(identityAss, /SPEAKER_ABCDEF/);
+});
