@@ -156,10 +156,16 @@ test('colored subtitle indexes remain readable against tinted rows', async ({ pa
   await waitEditorReady(page);
   await paintFirstSegmentRed(page);
 
-  await expect(page.locator('.cue[data-idx="0"] .index')).toHaveCSS(
-    'color',
-    'rgb(168, 177, 192)',
-  );
+  // Colored rows use the theme's secondary text token for readable indexes.
+  const expected = await page.evaluate(() => {
+    const probe = document.createElement('span');
+    probe.style.color = 'var(--text-secondary)';
+    document.body.appendChild(probe);
+    const color = getComputedStyle(probe).color;
+    probe.remove();
+    return color;
+  });
+  await expect(page.locator('.cue[data-idx="0"] .index')).toHaveCSS('color', expected);
 });
 
 test('clicking a row shows only that color; checkboxes multi-select; clear restores all', async ({ page }) => {

@@ -49,6 +49,8 @@ const cases = [
     fontSize: 144, alignment: 7, extensionAlignment: 3, marginV: 100, times: [1000] },
   { name: 'oversized multiline group uniformly fits the viewport',
     main: Array(11).fill('M').join('\n'), extension: 'W\nW\nW',
+    // Keep each track's pixels separable in the composite colour-mask oracle.
+    extensionAlignment: 3,
     overlaySegments: [cue('overlay-tall', 'O\nO\nO')], times: [1000], verifyFit: true },
   { name: 'nonlinear font-size and rotation animation frames', marginV: 220,
     animations: { t: { enabled: true, startMs: 0, endMs: 1500, accel: 2, tags: '\\fs120\\frz25' } },
@@ -370,7 +372,8 @@ for (const fixture of cases) test(fixture.name, async ({ page }, testInfo) => {
   }
   if (fixture.verifyFit) {
     const tall = frames[0];
-    await configure(page, { main: 'M', extension: 'W', overlaySegments: [cue('overlay-control', 'O')] });
+    await configure(page, { main: 'M', extension: 'W', extensionAlignment: fixture.extensionAlignment,
+      overlaySegments: [cue('overlay-control', 'O')] });
     const small = await capture(page, 1000);
     const reference = libass(small.ass, 1000, testInfo, 'fit-single-line-control');
     for (const engine of ['canvas', 'libass']) {

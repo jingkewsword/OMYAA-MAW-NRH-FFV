@@ -1734,8 +1734,9 @@ test('contextual help links open their matching Help tabs', async ({ page }) => 
   await page.locator('#gap-remove-help').click();
   await expect(helpPanel).toHaveClass(/show/);
   await expect(page.locator('#help-tab-gap')).toHaveAttribute('aria-selected', 'true');
-  await expect(page.locator('#gap-remove-panel')).not.toHaveClass(/show/);
+  await expect(page.locator('#gap-remove-panel')).toHaveClass(/show/);
   await page.locator('#help-close').click();
+  await page.locator('#gap-remove-manage').click();
 
   for (const { button, tab } of [
     { button: '#waveform-settings-help', tab: '#help-tab-waveform' },
@@ -1745,8 +1746,9 @@ test('contextual help links open their matching Help tabs', async ({ page }) => 
     await page.locator(button).click();
     await expect(helpPanel).toHaveClass(/show/);
     await expect(page.locator(tab)).toHaveAttribute('aria-selected', 'true');
-    await expect(page.locator('#waveform-settings-panel')).toBeHidden();
+    await expect(page.locator('#waveform-settings-panel')).toBeVisible();
     await page.locator('#help-close').click();
+    await closeSettingsPanels(page);
   }
   // 波形操作/按键微调/空隙操作方式设置已移入全局设置「通用操作」，其帮助入口随之迁移
   for (const { button, tab } of [
@@ -1758,8 +1760,9 @@ test('contextual help links open their matching Help tabs', async ({ page }) => 
     await page.locator(button).click();
     await expect(helpPanel).toHaveClass(/show/);
     await expect(page.locator(tab)).toHaveAttribute('aria-selected', 'true');
-    await expect(page.locator('#editor-settings-panel')).toBeHidden();
+    await expect(page.locator('#editor-settings-panel')).toBeVisible();
     await page.locator('#help-close').click();
+    await closeSettingsPanels(page);
   }
 });
 
@@ -2096,6 +2099,8 @@ test('nested export menus preserve pointer reachability and keyboard focus', asy
 
   await exportButton.focus();
   await page.keyboard.press('ArrowDown');
+  await expect(page.locator('#download-green-screen-video')).toBeFocused();
+  await page.keyboard.press('ArrowDown');
   await expect(page.locator('#download-fcp7-export')).toBeFocused();
   await page.keyboard.press('ArrowDown');
   await expect(otioToggle).toBeFocused();
@@ -2286,10 +2291,11 @@ test('server media loads from the resolved project path and OTIO keeps its absol
   await page.goto(server.url);
   const state = await page.evaluate(() => ({
     media: MaweBoot.DATA.media,
+    boundPath: MaweBoot.SERVER_CONFIG.autoLoadedMediaPath,
     currentSrc: document.getElementById('player').currentSrc,
   }));
-  expect(state.media).toMatch(/synthetic\.wav$/);
-  expect(state.media).toMatch(/^(?:[A-Za-z]:[\\/]|\/)/);
+  expect(state.media).toBe('synthetic.wav');
+  expect(state.boundPath).toMatch(/^(?:[A-Za-z]:[\\/]|\/).*synthetic\.wav$/);
   expect(state.currentSrc).toBe(`${server.url}media`);
 
   await page.evaluate(() => {

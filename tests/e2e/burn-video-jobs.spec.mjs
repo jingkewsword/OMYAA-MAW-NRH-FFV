@@ -346,7 +346,7 @@ for (const phase of ['admission-body', 'write-pending']) {
           createWritable: async () => ({ write: () => new Promise(() => { window.writeStarted = true; }),
             close: async () => { window.saved = true; }, abort: async () => { window.fileAborted = true; } }) });
       }, phase);
-      await page.addScriptTag({ content: fs.readFileSync(new URL('../../web/editor/io/editor-project-load.js', import.meta.url), 'utf8') });
+      await page.addScriptTag({ type: 'module', content: `${fs.readFileSync(new URL('../../web/editor/io/editor-project-load.js', import.meta.url), 'utf8')}\ninitMaweProjectLoad();` });
       await page.click('#burn-video-export-btn');
       await expect.poll(() => state.jobs.size).toBe(1);
       if (phase === 'write-pending') await expect.poll(() => page.evaluate(() => window.writeStarted)).toBe(true);
