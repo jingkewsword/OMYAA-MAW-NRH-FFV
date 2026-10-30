@@ -2,8 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-const source = readFileSync(new URL('../web/shared/utils/project-tracks.js', import.meta.url), 'utf8');
-const model = (await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`)).createUtilsModule();
+const model = (await import('../web/shared/utils/project-tracks.js')).createUtilsModule();
 const fixture = name => JSON.parse(readFileSync(new URL(`./fixtures/project-tracks/${name}.json`, import.meta.url), 'utf8'));
 const canonical = () => fixture('canonical');
 const json = value => JSON.parse(JSON.stringify(value));
@@ -13,6 +12,58 @@ function rejects(raw, path) {
     && error.errors.some(entry => entry.path === path), path);
   assert.deepEqual(raw, before);
 }
+
+test('shared style contract validates references and preserves snapshots', () => {
+  const data = fixture('style-contract');
+  const project = canonical();
+  project.styles = json(data.styles);
+  project.tracks[0].style = json(data.style);
+  project.tracks[1].style = { style_id: 'shared' };
+  const before = json(project);
+  const imported = model.importProject(project).project;
+  assert.deepEqual(imported, before);
+  imported.styles[0].vendor.zero = 2;
+  assert.deepEqual(project, before);
+  for (const item of data.invalid) {
+    const invalid = json(before);
+    if (Object.hasOwn(item, 'styles')) invalid.styles = json(item.styles);
+    if (item.delete_styles) delete invalid.styles;
+    if (Object.hasOwn(item, 'style')) invalid.tracks[0].style = json(item.style);
+    const original = json(invalid);
+    const result = model.validateTracksProject(invalid);
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.errors, [{ path: item.path, message: item.message }]);
+    assert.deepEqual(invalid, original);
+  }
+  const tooLong = json(before); tooLong.styles[0].id = 'x'.repeat(161);
+  assert.deepEqual(model.validateTracksProject(tooLong).errors, [{ path: '$.styles[0].id', message: 'must be a non-empty string of at most 160 characters' }]);
+});
+
+test('shared track options preserve legacy behavior and reject invalid canonical types', () => {
+  const options = fixture('track-options');
+  for (const schema of ['moy.asr.project.v1', 'moy.asr.project.v1.5']) {
+    const raw = { ...json(options.legacy), schema };
+    if (schema.endsWith('v1.5')) raw.subtitle_groups = { color: [], sticker: [] };
+    const before = json(raw);
+    const project = model.importProject(raw).project;
+    assert.deepEqual(raw, before);
+    const [main, overlay, secondary] = project.tracks;
+    assert.deepEqual([main.preview_visible, main.variant, main.export], [true, 'plain', { enabled: true }]);
+    assert.equal(overlay.enabled, false);
+    assert.equal(overlay.preview_visible, false);
+    assert.equal(overlay.variant, 'future-overlay');
+    assert.deepEqual(overlay.export, before.overlay_track.export);
+    assert.equal(secondary.enabled, false);
+    assert.deepEqual(secondary.export, { enabled: true, vendor: [] });
+    assert.deepEqual(model.importProject(project).project, project);
+  }
+  for (const item of options.invalid) {
+    const project = canonical(); project.tracks[0][item.field] = item.value;
+    rejects(project, item.path);
+    const legacy = json(options.legacy); legacy.overlay_track[item.field] = item.value;
+    rejects(legacy, item.path.replace('tracks[0]', 'tracks[1]'));
+  }
+});
 
 test('legacy binding migrates to named CueRefs, preserves extension fields and rejects old canonical fields', () => {
   const input = { segments: [{ id: 'a', start: 0, end: 100, text: 'A' }],

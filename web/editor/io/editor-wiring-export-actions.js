@@ -257,7 +257,12 @@ MaweDom.downloadMultiSrtButton?.addEventListener('click', async () => {
     desc: '副字幕 SRT 文件', types: { 'text/plain': ['.srt'] },
   });
 });
+function subtitleExportBlocked() {
+  try { window.AsrEditorUtils.TrackPolicy.assertExportable(MaweBoot.DATA); return false; }
+  catch (error) { MaweHint.flashHint(error.message, 'warning'); return true; }
+}
 document.getElementById('download-bilingual-srt')?.addEventListener('click', async (event) => {
+  if (subtitleExportBlocked()) return;
   if (event.currentTarget.classList.contains('disabled')
       || MaweMultiSubtitleCore.getActiveExtensionTrack()?.enabled !== true) return;
   if (MaweInlineEdit.editingState) MaweInlineEdit.finishEdit(true);
@@ -269,6 +274,7 @@ document.getElementById('download-bilingual-srt')?.addEventListener('click', asy
   });
 });
 document.getElementById('download-full-srt')?.addEventListener('click', async () => {
+  if (subtitleExportBlocked()) return;
   if (MaweInlineEdit.editingState) MaweInlineEdit.finishEdit(true);
   await MaweExportTimeline.downloadFile(MaweExportSrt.buildSrt(), `${MaweBoot.FILENAME_BASE}.srt`, 'text/plain', {
     desc: 'SRT 字幕文件', types: { 'text/plain': ['.srt'] }
@@ -334,6 +340,7 @@ document.addEventListener('keydown', (event) => {
   }
 });
 document.getElementById('download-resolve-json')?.addEventListener('click', async () => {
+  if (subtitleExportBlocked()) return;
   if (MaweInlineEdit.editingState) MaweInlineEdit.finishEdit(true);
   const payload = MaweExportTimeline.buildResolveJson();
   if (payload) {
@@ -354,12 +361,14 @@ MaweStickerOtioExport.stickerOtioExportMode?.addEventListener('change', () => {
 
 
 document.getElementById('download-sticker-otio')?.addEventListener('click', () => {
+  if (subtitleExportBlocked()) return;
   if (MaweExportTimeline.stickerExportBlocked('download-sticker-otio')) return;
   MaweStickerOtioExport.exportStickerOtio(
     'stickers', MaweExportTimeline.buildStickerOtio, `${MaweBoot.FILENAME_BASE}_${window.MAWE_I18N?.exportTag?.('stickers') || 'stickers'}.otio`, 'OTIO 工程文件'
   );
 });
 document.getElementById('download-gap-removed-srt')?.addEventListener('click', async () => {
+  if (subtitleExportBlocked()) return;
   if (MaweInlineEdit.editingState) MaweInlineEdit.finishEdit(true);
   const payload = MaweExportSrt.buildGapRemovedSrt();
   if (payload) {
@@ -384,6 +393,8 @@ document.getElementById('download-gap-removed-ass')?.addEventListener('click', a
   }
 });
 document.getElementById('download-otio')?.addEventListener('click', async () => {
+  if ((MaweSettings.EDITOR_SETTINGS.otioExportIncludeSrt || MaweSettings.EDITOR_SETTINGS.otioExportIncludeMarkers
+      || MaweSettings.EDITOR_SETTINGS.otioExportIncludeStickers) && subtitleExportBlocked()) return;
   if (MaweInlineEdit.editingState) MaweInlineEdit.finishEdit(true);
   const payload = MaweExportTimeline.buildSourceOtio();
   if (!payload) return;
@@ -397,6 +408,8 @@ document.getElementById('download-otio')?.addEventListener('click', async () => 
   }
 });
 document.getElementById('download-otioz')?.addEventListener('click', async () => {
+  if ((MaweSettings.EDITOR_SETTINGS.otioExportIncludeSrt || MaweSettings.EDITOR_SETTINGS.otioExportIncludeMarkers
+      || MaweSettings.EDITOR_SETTINGS.otioExportIncludeStickers) && subtitleExportBlocked()) return;
   const saved = await MaweExportTimeline.exportTimelineOtioz(
     'source',
     MaweExportTimeline.buildSourceOtio,
@@ -410,6 +423,8 @@ document.getElementById('download-otioz')?.addEventListener('click', async () =>
   }
 });
 document.getElementById('download-gap-removed-otio')?.addEventListener('click', async () => {
+  if ((MaweSettings.EDITOR_SETTINGS.otioExportIncludeSrt || MaweSettings.EDITOR_SETTINGS.otioExportIncludeMarkers
+      || MaweSettings.EDITOR_SETTINGS.otioExportIncludeStickers) && subtitleExportBlocked()) return;
   if (MaweInlineEdit.editingState) MaweInlineEdit.finishEdit(true);
   const payload = MaweExportTimeline.buildGapRemovedOtio();
   if (!payload) return;
@@ -426,6 +441,8 @@ document.getElementById('download-gap-removed-otio')?.addEventListener('click', 
   }
 });
 document.getElementById('download-gap-removed-otioz')?.addEventListener('click', async () => {
+  if ((MaweSettings.EDITOR_SETTINGS.otioExportIncludeSrt || MaweSettings.EDITOR_SETTINGS.otioExportIncludeMarkers
+      || MaweSettings.EDITOR_SETTINGS.otioExportIncludeStickers) && subtitleExportBlocked()) return;
   const saved = await MaweExportTimeline.exportTimelineOtioz(
     'gap-removed',
     MaweExportTimeline.buildGapRemovedOtio,
@@ -508,7 +525,11 @@ document.getElementById('download-gap-removed-video')?.addEventListener('click',
   const selectedAudioTrack = isAudio ? currentAudioTrack() : undefined;
   const audioSelection = selectedAudioTrack === undefined ? {} : { selectedAudioTrack };
   const intervals = context.intervals.map(({ start, end }) => ({ startMs: start, endMs: end }));
-  const buildVideoSrt = !isAudio ? MaweExportSrt.captureVideoSrt?.() : null;
+  let buildVideoSrt = null;
+  if (!isAudio) {
+    try { buildVideoSrt = MaweExportSrt.captureVideoSrt?.() || null; }
+    catch (error) { MaweHint.flashHint(`无法生成匹配字幕：${error.message || error}`, 'warning'); }
+  }
   let videoTimeline = null;
   const isBindingCurrent = () => MaweBoot.SERVER_CONFIG === config && canExport()
     && config.bindingGeneration === bindingGeneration && config.sourceMediaId === sourceMediaId
@@ -1051,6 +1072,7 @@ document.getElementById('download-gap-removed-regions-json')?.addEventListener('
   }
 });
 document.getElementById('download-gap-removed-sticker-otio')?.addEventListener('click', async () => {
+  if (subtitleExportBlocked()) return;
   if (MaweExportTimeline.stickerExportBlocked('download-gap-removed-sticker-otio')) return;
   await MaweStickerOtioExport.exportStickerOtio(
     'gap-removed-stickers', MaweExportTimeline.buildGapRemovedStickerOtio,
@@ -1058,6 +1080,7 @@ document.getElementById('download-gap-removed-sticker-otio')?.addEventListener('
   );
 });
 document.getElementById('download-gap-removed-sticker-otioz')?.addEventListener('click', async () => {
+  if (subtitleExportBlocked()) return;
   if (MaweExportTimeline.stickerExportBlocked('download-gap-removed-sticker-otioz')) return;
   const removed = MaweGapRemoveData.getRemovedGapRanges();
   if (!removed.length) {
@@ -1071,6 +1094,7 @@ document.getElementById('download-gap-removed-sticker-otioz')?.addEventListener(
   );
 });
 document.getElementById('download-sticker-otioz')?.addEventListener('click', async () => {
+  if (subtitleExportBlocked()) return;
   if (MaweExportTimeline.stickerExportBlocked('download-sticker-otioz')) return;
   await MaweExportTimeline.exportStickerOtoz(
     'stickers', MaweExportTimeline.buildStickerOtio,

@@ -1,5 +1,3 @@
-import { activeExtensionSegments } from '../cues/overlay-track.js';
-
 export function initMaweAssPreviewWiring() {
   'use strict';
 
@@ -256,9 +254,10 @@ function assStackInputRevision(tracks, identityTracks = tracks) {
         || previous[3] !== cue.text || previous[4] !== cue.disabled || previous[5] !== color
         || previous[6] !== cue.speaker || previous[7] !== cue.id
         || previous[8] !== cue.color_ref?.headIdx || previous[9] !== cue.color_ref?.name
-        || previous[10] !== retainedItems || previous[11] !== JSON.stringify(cue.assOverride)) {
+        || previous[10] !== retainedItems || previous[11] !== JSON.stringify(cue.assOverride)
+        || previous[12] !== JSON.stringify(cue.assStyle)) {
         snapshot[index] = [identity, cue.start, cue.end, cue.text, cue.disabled, color, cue.speaker, cue.id,
-          cue.color_ref?.headIdx, cue.color_ref?.name, retainedItems, JSON.stringify(cue.assOverride)]; changed = true;
+          cue.color_ref?.headIdx, cue.color_ref?.name, retainedItems, JSON.stringify(cue.assOverride), JSON.stringify(cue.assStyle)]; changed = true;
       }
     }
   }
@@ -272,9 +271,16 @@ function applyAssSubtitlePreview({ tMs, overlaySegments }) {
   // Snapshot only project inputs: measurements and animation envelopes are
   // computed once per revision, never once per playback frame. Direct edits
   // to mutable imported cue/style records also invalidate this snapshot.
-  const rawTracks = [window.AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments, activeExtensionSegments(), overlaySegments];
-  const revision = assStackInputRevision([MaweExportSrt.cleanupMainSegments(), rawTracks[1], rawTracks[2]], rawTracks);
-  const key = JSON.stringify([revision, ASS_STYLE_LIBRARY, MaweSettings.EDITOR_SETTINGS,
+  const policy = window.AsrEditorUtils.TrackPolicy;
+  const main = window.AsrEditorUtils.getMainTrack(MaweBoot.DATA);
+  const extension = MaweMultiSubtitleCore.getActiveExtensionTrack();
+  const overlay = window.AsrEditorUtils.getOverlayTrack(MaweBoot.DATA);
+  const rawTracks = [policy.isTrackEnabled(main, 'preview') ? main.segments : [],
+    policy.isTrackEnabled(extension, 'preview') ? extension.segments : [],
+    policy.isTrackEnabled(overlay, 'preview') ? overlaySegments : []];
+  const revision = assStackInputRevision([rawTracks[0].length ? MaweExportSrt.cleanupMainSegments() : [], rawTracks[1], rawTracks[2]], rawTracks);
+  const key = JSON.stringify([revision, ASS_STYLE_LIBRARY, MaweBoot.DATA.styles,
+    main?.style, extension?.style, overlay?.style, MaweSettings.EDITOR_SETTINGS,
     MaweAppearance.getSubtitleAppearance(), metrics.resolution, MaweColors.COLOR_PALETTE,
     MaweSpeakerLabels.getSpeakerLabelSettings(), MaweDom.overlayToggle.checked,
     MaweDom.extensionOverlayToggle?.checked, assStackFontRevision]);
