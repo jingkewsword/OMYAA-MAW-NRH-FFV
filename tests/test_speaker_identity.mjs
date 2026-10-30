@@ -1,6 +1,34 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { validateProjectSpeakers } from '../web/shared/utils/speaker-identity.js';
+import { createUtilsModule } from '../web/shared/utils/project-tracks.js';
+
+test('canonical import and validation enforce speaker references, settings and collapsed slots', () => {
+  const model = createUtilsModule();
+  const project = model.makeProject([{ start: 0, end: 100, text: 'x', speaker: null }], { projectFields: {
+    speakers: [{ id: 'p1', name: '同名', color: '#969fab' }, { id: 'p2', name: '同名', color: '#969fab' }],
+    annotation_mode: 'color', palette_size: 5, speaker_shortcuts: { 1: 'p1', 6: 'p2' }, vendor: { keep: 1 },
+  } });
+  assert.deepEqual(model.importProject(project).project, project);
+  const oldCore = structuredClone(project);
+  for (const field of ['speakers', 'annotation_mode', 'palette_size', 'speaker_shortcuts']) delete oldCore[field];
+  assert.equal(model.validateTracksProject(oldCore).ok, false);
+  assert.deepEqual(model.importProject(oldCore).project.speakers, []);
+  for (const [fields, path] of [
+    [{ palette_size: true }, '$.palette_size'], [{ annotation_mode: 'bad' }, '$.annotation_mode'],
+    [{ speaker_shortcuts: { 0: 'p1' } }, '$.speaker_shortcuts.0'],
+    [{ speaker_shortcuts: { 6: 'missing' } }, '$.speaker_shortcuts.6'],
+    [{ speaker_shortcuts: null }, '$.speaker_shortcuts'],
+  ]) {
+    assert.ok(model.validateTracksProject({ ...project, ...fields }).errors.some(error => error.path === path));
+  }
+  const invalid = structuredClone(project);
+  invalid.tracks[0].segments[0].speaker = 'missing';
+  assert.throws(() => model.importProject(invalid), /must reference a project speaker/);
+  invalid.tracks[0].segments[0].speaker = 'p1';
+  invalid.tracks[0].segments[0].items = [{ start: 0, end: 100, text: 'x', speaker: 'p1' }];
+  assert.throws(() => model.importProject(invalid), /speaker belongs to the segment/);
+});
 
 test('project speaker identities remain distinct when names and colors are equal', () => {
   const project = { speakers: [{ id: 'p1', name: '主持人', color: '#f9ca1f' },

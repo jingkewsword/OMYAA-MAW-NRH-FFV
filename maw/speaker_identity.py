@@ -1,4 +1,4 @@
-"""Helpers for source speaker identities; project migration is handled separately."""
+"""Source speaker migration and the v2 project identity boundary."""
 
 from __future__ import annotations
 
@@ -7,6 +7,19 @@ import re
 import unicodedata
 from collections.abc import Iterable, Mapping
 from typing import Any
+
+from maw.colors import COLOR_PALETTE
+
+# The first five entries retain the existing shortcuts and display colours.
+SPEAKER_PALETTE = (*COLOR_PALETTE, ("orange", "#f2a65a"), ("cyan", "#49c5c1"),
+                   ("magenta", "#d675b9"), ("gray", "#969fab"))
+SPEAKER_PROJECT_FIELDS = ("speakers", "annotation_mode", "palette_size", "speaker_shortcuts")
+
+
+class SpeakerMigrationError(ValueError):
+    def __init__(self, path: str, message: str):
+        super().__init__(message)
+        self.path = path
 
 
 def is_valid_speaker_id(value: object) -> bool:
@@ -68,6 +81,18 @@ def allocate_source_speaker_ids(
     return mapping
 
 
+def _allocate_split_id(base: str, reserved: set[str], *, start: int = 1) -> str:
+    """Reserve the final ID, keeping the contract's Unicode-codepoint limit."""
+    number = start
+    while True:
+        suffix = f"-speaker-{number}"
+        candidate = base[:160 - len(suffix)] + suffix
+        if candidate not in reserved:
+            reserved.add(candidate)
+            return candidate
+        number += 1
+
+
 def migrate_speaker_segments(
     segments: Iterable[Mapping[str, Any]], source_to_project: Mapping[str, str],
     *, reserved_segment_ids: Iterable[str] = (),
@@ -99,12 +124,7 @@ def migrate_speaker_segments(
         return value
 
     def new_id(base: str) -> str:
-        number = 1
-        while f"{base}-speaker-{number}" in used:
-            number += 1
-        candidate = f"{base}-speaker-{number}"
-        used.add(candidate)
-        return candidate
+        return _allocate_split_id(base, used)
 
     for index, segment in enumerate(source):
         items = segment.get("items")
@@ -203,7 +223,7 @@ def prepare_asr_speaker_segments(
 
 
 def validate_project_speakers(project: Mapping[str, Any]) -> list[dict[str, str]]:
-    """Validate the proposed segment-level speaker references in a tracks project."""
+    """Validate segment-level references and project-owned palette settings."""
     errors: list[dict[str, str]] = []
 
     def error(path: str, message: str) -> None:
@@ -216,6 +236,10 @@ def validate_project_speakers(project: Mapping[str, Any]) -> list[dict[str, str]
     if not isinstance(speakers, list):
         error("$.speakers", "must be an array")
         speakers = []
+    if "annotation_mode" in project and project["annotation_mode"] not in ("speaker", "color"):
+        error("$.annotation_mode", "must be speaker or color")
+    if "palette_size" in project and (type(project["palette_size"]) is not int or project["palette_size"] not in (5, 9)):
+        error("$.palette_size", "must be 5 or 9")
     ids: set[str] = set()
     for index, speaker in enumerate(speakers):
         path = f"$.speakers[{index}]"
@@ -223,7 +247,10 @@ def validate_project_speakers(project: Mapping[str, Any]) -> list[dict[str, str]
             error(path, "must be an object")
             continue
         identifier = speaker.get("id")
-        if not is_valid_speaker_id(identifier) or identifier in ids:
+        if (not is_valid_speaker_id(identifier) or len(identifier) > 160
+                or identifier != identifier.strip() or identifier.startswith('\ufeff') or identifier.endswith('\ufeff')
+                or any(ord(char) < 32 or 127 <= ord(char) <= 159 for char in identifier)
+                or identifier in ids):
             error(f"{path}.id", "must be a unique nonempty string")
         else:
             ids.add(identifier)
@@ -234,6 +261,16 @@ def validate_project_speakers(project: Mapping[str, Any]) -> list[dict[str, str]
         color = speaker.get("color")
         if not isinstance(color, str) or not re.fullmatch(r"#[0-9a-fA-F]{6}", color):
             error(f"{path}.color", "must be a six-digit hex color")
+
+    shortcuts = project.get("speaker_shortcuts", {})
+    if not isinstance(shortcuts, dict):
+        error("$.speaker_shortcuts", "must be an object")
+    else:
+        for slot, identity in shortcuts.items():
+            if slot not in tuple(str(index) for index in range(1, 10)):
+                error(f"$.speaker_shortcuts.{slot}", "must be a slot from 1 to 9")
+            elif not isinstance(identity, str) or identity not in ids:
+                error(f"$.speaker_shortcuts.{slot}", "must reference a project speaker")
 
     tracks = project.get("tracks")
     if not isinstance(tracks, list):
@@ -262,3 +299,94 @@ def validate_project_speakers(project: Mapping[str, Any]) -> list[dict[str, str]
                 if isinstance(item, Mapping) and "speaker" in item:
                     error(f"{segment_path}.items[{item_index}].speaker", "speaker belongs to the segment")
     return errors
+
+
+def resolve_project_speaker(project: Mapping[str, Any], segment: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    """Resolve only the current segment reference; colour and words are not fallbacks."""
+    identifier = segment.get("speaker")
+    if identifier is None:
+        return None
+    return next((speaker for speaker in project.get("speakers", []) if speaker.get("id") == identifier), None)
+
+
+def can_merge_speaker_segments(segments: Iterable[Mapping[str, Any]]) -> bool:
+    """Assigned/unassigned mixtures and distinct identities require explicit reassignment."""
+    source = list(segments)
+    return bool(source) and all(segment.get("speaker") == source[0].get("speaker") for segment in source)
+
+
+def upgrade_project_speakers(project: Mapping[str, Any]) -> dict[str, Any]:
+    """Upgrade a structurally validated tracks project, without modifying its source.
+
+    A present identity table is authoritative, even when empty: never revive a
+    cleared identity from legacy words or colours. Without a table, provider IDs
+    are interpreted within this one input project and allocated independently.
+    Independent cue splits release a one-to-one binding, just like the editor;
+    paired splits at matching absolute boundaries retain the paired relation.
+    The import boundary exposes all changes, including removed bindings.
+    """
+    result = copy.deepcopy(dict(project))
+    if "speakers" in result:
+        return result
+    tracks = result["tracks"]
+    old_segments = [segment for track in tracks for segment in track["segments"]]
+    identities = allocate_source_speaker_ids(old_segments, reserved_ids=())
+    reserved = {segment["id"] for segment in old_segments}
+    replacements: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for ti, track in enumerate(tracks):
+        try:
+            migrated, mappings = migrate_speaker_segments(track["segments"], identities, reserved_segment_ids=reserved)
+        except ValueError as error:
+            raise SpeakerMigrationError(f"$.tracks[{ti}].segments", str(error)) from error
+        by_id = {segment["id"]: segment for segment in migrated}
+        reserved.update(by_id)
+        for mapping in mappings:
+            replacements[track["id"], mapping["old_id"]] = [by_id[identifier] for identifier in mapping["new_ids"]]
+        track["segments"] = migrated
+
+    palette_size = result.setdefault("palette_size", 5)
+    if type(palette_size) is not int or palette_size not in (5, 9):
+        raise SpeakerMigrationError("$.palette_size", "must be 5 or 9")
+    result.setdefault("annotation_mode", "color")
+    used = distinct_speaker_ids(segment for track in tracks for segment in track["segments"])
+    result["speakers"] = [{"id": identifier, "name": f"说话人 {index + 1}",
+                           "color": SPEAKER_PALETTE[index % palette_size][1]}
+                          for index, identifier in enumerate(used)]
+    if "speaker_shortcuts" not in result:
+        result["speaker_shortcuts"] = {str(index + 1): identifier for index, identifier in enumerate(used[:palette_size])}
+    else:
+        shortcuts = result["speaker_shortcuts"]
+        if not isinstance(shortcuts, dict):
+            raise SpeakerMigrationError("$.speaker_shortcuts", "must be an object")
+        for slot, source_id in shortcuts.items():
+            if not isinstance(source_id, str) or identities.get(source_id) not in used:
+                raise SpeakerMigrationError(f"$.speaker_shortcuts.{slot}", "must reference an existing source speaker")
+            shortcuts[slot] = identities[source_id]
+
+    bindings = result["bindings"]
+    reserved_bindings = {binding["id"] for binding in bindings}
+    migrated_bindings = []
+    for binding in bindings:
+        sides = [replacements[ref["track_id"], ref["segment_id"]] for ref in (binding["source"], binding["target"])]
+        source, target = sides
+        if len(source) == len(target) == 1:
+            migrated_bindings.append(binding)
+            continue
+        # Both sides must preserve the same absolute cuts, including any gap.
+        paired = len(source) == len(target) and all(
+            source[index - 1]["end"] == target[index - 1]["end"] and source[index]["start"] == target[index]["start"]
+            for index in range(1, len(source))
+        )
+        if not paired:
+            continue
+        for index, (source_cue, target_cue) in enumerate(zip(source, target)):
+            replacement = copy.deepcopy(binding)
+            if index:
+                replacement["id"] = _allocate_split_id(binding["id"], reserved_bindings, start=index)
+            replacement["source"]["segment_id"] = source_cue["id"]
+            replacement["target"]["segment_id"] = target_cue["id"]
+            for edge in ("start", "end"):
+                replacement[f"{edge}_offset_ms"] = target_cue[edge] - source_cue[edge]
+            migrated_bindings.append(replacement)
+    result["bindings"] = migrated_bindings
+    return result
