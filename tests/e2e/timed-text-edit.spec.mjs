@@ -193,9 +193,10 @@ test('previews text changes and applies the reported item-timing mapping', async
 test('switching text views does not overwrite the next editor focus or input', async ({ page }, testInfo) => {
   await page.addInitScript(() => localStorage.setItem('moy.asr.editor.onboarding.v1', 'completed'));
   await page.goto(server.url);
-  await page.locator('#timed-text-edit-btn').click();
   await page.clock.install();
   await page.clock.pauseAt(new Date());
+  await page.locator('#timed-text-edit-btn').click();
+  await page.clock.runFor(50);
   await page.evaluate(() => {
     window.textViewEvents = [];
     for (const type of ['focusin', 'input']) {
@@ -227,6 +228,15 @@ test('switching text views does not overwrite the next editor focus or input', a
   await page.keyboard.press('Enter');
   await page.clock.runFor(1);
   await expect(singleButton).toBeFocused();
+  await page.evaluate(() => {
+    MaweDom.timedTextEditView.querySelector('[data-view="rows"]').click();
+    MaweTimedTextEdit.closeTimedTextEdit();
+    document.body.tabIndex = -1;
+    document.body.focus();
+  });
+  await page.clock.runFor(1);
+  await expect(page.locator('#timed-text-edit-modal')).not.toHaveClass(/show/);
+  expect(await page.evaluate(() => MaweDom.timedTextEditModal.contains(document.activeElement))).toBe(false);
 });
 
 test('shows disabled subtitles on demand without replacing hidden cues', async ({ page }) => {
@@ -373,6 +383,38 @@ test('search navigation focuses the hit textarea with a visible caret, F3/Enter 
   page.once('dialog', (dialog) => dialog.accept());
   await page.keyboard.press('Escape');
   await expect(page.locator('#timed-text-edit-modal')).not.toHaveClass(/show/);
+});
+
+test('delayed initial focus does not override an active search', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('moy.asr.editor.onboarding.v1', 'completed'));
+  await page.goto(server.url);
+  await page.evaluate(() => {
+    const original = window.setTimeout;
+    window.setTimeout = function(callback, delay, ...args) {
+      if (delay === 50 && typeof callback === 'function' && callback.toString().includes('timedTextEditSingleTextarea')) {
+        window.setTimeout = original;
+        window.__runInitialFocus = () => callback(...args);
+        return 0;
+      }
+      return original(callback, delay, ...args);
+    };
+    MaweBoot.DATA.segments = Array.from({ length: 24 }, (_, index) => ({
+      id: `focus-${index}`, start: index * 100, end: index * 100 + 80,
+      text: index === 12 ? 'needle target' : `caption ${index}`,
+    }));
+    MaweCuePanel.renderAll({ waveform: 'full' });
+  });
+  await page.locator('#timed-text-edit-btn').click();
+  const find = page.locator('#timed-text-edit-find');
+  await page.keyboard.press('Control+f');
+  await find.fill('needle target');
+  const target = page.locator('#timed-text-edit-rows .timed-text-edit-row[data-index="12"]');
+  await expect(target).toHaveClass(/search-current/);
+  const scrollTop = await page.locator('#timed-text-edit-rows').evaluate(element => element.scrollTop);
+  expect(scrollTop).toBeGreaterThan(0);
+  await page.evaluate(() => { if (!window.__runInitialFocus) throw new Error('Initial focus timer not captured'); window.__runInitialFocus(); });
+  await expect(find).toBeFocused();
+  expect(await page.locator('#timed-text-edit-rows').evaluate(element => element.scrollTop)).toBe(scrollTop);
 });
 
 test('search reveals filtered rows in the center and highlights/scrolls the matching text in overall view', async ({ page }) => {
