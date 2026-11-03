@@ -1245,6 +1245,8 @@
     MaweDom.timedTextEditModal.classList.add('show');
     const scrollRowIndex = timedTextEditInitialScrollRowIndex();
     setTimeout(() => {
+      if (!MaweDom.timedTextEditModal.classList.contains('show')
+        || MaweDom.timedTextEditModal.contains(document.activeElement)) return;
       // 整体视图没有行元素可滚（Greptile P2：此前无条件查 rows 容器，single
       // 视图下为空导致选中字幕留在屏外）：把 caret 预置到选中行首再聚焦，
       // 浏览器随焦点滚动到该行；逐条视图维持 scrollIntoView 原路径。

@@ -121,6 +121,73 @@ test('all pending-load save entrances refuse before writing or opening a picker'
   assert.equal(calls.saved, 0);
 });
 
+test('autosave defers a held waveform drag without flushing or writing', async () => {
+  const {context, calls} = fixture({failure: null});
+  let scheduled = 0;
+  let flushed = 0;
+  context.MaweServerSave.scheduleAutoSaveFlush = () => { scheduled++; };
+  context.MaweCuePanel.commitCuePanelEdit = () => { flushed++; };
+  context.MaweCoreState.waveformEditor = {drag: {pointerId: 7}};
+  assert.equal(await context.MaweProjectSave.saveCurrentProject({silent: true}), false);
+  assert.equal(scheduled, 1);
+  assert.equal(flushed, 0);
+  assert.deepEqual(calls.build, []);
+  assert.deepEqual(calls.posted, []);
+});
+
+test('a backup skips a held waveform drag without scheduling a main save', async () => {
+  const {context, calls} = fixture({failure: null});
+  let scheduled = 0;
+  let flushed = 0;
+  context.MaweSettings.EDITOR_SETTINGS.projectBackupEnabled = true;
+  context.MaweSettings.EDITOR_SETTINGS.autoSaveProject = false;
+  context.MaweServerSave.scheduleAutoSaveFlush = () => { scheduled++; };
+  context.MaweCuePanel.commitCuePanelEdit = () => { flushed++; };
+  context.MaweCoreState.waveformEditor = {drag: {pointerId: 7}};
+  assert.equal(await context.MaweProjectSave.saveProjectToServer({silent: true, backupOnly: true}), false);
+  assert.equal(scheduled, 0);
+  assert.equal(flushed, 0);
+  assert.deepEqual(calls.build, []);
+  assert.deepEqual(calls.posted, []);
+});
+
+test('direct silent handle save defers a held waveform drag', async () => {
+  const {context, calls} = fixture({failure: null});
+  let scheduled = 0;
+  let flushed = 0;
+  context.MaweServerSave.projectFileHandle = {name: 'saved.mosp'};
+  context.MaweServerSave.scheduleAutoSaveFlush = () => { scheduled++; };
+  context.MaweCuePanel.commitCuePanelEdit = () => { flushed++; };
+  context.MaweCoreState.waveformEditor = {drag: {pointerId: 7}};
+  assert.equal(await context.MaweProjectSave.saveProjectToHandle({silent: true}), false);
+  assert.equal(scheduled, 1);
+  assert.equal(flushed, 0);
+  assert.deepEqual(calls.build, []);
+});
+
+test('explicit save and save-as finish a waveform drag before flushing or building', async () => {
+  for (const saveAs of [false, true]) {
+    const {context, calls} = fixture({failure: null});
+    const order = [];
+    const drag = {pointerId: 7, lastPointerPosition: {clientX: 120, clientY: 45}};
+    context.MaweCoreState.waveformEditor = {drag, endCueDrag(event) {
+      order.push('end');
+      assert.equal(event.type, 'pointerup');
+      assert.equal(event.pointerId, 7);
+      assert.equal(event.clientX, 120);
+      assert.equal(event.clientY, 45);
+      this.drag = null;
+    }};
+    context.MaweCuePanel.commitCuePanelEdit = () => { order.push('flush'); };
+    context.MaweHost.files = {hasSavePicker: () => false};
+    if (saveAs) await context.MaweProjectSave.saveProjectAsToFile();
+    else assert.equal(await context.MaweProjectSave.saveCurrentProject(), true);
+    assert.deepEqual(order, ['end', 'flush']);
+    assert.equal(calls.build.length, 1);
+    assert.equal(saveAs ? calls.downloaded.length : calls.posted.length, 1);
+  }
+});
+
 test('old server success and failure never mark a newly opened project or offer its recovery download', async () => {
   for (const failure of [false, true]) {
     const {context, calls, save} = fixture();
