@@ -321,7 +321,11 @@
     if (wrapCharsLeftInput) wrapCharsLeftInput.value = '';
     if (wrapCharsRightInput) wrapCharsRightInput.value = '';
     wrapCharsModal?.classList.add('show');
-    wrapCharsLeftInput?.focus();
+    setTimeout(() => {
+      if (wrapCharsModal?.classList.contains('show') && !wrapCharsModal.contains(document.activeElement)) {
+        wrapCharsLeftInput?.focus();
+      }
+    }, 50);
   }
 
 

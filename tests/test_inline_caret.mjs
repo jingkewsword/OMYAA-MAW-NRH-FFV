@@ -80,9 +80,15 @@ test('custom wrapping keeps focus with the next field after opening tasks finish
   vm.runInNewContext(readFileSync(new URL('../web/editor/cues/editor-text-process.js', import.meta.url), 'utf8'), context);
   const api = context.window.MaweTextProcess;
   api.openWrapCharsModal([0]);
-  const initialFocus = document.activeElement;
-  api.wrapCharsRightInput.focus();
+  assert.equal(document.activeElement, null);
   timers.forEach(callback => callback());
+  assert.equal(document.activeElement, api.wrapCharsLeftInput);
+  api.openWrapCharsModal([0]);
+  api.wrapCharsRightInput.focus();
+  timers.at(-1)();
   assert.equal(document.activeElement, api.wrapCharsRightInput);
-  assert.equal(initialFocus, api.wrapCharsLeftInput);
+  api.closeWrapCharsModal();
+  document.activeElement = null;
+  timers.at(-1)();
+  assert.equal(document.activeElement, null);
 });

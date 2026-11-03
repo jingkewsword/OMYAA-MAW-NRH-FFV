@@ -428,10 +428,12 @@ MaweDom.timedTextEditView?.addEventListener('click', (event) => {
   else MaweTimedTextEdit.renderTimedTextEditRows();
   MaweTimedTextEdit.renderTimedTextEditView();
   MaweTimedTextEdit.flushTimedTextEditReport();
-  // Rendering has already exposed the target. Focus within this click so a later
-  // user click or keyboard input cannot be overtaken by a queued focus task.
-  (nextView === 'single'
-    ? MaweDom.timedTextEditSingleTextarea : MaweDom.timedTextEditRows.querySelector('textarea'))?.focus();
+  setTimeout(() => {
+    if (!MaweDom.timedTextEditModal.classList.contains('show')
+      || MaweDom.timedTextEditModal.contains(document.activeElement)) return;
+    (nextView === 'single'
+      ? MaweDom.timedTextEditSingleTextarea : MaweDom.timedTextEditRows.querySelector('textarea'))?.focus();
+  }, 0);
 });
 MaweDom.timedTextEditShowAll?.addEventListener('click', () => {
   if (!MaweDom.timedTextEditDraft) return;

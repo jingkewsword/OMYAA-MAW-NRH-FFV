@@ -205,15 +205,13 @@ test('switching text views does not overwrite the next editor focus or input', a
       });
     }
   });
-  await page.locator('#timed-text-edit-view [data-view="single"]').click();
-  const initialSingleFocused = await page.locator('#timed-text-edit-single-textarea')
-    .evaluate(element => element === document.activeElement);
+  const singleButton = page.locator('#timed-text-edit-view [data-view="single"]');
+  await singleButton.click();
   await page.clock.runFor(1);
   await expect(page.locator('#timed-text-edit-single-textarea')).toBeFocused();
   await page.locator('#timed-text-edit-single-textarea').fill('就是那颗\nabc');
   await page.locator('#timed-text-edit-view [data-view="rows"]').click();
   const rows = page.locator('#timed-text-edit-rows textarea');
-  const initialRowFocused = await rows.nth(0).evaluate(element => element === document.activeElement);
   await rows.nth(1).click();
   await page.keyboard.press('ControlOrMeta+a');
   await page.clock.runFor(1);
@@ -225,8 +223,10 @@ test('switching text views does not overwrite the next editor focus or input', a
   await expect(rows.nth(0)).toHaveValue('就是那颗');
   await expect(rows.nth(1)).toHaveValue('abXc');
   await expect(rows.nth(1)).toBeFocused();
-  expect(initialSingleFocused).toBe(true);
-  expect(initialRowFocused).toBe(true);
+  await singleButton.focus();
+  await page.keyboard.press('Enter');
+  await page.clock.runFor(1);
+  await expect(singleButton).toBeFocused();
 });
 
 test('shows disabled subtitles on demand without replacing hidden cues', async ({ page }) => {

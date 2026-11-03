@@ -29,12 +29,6 @@ for (const view of ['rows', 'single']) for (const entry of ['mouse', 'keyboard']
     await page.evaluate(view => {
       MaweBoot.DATA.timed_text_edit_view = view;
       MaweSelection.selectOnly(90);
-      // Capture the end of the real click dispatch, including menu cleanup.
-      document.addEventListener('click', event => {
-        if (event.target.closest('#timed-text-edit-btn')) {
-          window.modalInitialFocus = document.activeElement?.id || document.activeElement?.tagName;
-        }
-      });
     }, view);
     await page.clock.install();
     await page.clock.pauseAt(new Date());
@@ -49,7 +43,8 @@ for (const view of ['rows', 'single']) for (const entry of ['mouse', 'keyboard']
       await page.keyboard.press('Enter');
     }
     const editor = page.locator(view === 'rows' ? '#timed-text-edit-rows textarea' : '#timed-text-edit-single-textarea').first();
-    expect(await page.evaluate(() => window.modalInitialFocus)).toBe(view === 'rows' ? 'TEXTAREA' : 'timed-text-edit-single-textarea');
+    await expect(editor).not.toBeFocused();
+    await page.clock.runFor(50);
     await expect(editor).toBeFocused();
     if (view === 'rows') {
       await expect(page.locator('.timed-text-edit-row[data-index="90"]')).toBeInViewport();
@@ -93,6 +88,30 @@ for (const view of ['rows', 'single']) for (const entry of ['mouse', 'keyboard']
   });
 }
 
+test('opening delay preserves early search focus and close', async ({ page }) => {
+  await page.clock.install();
+  await page.clock.pauseAt(new Date());
+  await page.locator('#batch-operations-btn').click();
+  await page.locator('#timed-text-edit-btn').click();
+  await page.keyboard.press('Control+f');
+  const search = page.locator('#timed-text-edit-find');
+  await search.fill('Subtitle 90');
+  const rows = page.locator('#timed-text-edit-rows');
+  const before = await rows.evaluate(element => element.scrollTop);
+  await page.clock.runFor(50);
+  await expect(search).toBeFocused();
+  await expect(search).toHaveValue('Subtitle 90');
+  expect(await rows.evaluate(element => element.scrollTop)).toBe(before);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#timed-text-edit-modal')).not.toHaveClass(/show/);
+  await page.locator('#batch-operations-btn').click();
+  await page.locator('#timed-text-edit-btn').click();
+  await page.keyboard.press('Escape');
+  await page.clock.runFor(50);
+  await expect(page.locator('#timed-text-edit-modal')).not.toHaveClass(/show/);
+  expect(await page.evaluate(() => MaweDom.timedTextEditModal.contains(document.activeElement))).toBe(false);
+});
+
 test('custom wrapping real context-menu click focuses once and preserves Tab and typing', async ({ page }) => {
   await page.clock.install();
   await page.clock.pauseAt(new Date());
@@ -100,6 +119,8 @@ test('custom wrapping real context-menu click focuses once and preserves Tab and
   await page.getByText('左右添加字符', { exact: true }).click();
   await page.locator('#ctxmenu').getByText('自定义…', { exact: true }).click();
   const left = page.locator('#wrap-chars-left'), right = page.locator('#wrap-chars-right');
+  await expect(left).not.toBeFocused();
+  await page.clock.runFor(50);
   await expect(left).toBeFocused();
   await page.keyboard.press('Tab');
   await expect(right).toBeFocused();
