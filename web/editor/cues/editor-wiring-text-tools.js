@@ -428,8 +428,12 @@ MaweDom.timedTextEditView?.addEventListener('click', (event) => {
   else MaweTimedTextEdit.renderTimedTextEditRows();
   MaweTimedTextEdit.renderTimedTextEditView();
   MaweTimedTextEdit.flushTimedTextEditReport();
-  setTimeout(() => (nextView === 'single'
-    ? MaweDom.timedTextEditSingleTextarea : MaweDom.timedTextEditRows.querySelector('textarea'))?.focus(), 0);
+  setTimeout(() => {
+    if (!MaweDom.timedTextEditModal.classList.contains('show')
+      || MaweDom.timedTextEditModal.contains(document.activeElement)) return;
+    (nextView === 'single'
+      ? MaweDom.timedTextEditSingleTextarea : MaweDom.timedTextEditRows.querySelector('textarea'))?.focus();
+  }, 0);
 });
 MaweDom.timedTextEditShowAll?.addEventListener('click', () => {
   if (!MaweDom.timedTextEditDraft) return;
