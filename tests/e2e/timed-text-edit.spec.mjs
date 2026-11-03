@@ -367,11 +367,17 @@ test('search reveals filtered rows in the center and highlights/scrolls the matc
     const rowRect = row.getBoundingClientRect();
     return {
       scrollTop: container.scrollTop,
+      scrollHeight: container.scrollHeight,
+      clientHeight: container.clientHeight,
+      rowTop: rowRect.top,
+      rowHeight: rowRect.height,
+      containerTop: containerRect.top,
+      activeElement: document.activeElement?.id || document.activeElement?.tagName,
       centerError: Math.abs((rowRect.top + rowRect.height / 2) - (containerRect.top + container.clientHeight / 2)),
     };
   });
-  expect(rowPosition.scrollTop).toBeGreaterThan(0);
-  expect(rowPosition.centerError).toBeLessThan(2);
+  expect(rowPosition.scrollTop, JSON.stringify(rowPosition)).toBeGreaterThan(0);
+  expect(rowPosition.centerError, JSON.stringify(rowPosition)).toBeLessThan(2);
   await expect.poll(() => page.evaluate(() => MaweDom.timedTextEditDraft.filter)).toBeNull();
 
   await page.locator('#timed-text-edit-view [data-view="single"]').click();

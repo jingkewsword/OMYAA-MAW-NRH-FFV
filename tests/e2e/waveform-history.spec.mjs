@@ -1734,8 +1734,9 @@ test('contextual help links open their matching Help tabs', async ({ page }) => 
   await page.locator('#gap-remove-help').click();
   await expect(helpPanel).toHaveClass(/show/);
   await expect(page.locator('#help-tab-gap')).toHaveAttribute('aria-selected', 'true');
-  await expect(page.locator('#gap-remove-panel')).not.toHaveClass(/show/);
+  await expect(page.locator('#gap-remove-panel')).toHaveClass(/show/);
   await page.locator('#help-close').click();
+  await page.locator('#gap-remove-manage').click();
 
   for (const { button, tab } of [
     { button: '#waveform-settings-help', tab: '#help-tab-waveform' },
@@ -1745,8 +1746,9 @@ test('contextual help links open their matching Help tabs', async ({ page }) => 
     await page.locator(button).click();
     await expect(helpPanel).toHaveClass(/show/);
     await expect(page.locator(tab)).toHaveAttribute('aria-selected', 'true');
-    await expect(page.locator('#waveform-settings-panel')).toBeHidden();
+    await expect(page.locator('#waveform-settings-panel')).toBeVisible();
     await page.locator('#help-close').click();
+    await closeSettingsPanels(page);
   }
   // 波形操作/按键微调/空隙操作方式设置已移入全局设置「通用操作」，其帮助入口随之迁移
   for (const { button, tab } of [
@@ -1758,8 +1760,9 @@ test('contextual help links open their matching Help tabs', async ({ page }) => 
     await page.locator(button).click();
     await expect(helpPanel).toHaveClass(/show/);
     await expect(page.locator(tab)).toHaveAttribute('aria-selected', 'true');
-    await expect(page.locator('#editor-settings-panel')).toBeHidden();
+    await expect(page.locator('#editor-settings-panel')).toBeVisible();
     await page.locator('#help-close').click();
+    await closeSettingsPanels(page);
   }
 });
 
@@ -1841,8 +1844,8 @@ test('waveform toolbar exposes grouped icon controls and selected cues use a yel
   await expect(selectTool.locator('svg')).toHaveCount(1);
   await expect(splitTool).toContainText('分割');
   await expect(splitTool.locator('svg')).toHaveCount(1);
-  await expect(selectTool).toHaveAttribute('title', /V/);
-  await expect(splitTool).toHaveAttribute('title', /R/);
+  await expect(selectTool).toHaveAttribute('data-title', /V/);
+  await expect(splitTool).toHaveAttribute('data-title', /R/);
   await expect(page.locator('#help-toggle')).toContainText('帮助');
 
   await page.keyboard.press('r');
@@ -2096,6 +2099,8 @@ test('nested export menus preserve pointer reachability and keyboard focus', asy
 
   await exportButton.focus();
   await page.keyboard.press('ArrowDown');
+  await expect(page.locator('#download-green-screen-video')).toBeFocused();
+  await page.keyboard.press('ArrowDown');
   await expect(page.locator('#download-fcp7-export')).toBeFocused();
   await page.keyboard.press('ArrowDown');
   await expect(otioToggle).toBeFocused();
@@ -2109,6 +2114,7 @@ test('nested export menus preserve pointer reachability and keyboard focus', asy
 });
 
 test('nested export menus keep the current submenu while the pointer crosses its aim corridor', async ({ page }) => {
+  await page.clock.install();
   await page.goto(server.url);
   const exportButton = page.locator('#extra-export-btn');
   const otioWrapper = page.locator('#extra-export-menu > .dropdown-submenu').first();
@@ -2125,6 +2131,8 @@ test('nested export menus keep the current submenu while the pointer crosses its
   expect(otioToggleBox).not.toBeNull();
   expect(dynamicToggleBox).not.toBeNull();
 
+  // Freeze only after layout and hover; real pointer events still follow the corridor.
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
   await page.mouse.move(
     otioToggleBox.x + otioToggleBox.width * 0.7,
     otioToggleBox.y + otioToggleBox.height / 2,
@@ -2134,10 +2142,10 @@ test('nested export menus keep the current submenu while the pointer crosses its
     dynamicToggleBox.y + dynamicToggleBox.height / 2,
     { steps: 12 },
   );
-  await page.waitForTimeout(40);
+  await page.clock.fastForward(40);
   await expect(page.locator('#extra-otio-menu')).toBeVisible({ timeout: 100 });
   await expect(page.locator('#extra-dynamic-menu')).toBeHidden();
-  await page.waitForTimeout(180);
+  await page.clock.fastForward(180);
   await expect(page.locator('#extra-dynamic-menu')).toBeVisible();
 });
 
@@ -2286,10 +2294,11 @@ test('server media loads from the resolved project path and OTIO keeps its absol
   await page.goto(server.url);
   const state = await page.evaluate(() => ({
     media: MaweBoot.DATA.media,
+    boundPath: MaweBoot.SERVER_CONFIG.autoLoadedMediaPath,
     currentSrc: document.getElementById('player').currentSrc,
   }));
-  expect(state.media).toMatch(/synthetic\.wav$/);
-  expect(state.media).toMatch(/^(?:[A-Za-z]:[\\/]|\/)/);
+  expect(state.media).toBe('synthetic.wav');
+  expect(state.boundPath).toMatch(/^(?:[A-Za-z]:[\\/]|\/).*synthetic\.wav$/);
   expect(state.currentSrc).toBe(`${server.url}media`);
 
   await page.evaluate(() => {

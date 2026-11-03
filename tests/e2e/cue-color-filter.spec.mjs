@@ -147,6 +147,13 @@ test('detaches a cue from a color group while keeping its color and limiting the
 
 test('color filter button appears only for projects with colored subtitles', async ({ page }) => {
   await waitEditorReady(page);
+  await page.evaluate(() => {
+    for (const segment of MaweBoot.DATA.segments) {
+      delete segment.color;
+      delete segment.color_ref;
+    }
+    MaweCuePanel.renderAll({ waveform: 'none' });
+  });
   await expect(page.locator('#color-filter-btn')).toBeHidden();
   await paintFirstSegmentRed(page);
   await expect(page.locator('#color-filter-btn')).toBeVisible();
@@ -156,20 +163,37 @@ test('colored subtitle indexes remain readable against tinted rows', async ({ pa
   await waitEditorReady(page);
   await paintFirstSegmentRed(page);
 
-  await expect(page.locator('.cue[data-idx="0"] .index')).toHaveCSS(
-    'color',
-    'rgb(168, 177, 192)',
-  );
+  // Colored rows use the theme's secondary text token for readable indexes.
+  const expected = await page.evaluate(() => {
+    const probe = document.createElement('span');
+    probe.style.color = 'var(--text-secondary)';
+    document.body.appendChild(probe);
+    const color = getComputedStyle(probe).color;
+    probe.remove();
+    return color;
+  });
+  await expect(page.locator('.cue[data-idx="0"] .index')).toHaveCSS('color', expected);
 });
 
 test('clicking a row shows only that color; checkboxes multi-select; clear restores all', async ({ page }) => {
   await waitEditorReady(page);
+  // 每个用例共享服务端工程；明确构造一条彩色、两条无色字幕，
+  // 避免共享工程残留的颜色组及 color_ref 改变筛选结果。
+  await page.evaluate(() => {
+    MaweBoot.DATA.segments.splice(0, MaweBoot.DATA.segments.length,
+      { start: 0, end: 1000, text: 'one', items: [] },
+      { start: 1000, end: 2000, text: 'two', items: [] },
+      { start: 2000, end: 3000, text: 'three', items: [] });
+  });
   await paintFirstSegmentRed(page);
   const total = await page.evaluate(() => MaweBoot.DATA.segments.length);
+  expect(total).toBe(3);
 
   await page.locator('#color-filter-btn').click();
   const rows = page.locator('#color-filter-menu .color-filter-item');
   await expect(rows).toHaveCount(2); // 默认 + 红
+  await expect(rows.first().locator('.color-count')).toHaveText('2');
+  await expect(rows.nth(1).locator('.color-count')).toHaveText('1');
 
   // 点击“红”这一行（非 checkbox 区域）= 只显示该颜色。
   await rows.nth(1).locator('.color-name').click();

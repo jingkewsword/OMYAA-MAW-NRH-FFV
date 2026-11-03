@@ -1233,7 +1233,7 @@ test('A/D adjusts a held subtitle block and a held shared boundary', async ({ pa
   await step.press('Tab');
   await page.keyboard.press('Escape');
 
-  const block = page.locator('.waveform-cue-block[data-idx="0"]').first();
+  const block = page.locator('.waveform-cue-block[data-track="main"][data-idx="0"]').first();
   await expect(block).toBeVisible();
   const blockBox = await stableVisibleBoundingBox(page, block);
   await page.mouse.move(blockBox.x + blockBox.width / 2, blockBox.y + blockBox.height / 2);
@@ -1248,7 +1248,7 @@ test('A/D adjusts a held subtitle block and a held shared boundary', async ({ pa
   ]);
 
   // 新模式（中缝联动）下，按住中缝拖动区再按 D：共享边界联动移动。
-  const boundary = page.locator('.waveform-cue-boundary').first();
+  const boundary = page.locator('.waveform-cue-boundary[data-track="main"][data-left-idx="0"]').first();
   await expect(boundary).toBeVisible();
   const boundaryBox = await boundary.boundingBox();
   expect(boundaryBox).not.toBeNull();
