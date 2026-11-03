@@ -172,11 +172,10 @@ test('creates an empty secondary track on enable and imports subtitles optionall
   await dropFiles(page, [srtSpec('main.srt', mainSrt)]);
   const dialogs = [];
   page.on('dialog', async (dialog) => { dialogs.push(dialog.message()); await dialog.dismiss(); });
-  await expect(page.locator('#project-multi-subtitle-settings')).toBeHidden();
+  await expect(page.locator('#multi-subtitle-toggle')).not.toBeChecked();
   await expect(page.locator('#multi-subtitle-toggle-label'))
     .toHaveAttribute('data-title', '开启后显示副字幕轨，可手动添加或导入第二条字幕。');
   await setProjectTrackEnabled(page, 'multi-subtitle-toggle', true);
-  await expect(page.locator('#project-multi-subtitle-settings')).not.toHaveAttribute('hidden');
   await openSettingsPage(page, 'multi-subtitle');
   await expect(page.locator('#multi-subtitle-empty-hint')).toBeVisible();
   await closeSettingsPanels(page);
@@ -206,7 +205,7 @@ test('creates an empty secondary track on enable and imports subtitles optionall
   });
   expect(importGap.above).toBeGreaterThanOrEqual(8);
   expect(importGap.horizontalGap).toBeGreaterThanOrEqual(8);
-  await page.locator('#project-multi-subtitle-settings').screenshot({ path: test.info().outputPath('empty-track-settings.png') });
+  await page.locator('#editor-settings-page-multi-subtitle').screenshot({ path: test.info().outputPath('empty-track-settings.png') });
   const chooserPromise = page.waitForEvent('filechooser');
   await page.locator('#multi-subtitle-import').click();
   const chooser = await chooserPromise;
@@ -217,7 +216,7 @@ test('creates an empty secondary track on enable and imports subtitles optionall
   expect(await page.evaluate(() => MaweMultiSubtitleCore.getActiveExtensionTrack().id)).toBe(trackId);
   expect(await page.evaluate(() => MaweMultiSubtitleCore.getActiveExtensionTrack().segments.length)).toBe(3);
   await page.locator('#undo-btn').click();
-  await openSettingsPage(page, 'project-tracks');
+  await openMultiSubtitleSettings(page);
   await expect(page.locator('#multi-subtitle-empty-hint')).toBeVisible();
   await closeSettingsPanels(page);
   expect(await page.evaluate(() => MaweMultiSubtitleCore.getActiveExtensionTrack().segments.length)).toBe(0);
@@ -234,7 +233,7 @@ test('keeps the quick-import prompt when enabling an empty secondary track', asy
   const chooser = await chooserPromise;
   expect(prompt).toBe('是否导入第二条字幕？（后续也可以将字幕或工程拖入编辑器加载）');
   await expect(page.locator('#multi-subtitle-toggle')).toBeChecked();
-  await openSettingsPage(page, 'project-tracks');
+  await openMultiSubtitleSettings(page);
   await expect(page.locator('#multi-subtitle-empty-hint')).toBeVisible();
   await closeSettingsPanels(page);
   const trackId = await page.evaluate(() => MaweMultiSubtitleCore.getActiveExtensionTrack().id);
@@ -510,7 +509,7 @@ test('light theme keeps the main waveform subtitle white and secondary subtitle 
   });
   expect(colors.main.background).toBe('rgba(255, 255, 255, 0.82)');
   // 初始播放位置命中主字幕活动态，使用亮色主题的活动字幕深色令牌。
-  expect(colors.main.color).toBe('rgb(31, 37, 48)');
+  expect(colors.main.color).toBe('rgb(29, 29, 32)');
   expect(colors.extension.background).toBe('rgba(238, 240, 244, 0.68)');
   expect(colors.extension.background).not.toBe(colors.main.background);
 });
@@ -694,7 +693,7 @@ test('uses the same text editor box styling in single and dual-column modes', as
 
 test('reserves space for the dirty marker beside main dual-column text', async ({ page }) => {
   const project = {
-    segments: [{ id: 'dirty-main-001', start: 0, end: 2000, text: 'main dirty cue', _dirty: true }],
+    segments: [{ id: 'dirty-main-001', start: 0, end: 2000, text: 'main dirty cue' }],
     waveform: generateWaveformPayload(3000),
     multi_subtitle: {
       schema: 'moy.asr.multi_subtitle.v1',
@@ -721,6 +720,11 @@ test('reserves space for the dirty marker beside main dual-column text', async (
   }]);
 
   const main = page.locator('.multi-dual-cue .multi-cue-column.main').first();
+  const text = main.locator('.text');
+  await text.dblclick();
+  await text.fill('main edited cue');
+  await page.keyboard.press('ControlOrMeta+Enter');
+  await page.evaluate(() => MaweCuePanel.renderAll({ waveform: 'full' }));
   await expect(main).toHaveClass(/dirty/);
   const geometry = await main.evaluate((element) => {
     const text = element.querySelector('.text');
@@ -1847,7 +1851,7 @@ test('swaps main and extension subtitles from the gear menu and supports undo', 
   const afterSwap = await page.evaluate(() => AsrEditorUtils.snapshotProjectContent(MaweBoot.DATA));
   // Track entities retain their own cue attributes when their roles change.
   expect(getMainTrack(afterSwap)).toEqual({ ...getExtensionTrack(beforeSwap), role: 'main', enabled: true });
-  expect(getExtensionTrack(afterSwap)).toEqual({ ...getMainTrack(beforeSwap), role: 'extension', enabled: true });
+  expect(getExtensionTrack(afterSwap)).toEqual({ ...getMainTrack(beforeSwap), role: 'secondary', enabled: true });
   expect(afterSwap.subtitle_groups).toEqual(beforeSwap.subtitle_groups);
 
   await page.keyboard.press('ControlOrMeta+z');
@@ -1908,7 +1912,7 @@ test('auto-binds the earliest unbound main cue when an extension overlaps severa
       bindings: [{
         id: 'binding-001', track_id: 'extension-1',
         main_segment_ids: ['main-001'], extension_segment_ids: ['extension-001'],
-        start_offset_ms: 100, end_offset_ms: -100,
+        start_offset_ms: 50, end_offset_ms: -250,
       }],
     },
   };
@@ -2278,6 +2282,41 @@ test('uses G to bind a single extension cue and labels extension context shortcu
   await expect(unboundExtension).toHaveClass(/unbound/);
 });
 
+test('background secondary selection restoration preserves the active cue', async ({ page }) => {
+  await importPair(page);
+  await page.locator('#multi-subtitle-import-extension').click();
+  await page.locator('#multi-subtitle-import-result-confirm').click();
+  const result = await page.evaluate(() => {
+    const selection = MaweState.selection;
+    const main = AsrEditorUtils.getMainTrack(MaweBoot.DATA);
+    const secondary = MaweMultiSubtitleCore.getActiveExtensionTrack();
+    selection.reset();
+    selection.add('main', 0);
+    selection.add('extension', 0, { activate: false });
+    const originalMain = selection.getCurrentCueRef();
+    secondary.segments.reverse();
+    MaweMultiSubtitleCore.sortExtensionTrackSegments(secondary);
+    const mainAfterSort = selection.getCurrentCueRef();
+    const secondaryRef = selection.getSelectedCueRefs().find(ref => ref.track_id === secondary.id);
+    selection.activateRef(secondaryRef);
+    secondary.segments.reverse();
+    MaweMultiSubtitleCore.sortExtensionTrackSegments(secondary);
+    const secondaryAfterSort = selection.getCurrentCueRef();
+    const snapshot = MaweMultiSubtitleCore.extensionTrackSelectionSnapshot(secondary);
+    secondary.segments = secondary.segments.filter(segment => segment.id !== secondaryRef.segment_id);
+    MaweMultiSubtitleCore.restoreExtensionTrackSelection(secondary, snapshot);
+    return { mainId: main.id, secondaryId: secondary.id, originalMain, mainAfterSort,
+      secondaryRef, secondaryAfterSort, afterRemoved: selection.getCurrentCueRef(),
+      selectedAfterRemoved: selection.getSelectedCueRefs() };
+  });
+  expect(result.mainAfterSort).toEqual(result.originalMain);
+  expect(result.originalMain.track_id).toBe(result.mainId);
+  expect(result.secondaryAfterSort).toEqual(result.secondaryRef);
+  expect(result.secondaryRef.track_id).toBe(result.secondaryId);
+  expect(result.afterRemoved).toEqual(result.originalMain);
+  expect(result.selectedAfterRemoved).toEqual([result.originalMain]);
+});
+
 test('normal extension clicks replace stale main selection with the clicked binding', async ({ page }) => {
   await importPair(page);
   await page.locator('#multi-subtitle-import-extension').click();
@@ -2557,9 +2596,12 @@ test('ignores a tiny unbound extension overlap at the main merge boundary', asyn
     end: segment.end,
     text: segment.text,
   })))).toEqual([
-    { id: 'extension-001-merged', start: 1100, end: 1900, text: '已绑定副字幕' },
+    { id: 'extension-001', start: 1100, end: 1900, text: '已绑定副字幕' },
     { id: 'extension-002', start: 2990, end: 3990, text: '边界副字幕' },
   ]);
+  const binding = await page.evaluate(() => ({ binding: MaweBoot.DATA.bindings[0], mainId: AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments[0].id }));
+  expect(binding.binding.source.segment_id).toBe(binding.mainId);
+  expect(binding.binding.target.segment_id).toBe('extension-001');
 });
 
 test('拼合主字幕时同步延展绑定副字幕并支持撤销', async ({ page }) => {
@@ -2911,7 +2953,7 @@ test('keeps the main range fixed when its extension follower hits another extens
   await page.mouse.move(targetX, centerY, { steps: 4 });
   await page.mouse.up();
 
-  await expect(page.locator('#hint-stack')).toContainText('挤压 1 条副字幕');
+  await expect(page.locator('#hint-stack')).toContainText('裁剪 1 条其他副字幕');
   const timing = await page.evaluate(() => ({
     main: [AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments[0].start, AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments[0].end],
     extension: AsrEditorUtils.getExtensionTrack(MaweBoot.DATA).segments.map((segment) => [segment.start, segment.end]),
@@ -4344,6 +4386,10 @@ test('ASS mode previews and exports extension cues with the shared extension sty
   const result = await page.evaluate(() => {
     MaweBoot.DATA.media_metadata = { video_width: 1920, video_height: 1080 };
     ASS_STYLE_LIBRARY = window.AsrEditorUtils.defaultAssStyleLibrary();
+    for (const track of MaweBoot.DATA.tracks) {
+      const id = track.role === 'secondary' ? 'ass-extension' : 'ass';
+      window.AsrEditorUtils.applyTrackStyle(MaweBoot.DATA, track, ASS_STYLE_LIBRARY.styles.find(style => style.id === id));
+    }
     MaweSettings.EDITOR_SETTINGS.assMode = true;
     MaweDom.overlayToggle.checked = true;
     MawePlaybackLoop.refreshSubtitlePreview(1000, 0);
@@ -4366,7 +4412,7 @@ test('ASS mode previews and exports extension cues with the shared extension sty
     };
   });
   // 副字幕共用样式库的「ASS 副字幕样式」：字号 64（主样式 86 的 64/86）、
-  // 默认黄色，跟随其样式预设固定在主字幕下方（MarginV 36）。
+  // 默认黄色，跟随其样式预设固定在主字幕下方（MarginV 100）。
   expect(result.trackDebug).toEqual(['ok', 'ok', 'ok']);
   expect(result.mainNative).toBe(86);
   expect(result.extensionNative).toBe(64);
@@ -4375,10 +4421,10 @@ test('ASS mode previews and exports extension cues with the shared extension sty
   // 底部对齐时主文本块在锚点上方：副字幕锚点低于主字幕锚点即为主下方。
   expect(result.extensionAnchor.y).toBeGreaterThan(result.mainAnchor.y);
   expect(result.extensionAnchor.x).toBeCloseTo(960, 3);
-  // 叠加字幕固定锚定在主字幕上方（88 + round(1.2 * 86) = 191）。
+  // 叠加字幕固定锚定在主字幕上方（180 + round(1.2 * 86) = 283）。
   expect(result.overlayAnchor.y).toBeLessThan(result.mainAnchor.y - result.mainHeight);
   // 导出：副字幕 Layer 1 + 独立 Extension 样式；叠加轨 Layer 2 + 固化
-  // 主样式 marginV 88 + 1.2 × 字号 86 = 191 的 Overlay 样式。
+  // 主样式 marginV 180 + 1.2 × 字号 86 = 283 的 Overlay 样式。
   const dialogueLines = result.ass.split('\n').filter((line) => line.startsWith('Dialogue:'));
   expect(dialogueLines).toHaveLength(3);
   expect(dialogueLines[1]).toMatch(/^Dialogue: 1,/);
@@ -4387,10 +4433,19 @@ test('ASS mode previews and exports extension cues with the shared extension sty
   expect(dialogueLines[2]).toContain(`\\pos(${result.overlayAnchor.x},${result.overlayAnchor.y})`);
   const extensionStyleLine = result.ass.split('\n').find((line) => line.startsWith('Style: Extension,'));
   expect(extensionStyleLine).toBeTruthy();
-  expect(extensionStyleLine).toMatch(/,10,10,36,1$/);
+  expect(extensionStyleLine).toMatch(/,10,10,100,1$/);
   const overlayStyleLine = result.ass.split('\n').find((line) => line.startsWith('Style: Overlay,'));
   expect(overlayStyleLine).toBeTruthy();
-  expect(overlayStyleLine).toMatch(/,10,10,191,1$/);
+  expect(overlayStyleLine).toMatch(/,10,10,283,1$/);
+
+  const unchangedOverlay = await page.evaluate(() => {
+    const mainTrack = AsrEditorUtils.getMainTrack(MaweBoot.DATA);
+    const overlayTrack = AsrEditorUtils.getOverlayTrack(MaweBoot.DATA);
+    const before = AsrEditorUtils.resolveTrackStyle(MaweBoot.DATA, overlayTrack, ASS_STYLE_LIBRARY).style;
+    AsrEditorUtils.updateTrackStyle(MaweBoot.DATA, mainTrack, { marginV: 160 });
+    return { before, after: AsrEditorUtils.resolveTrackStyle(MaweBoot.DATA, overlayTrack, ASS_STYLE_LIBRARY).style };
+  });
+  expect(unchangedOverlay.after).toEqual(unchangedOverlay.before);
 
   const variants = await page.evaluate(() => {
     const main = ASS_STYLE_LIBRARY.styles.find((style) => style.id === 'ass');
@@ -4400,6 +4455,9 @@ test('ASS mode previews and exports extension cues with the shared extension sty
       for (const extensionAlignment of [1, 6, 9]) {
         Object.assign(main, { alignment: mainAlignment, marginV: 160 });
         Object.assign(extension, { alignment: extensionAlignment, marginL: 40, marginR: 50 });
+        for (const track of MaweBoot.DATA.tracks) {
+          window.AsrEditorUtils.applyTrackStyle(MaweBoot.DATA, track, track.role === 'secondary' ? extension : main);
+        }
         MawePlaybackLoop.refreshSubtitlePreview(1000, 0);
         const tracks = window.MaweAssCanvas.lastRender.tracks;
         results.push({ mainAlignment, extensionAlignment,
@@ -4421,9 +4479,9 @@ test('ASS mode previews and exports extension cues with the shared extension sty
     expect(variant.overlay.alignment).toBe(overlayAlignment);
     const mainRow = windowRow(variant.main.alignment);
     const mainTop = variant.main.anchor.y - variant.main.height * mainRow / 2;
-    // 副字幕固定在其样式行位的预设位置（MarginV 36）；底部行位于主字幕下方。
+    // 副字幕固定在其样式行位的预设位置（MarginV 100）；底部行位于主字幕下方。
     const extRow = windowRow(variant.extensionAlignment);
-    const extExpectedY = [36, 540, 1080 - 36][extRow];
+    const extExpectedY = [100, 540, 1080 - 100][extRow];
     expect(variant.extension.anchor.y).toBeCloseTo(extExpectedY, 0);
     // 叠加字幕固定锚定在主字幕上方。
     expect(variant.overlay.anchor.y).toBeLessThan(mainTop);
@@ -4442,7 +4500,7 @@ test('ASS mode previews and exports extension cues with the shared extension sty
   expect(pageErrors, `Page errors: ${pageErrors.join(' | ')}`).toEqual([]);
 });
 
-test('ASS mode swaps subtitle style controls for library selectors and syncs assignments', async ({ page }) => {
+test('ASS mode uses independent project style selectors and library assignments', async ({ page }) => {
   const pageErrors = [];
   page.on('pageerror', (error) => pageErrors.push(String(error?.stack || error)));
   const project = {
@@ -4522,7 +4580,7 @@ test('ASS mode swaps subtitle style controls for library selectors and syncs ass
   await expect(page.locator('#ass-color-style')).toHaveValue('stroke');
   await openSettingsPage(page, 'subtitle-style');
 
-  // 主字幕选择同步到当前 ASS 输出方案关联的样式。
+  // 轨道样式选择只更改工程快照，保留全局输出方案。
   await page.locator('#main-ass-style-select').selectOption('default');
   const profileStyleId = await page.evaluate(() => {
     const library = window.AsrEditorUtils.normalizeAssStyleLibrary(ASS_STYLE_LIBRARY);
@@ -4531,22 +4589,22 @@ test('ASS mode swaps subtitle style controls for library selectors and syncs ass
     );
     return profile.styleId;
   });
-  expect(profileStyleId).toBe('default');
+  expect(profileStyleId).toBe('ass');
 
-  // 副字幕选择同步到库的副字幕槽位；样式库窗口的方案表单（多重字幕模式下
-  // 可见）同步显示同一值。
+  // 副轨选择不改变样式库中的默认副字幕槽位。
   await page.locator('#extension-ass-style-select').selectOption('default');
   await expect(page.locator('#ass-style-manager-open')).toBeVisible();
   await page.locator('#ass-style-manager-open').click();
   await page.locator('#ass-profile-list [data-ass-selection-kind="profile"]').first().click();
   await expect(page.locator('#ass-profile-form')).toBeVisible();
   await expect(page.locator('#ass-profile-extension-style-field')).toBeVisible();
-  await expect(page.locator('#ass-profile-extension-style')).toHaveValue('default');
+  await expect(page.locator('#ass-profile-extension-style')).toHaveValue('ass-extension');
 
-  // 从样式库窗口改回内置副字幕样式：设置页下拉同步；恢复默认，避免
-  // localStorage 里的选择影响后续测试。
+  // 修改全局槽位不覆盖已选工程快照。
+  await page.locator('#ass-profile-extension-style').selectOption('default');
+  await expect(page.locator('#extension-ass-style-select')).toHaveValue('default');
   await page.locator('#ass-profile-extension-style').selectOption('ass-extension');
-  await expect(page.locator('#extension-ass-style-select')).toHaveValue('ass-extension');
+  await expect(page.locator('#extension-ass-style-select')).toHaveValue('default');
   await page.locator('#main-ass-style-select').selectOption('ass');
   await expect(page.locator('#ass-profile-style-id')).toHaveValue('ass');
   expect(pageErrors, `Page errors: ${pageErrors.join(' | ')}`).toEqual([]);
@@ -4644,4 +4702,49 @@ test('ASS export gates extension cues on the multi-subtitle toggle and keeps gap
   const enabledGapRemovedLines = enabled.gapRemoved.split('\n').filter((line) => line.startsWith('Dialogue:'));
   assertSecondaryCoverage(enabledGapRemovedLines, 1000);
   expect(pageErrors, `Page errors: ${pageErrors.join(' | ')}`).toEqual([]);
+});
+
+test('Z/X edits the selected overlay cue and undo restores it without changing main', async ({ page }) => {
+  const project = {
+    segments: [{ id: 'main-zx', start: 1000, end: 4000, text: 'main' }],
+    overlay_track: { enabled: true, segments: [{ id: 'overlay-zx', start: 1200, end: 3800, text: 'overlay' }] },
+    waveform: generateWaveformPayload(5000),
+  };
+  await page.goto(server.url);
+  await dropFiles(page, [{ name: 'overlay-zx.json', type: 'application/json', base64: Buffer.from(JSON.stringify(project)).toString('base64') }]);
+  const block = page.locator('.waveform-cue-block[data-track="overlay"][data-overlay-idx="0"]');
+  await block.click();
+  await moveWaveformPointerToTime(page, block, 2000);
+  await page.keyboard.press('z');
+  const ranges = () => page.evaluate(() => ({
+    main: AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments.map(s => [s.start, s.end]),
+    overlay: AsrEditorUtils.getOverlayTrack(MaweBoot.DATA).segments.map(s => [s.start, s.end]),
+  }));
+  await expect.poll(ranges).toEqual({ main: [[1000, 4000]], overlay: [[2000, 3800]] });
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect.poll(ranges).toEqual({ main: [[1000, 4000]], overlay: [[1200, 3800]] });
+});
+
+
+test('binding auto-sync reports an extra subtitle removed and undo restores both', async ({ page }) => {
+  const project = {
+    segments: [{ id: 'main-bind-impact', start: 1000, end: 3000, text: 'main' }],
+    waveform: generateWaveformPayload(5000),
+    multi_subtitle: { schema: 'moy.asr.multi_subtitle.v1', enabled: true, display_mode: 'both',
+      tracks: [{ id: 'ext-bind-impact', role: 'extension', name: 'English', language: 'en', split_mode: 'word',
+        segments: [
+          { id: 'bound', start: 1200, end: 2000, text: 'bound' },
+          { id: 'covered', start: 2400, end: 2800, text: 'covered' },
+        ] }], bindings: [] },
+  };
+  await page.goto(server.url);
+  await dropFiles(page, [{ name: 'binding-impact.json', type: 'application/json', base64: Buffer.from(JSON.stringify(project)).toString('base64') }]);
+  await page.locator('.multi-cue-column.main').first().click();
+  await page.locator('.multi-cue-column.extension[data-ext-idx="0"]').first().click({ button: 'right' });
+  await page.locator('#ctxmenu .item').filter({ hasText: '与选中的主字幕绑定' }).click();
+  await expect(page.locator('#hint-stack')).toContainText('删除 1 条副字幕');
+  const ranges = () => page.evaluate(() => AsrEditorUtils.getExtensionTrack(MaweBoot.DATA).segments.map(s => [s.id, s.start, s.end]));
+  await expect.poll(ranges).toEqual([['bound', 1000, 3000]]);
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect.poll(ranges).toEqual([['bound', 1200, 2000], ['covered', 2400, 2800]]);
 });
