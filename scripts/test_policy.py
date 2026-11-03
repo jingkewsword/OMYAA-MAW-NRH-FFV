@@ -94,6 +94,11 @@ def node_pack(filename: str) -> str:
 
 def source_test_ids(path: Path) -> list[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"))
+    # unittest lets this hook replace or augment the discovered suite, so
+    # statically visible methods cannot establish its complete ownership.
+    if any(isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "load_tests"
+           for node in tree.body):
+        return []
     return [f"{path.stem}.{cls.name}.{method.name}" for cls in tree.body if isinstance(cls, ast.ClassDef)
             for method in cls.body if isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef))
             and method.name.startswith("test")]

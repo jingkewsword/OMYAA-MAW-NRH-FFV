@@ -468,6 +468,30 @@ class TestWorkflowTests(unittest.TestCase):
             with patch.object(test_policy, "__file__", str(root / "scripts/test_policy.py")):
                 self.assertTrue(ALL_MERGE.issubset(select_packs(["tests/test_dynamic.py"])["packs"]))
 
+    def test_load_tests_hook_broadens_even_with_static_test_methods(self):
+        area = ROOT / ".artifacts/dynamic-test-fixtures"
+        area.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=area) as directory:
+            root = Path(directory)
+            source = root / "tests/test_dynamic.py"
+            source.parent.mkdir()
+            source.write_text(
+                "import unittest\n"
+                "class StaticCase(unittest.TestCase):\n    def test_basic(self): pass\n"
+                "def load_tests(loader, tests, pattern):\n"
+                "    case = type('DynamicCase', (unittest.TestCase,), {\n"
+                "        '__module__': __name__,\n"
+                "        'test_real_audio_pipeline_writes_loadable_artifacts_without_asr': lambda self: None})\n"
+                "    tests.addTests(loader.loadTestsFromTestCase(case))\n"
+                "    return tests\n",
+                encoding="utf-8",
+            )
+            with patch.object(test_policy, "__file__", str(root / "scripts/test_policy.py")):
+                suite = run_tests.build_suite([], str(root / "tests"), "test_*.py")
+                self.assertEqual({test_policy.python_pack(case.id()) for case in run_tests.cases(suite)},
+                                 {"common", "media"})
+                self.assertTrue(ALL_MERGE.issubset(select_packs(["tests/test_dynamic.py"])["packs"]))
+
     def test_explicit_spec_plan_preserves_the_local_consumer(self):
         spec = "tests/e2e/shared-tooltip.spec.mjs"
         with contextlib.redirect_stdout(io.StringIO()), patch.object(test_workflow, "execute") as execute:
