@@ -2,6 +2,28 @@
 
 本页说明当前代码与数据边界；贡献流程见 [CONTRIBUTING](../../CONTRIBUTING.md)，仓库约束与发布规则以 [AGENTS](../../AGENTS.md) 为准。用户文档入口见 [文档索引](../INDEX.md)。
 
+## Linux AppImage 构建与成品核验
+
+`scripts/build-appimage.sh` 保持 Ubuntu 22.04 x86_64 构建基线，先构建前端 bundle，再冻结运行资料、执行 PyInstaller 和组装 AppDir。`scripts/appimage_support.py` 管理该打包路径的依赖身份与成品核验。
+
+FFmpeg 使用 BtbN latest 的 8.1 稳定分支资产。每次构建重新读取上游 checksums；缓存键为真实归档 SHA-256 与资产名，复用前重新校验，解压每次使用新的临时目录。两个工具均通过完整版本和内容检查后才装入。旧 `ffmpeg-static` 解压目录不参与复用。归档与 checksums 在 rolling 更新窗口不一致时构建失败，重新执行即可；构建不依赖 GitHub API 查询。
+
+`scripts/appimage-toolchain.json` 固定官方 appimagetool 与静态 type2-runtime 的 release、来源提交和 SHA-256。工具缓存复用也检查哈希，打包显式传入 `--runtime-file`。当前固定 runtime 静态链接 libfuse3，免除宿主 libfuse2 共享库要求，仍需要内核 FUSE/挂载权限。工具版本字符串可能显示 continuous build，应以固定 release、源提交与产物哈希共同识别。
+
+构建侧保留 `build-appimage/build-manifest.json`，成品内有对应的根清单与 `ffmpeg/BUILD-MANIFEST.json` / `SOURCE.txt`。清单记录双工具完整版本、二进制哈希、真实归档身份和工具链；CI artifact 保存构建侧清单。检查成品须用对应构建侧预期，不能只把包内清单当作自身可信依据：
+
+```sh
+uv run --no-sync python scripts/appimage_support.py verify \
+  --appimage /absolute/path/MAW-Linux-x86_64-vX.Y.Z.AppImage \
+  --manifest /absolute/path/build-manifest.json
+```
+
+该命令检查外层静态 ELF、runtime 版本和字节身份，提取后核对双工具及来源说明。官方 appimagetool 会在 runtime 的 `.digest_md5` 中嵌入成品摘要；身份检查仅归一化该 16 字节槽，其他字节必须与固定官方 runtime 一致。提取目录由本次验证管理并清理，不改原 AppImage。
+
+Linux 行为与打包验证入口是 `.github/workflows/appimage-check.yml`（相关 PR 或手动运行），只保存产物与证据，不发布 Release。其解压/headless 检查和正常 FUSE 检查分开；runner 缺少可用 `/dev/fuse` 时正常挂载明确记为未验证。WSL/真实桌面验收应使用同一份 22.04 构建产物，至少覆盖 22.04 旧端和默认 FUSE3、无 libfuse2 的新端。存活超时不能替代 Launcher 渲染、文件管理器双击或编辑器交互验证。
+
+Codex Cloud 可按同一提交准备 Python 3.11、Node 22/pnpm、uv、Qt 系统库、FFmpeg 和 squashfs-tools，运行行为测试、构建及上面的成品核验。先记录实际系统/架构/网络和 FUSE 条件；默认云环境不能直接当作 Ubuntu 22.04 ABI 基线或完整桌面。若不能提供相应基线，22.04 CI 负责发行构建，云端仅执行与其环境一致的验证。
+
 ## 代码入口
 
 | 位置 | 职责 |
