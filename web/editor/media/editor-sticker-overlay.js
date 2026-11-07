@@ -1,5 +1,3 @@
-import { getOverlayTrack } from '../cues/overlay-track.js';
-
 export function initMaweStickerOverlay() {
 'use strict';
 
@@ -30,6 +28,7 @@ export function initMaweStickerOverlay() {
 
 
   let stickerIntervalCacheVersion = -1;
+  let stickerIntervalTrackKey = '';
 
 
   let stickerIntervals = [];
@@ -57,8 +56,10 @@ export function initMaweStickerOverlay() {
 
 
 
-  function rebuildStickerIntervals() {
-  if (stickerIntervalCacheVersion === stickerOverlayDataVersion) return;
+  function rebuildStickerIntervals(surface = 'preview') {
+  const selected = window.AsrEditorUtils.TrackPolicy.selectTracks(MaweBoot.DATA, 'all', surface);
+  const trackKey = selected.map(track => track.id).join('\0');
+  if (surface === 'preview' && stickerIntervalCacheVersion === stickerOverlayDataVersion && stickerIntervalTrackKey === trackKey) return stickerIntervals;
   const intervals = [];
   const boundaries = new Set();
   // 收集一条轨的表情包区间：ref 在所在轨数组内解析 head。
@@ -79,8 +80,17 @@ export function initMaweStickerOverlay() {
       boundaries.add(end);
     });
   };
-  collect(MaweBoot.DATA.segments, 'main');
-  collect(getOverlayTrack()?.segments || [], 'overlay');
+  if (MaweBoot.DATA.subtitle_groups) {
+    for (const range of window.AsrEditorUtils.subtitleGroupRanges(MaweBoot.DATA, 'sticker', { trackIds: selected.map(track => track.id) })) {
+      if (!range.enabled) continue;
+      intervals.push({ ...range, key: range.id });
+      boundaries.add(range.start); boundaries.add(range.end);
+    }
+  } else {
+    for (const track of selected) collect(track.segments, track.role);
+  }
+  if (surface !== 'preview') return intervals;
+  stickerIntervalTrackKey = trackKey;
   stickerIntervals = intervals;
   stickerIntervalBoundaries = [...boundaries].sort((a, b) => a - b);
   stickerIntervalCacheVersion = stickerOverlayDataVersion;
@@ -89,6 +99,7 @@ export function initMaweStickerOverlay() {
   activeStickerCacheUntil = -Infinity;
   activeStickerCache = [];
   window.MaweStickerPreviewWiring.activeStickerHasOverlay = false;
+  return stickerIntervals;
 }
 
 
@@ -104,13 +115,13 @@ export function initMaweStickerOverlay() {
 
   const found = new Map();  // 同组 head/ref 去重，按文件名键
   stickerIntervals.forEach((interval) => {
-    if (time >= interval.start && time <= interval.end) found.set(interval.key, interval.source);
+    if (time >= interval.start && time < interval.end) found.set(interval.key, interval.source);
   });
   // 当前时刻是否有叠加轨表情包在显示（同名素材在主轨同时显示时也算——
   // 预览层展示的就是这张图，叠加归属用于决定预览内容区是否加高）。
   window.MaweStickerPreviewWiring.activeStickerHasOverlay = stickerIntervals.some((interval) => (
-    interval.track === 'overlay'
-    && time >= interval.start && time <= interval.end
+    (interval.hasOverlay || interval.track === 'overlay')
+    && time >= interval.start && time < interval.end
     && found.has(interval.key)
   ));
   // 播放时间单调前进时，缓存只需保留到下一个边界；二分定位避免每次
@@ -149,14 +160,14 @@ export function initMaweStickerOverlay() {
   }
   const stickers = activeStickersAt(tMs);
   // 签名带上叠加归属：同名素材的显示集合不变但叠加状态翻转时也要切换 class。
-  const signature = `${window.MaweStickerPreviewWiring.activeStickerHasOverlay ? 'O' : ''}\u0001${
-    stickers.map((sticker) => sticker.filename || sticker.name).join('\u0001')
-  }`;
+  const sources = stickers.map(sticker => ({ sticker, url: MaweSelection.stickerUrl(sticker) }));
+  const signature = JSON.stringify([window.MaweStickerPreviewWiring.activeStickerHasOverlay,
+    sources.map(({ sticker, url }) => [url, sticker.name])]);
   if (renderedStickerOverlayEnabled && renderedStickerSignature === signature) return;
   stickerOverlayContent.classList.toggle('has-overlay-sticker', window.MaweStickerPreviewWiring.activeStickerHasOverlay);
-  stickerOverlayContent.replaceChildren(...stickers.map((sticker) => {
+  stickerOverlayContent.replaceChildren(...sources.map(({ sticker, url }) => {
     const img = document.createElement('img');
-    img.src = MaweSelection.stickerUrl(sticker);
+    img.src = url;
     img.alt = sticker.name;
     img.title = sticker.name;
     return img;

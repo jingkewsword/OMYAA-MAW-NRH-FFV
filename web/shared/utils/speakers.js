@@ -1,7 +1,7 @@
 // speakers: private helpers; dependencies are injected by editor-utils.js.
 export function createUtilsModule(dependencies) {
   'use strict';
-  const { effectiveColorName } = dependencies;
+  const { effectiveColorName, getProject, resolveProjectSpeaker } = dependencies;
 
 
   const SPEAKER_LABEL_COLORS = Object.freeze([
@@ -58,18 +58,22 @@ export function createUtilsModule(dependencies) {
     const hasMappingEnabled = Object.prototype.hasOwnProperty.call(source, 'mapping_enabled');
     const hasEnabled = Object.prototype.hasOwnProperty.call(source, 'enabled');
     return {
+      ...source,
       // 旧工程没有独立的映射开关时，沿用原来的 enabled 语义，避免升级后
       // 已配置的说话人名称突然失效；新工程的预览名称默认开启，显式 false 仍保留。
       mapping_enabled: hasMappingEnabled ? source.mapping_enabled === true : source.enabled === true,
       enabled: hasEnabled ? source.enabled === true : true,
       export_enabled: source.export_enabled === true,
       separator: normalizeSpeakerLabelSeparator(source.separator),
-      names: normalizeSpeakerLabels(source.names),
+      names: { ...(source.names && typeof source.names === 'object' && !Array.isArray(source.names) ? source.names : {}),
+        ...normalizeSpeakerLabels(source.names) },
     };
   }
 
 
   function speakerLabelForSegment(segment, segments, labels) {
+    const project = getProject?.();
+    if (project?.annotation_mode === 'speaker') return resolveProjectSpeaker(project, segment)?.name || '';
     const colorName = effectiveColorName(segment, segments);
     if (!colorName) return '';
     return normalizeSpeakerLabels(labels)[colorName] || '';

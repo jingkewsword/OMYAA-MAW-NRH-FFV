@@ -47,7 +47,7 @@ export function initMawePlaybackLoop() {
   function findActive(tMs) {
     // 相邻字幕共用边界时，右侧字幕的 start 优先；处于时间间隙时保留
     // 前一条字幕作为当前项，和原有列表高亮语义一致。
-    return findActiveSegmentIndex(MaweBoot.DATA.segments, tMs);
+    return findActiveSegmentIndex(window.AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments, tMs);
   }
 
 
@@ -146,15 +146,18 @@ MaweCueListAnchor.scrollCueIntoViewIfNeeded(MaweCueListAnchor.playbackCueListEle
 
   function refreshSubtitlePreview(tMs = MaweCoreState.player.currentTime * 1000, idx = findActive(tMs)) {
   // 编辑字幕文本时只刷新播放器预览，避免每输入一个字都触发字幕列表的自动滚动。
-  const sourceSegment = idx >= 0 ? MaweBoot.DATA.segments[idx] : null;
+  const sourceSegment = idx >= 0 ? window.AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments[idx] : null;
   const seg = sourceSegment
-    ? window.AsrGapRemoveCore.projectCleanupRetainedSegments([sourceSegment], MaweBoot.DATA.gap_remove)[0]
+    ? MaweExportSrt.cleanupPreviewSegment(sourceSegment)
     : null;
-  const mainVisible = !!MaweDom.overlayToggle.checked && isSubtitlePreviewActive(seg, tMs);
+  const policy = window.AsrEditorUtils.TrackPolicy;
+  const mainVisible = policy.isTrackEnabled(window.AsrEditorUtils.getMainTrack(MaweBoot.DATA), 'preview')
+    && !!MaweDom.overlayToggle.checked && isSubtitlePreviewActive(seg, tMs);
   const extension = extensionSegmentAtTime(tMs, idx);
-  const extensionVisible = !!MaweDom.extensionOverlayToggle?.checked && !!extension;
+  const extensionVisible = policy.isTrackEnabled(MaweMultiSubtitleCore.getActiveExtensionTrack(), 'preview')
+    && !!MaweDom.extensionOverlayToggle?.checked && !!extension;
   // 独立叠加轨预览：播放头落在叠加字幕内时显示其文本（叠加轨开启即预览）。
-  const overlayCue = overlayTrackVisible()
+  const overlayCue = policy.isTrackEnabled(getOverlayTrack(), 'preview') && overlayTrackVisible()
     ? (getOverlayTrack()?.segments || []).find((segment) => isSubtitlePreviewActive(segment, tMs)) || null
     : null;
   const overlayCueVisible = Boolean(overlayCue);
@@ -175,11 +178,11 @@ MaweCueListAnchor.scrollCueIntoViewIfNeeded(MaweCueListAnchor.playbackCueListEle
   const mainSubtitleColor = subtitleAppearance.color || MaweSettings.DEFAULT_SUBTITLE_COLOR;
   const speakerLabels = MaweSpeakerLabels.getSpeakerLabelSettings();
   const mainColorName = mainVisible && seg
-    ? window.AsrEditorUtils.effectiveColorName(seg, MaweBoot.DATA.segments)
+    ? window.AsrEditorUtils.effectiveColorName(seg, window.AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments)
     : null;
   const speakerLabel = mainVisible && speakerLabels.mapping_enabled && speakerLabels.enabled
     ? window.AsrEditorUtils.speakerLabelForSegment(
-      seg, MaweBoot.DATA.segments, speakerLabels.names,
+      seg, window.AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments, speakerLabels.names,
     )
     : '';
   const speakerLabelVisible = Boolean(speakerLabel && mainColorName && MaweColors.COLOR_BY_NAME[mainColorName]);
@@ -292,7 +295,7 @@ MaweCueListAnchor.scrollCueIntoViewIfNeeded(MaweCueListAnchor.playbackCueListEle
   // 播放刷新每帧都写内联样式。
   let previewSegmentColor = '';
   if (mainVisible && colorPreviewEnabled && seg) {
-    const colorName = window.AsrEditorUtils.effectiveColorName(seg, MaweBoot.DATA.segments);
+    const colorName = window.AsrEditorUtils.effectiveColorName(seg, window.AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments);
     previewSegmentColor = colorName ? MaweColors.COLOR_BY_NAME[colorName]?.value || '' : '';
   }
   const colorUnderline = colorPreviewEnabled

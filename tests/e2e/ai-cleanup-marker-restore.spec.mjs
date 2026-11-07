@@ -26,7 +26,7 @@ async function seed(page) {
       { id: 'human', start: 2500, end: 2800, name: '人工', color: '#8e4ec6' },
       { id: 'review', start: 3000, end: 4000, note: '[AI] 复核：待确认', review: { status: 'pending' } },
     ]);
-    MaweBoot.DATA.segments[0].disabled = true;
+    AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments[0].disabled = true;
     const provenance = AsrGapRemoveCore.normalizeGapRemoveProvenance({ sources: {
       ai_cleanup: [{ id: 'auto-source', start: 1000, end: 2000 }],
       audio_gate: [{ id: 'overlap', start: 1500, end: 2200 }],
@@ -66,7 +66,7 @@ test('automatic removal restores actual audio range through popup, undo, save an
   await expect(action()).toHaveText('移除');
   expect(await removedRanges(page)).toEqual([{ start: 2000, end: 2200 }]);
   expect(await page.evaluate(() => MaweGapRemoveData.getGapRemoveData(false).provenance.sources)).toEqual(sources);
-  expect(await page.evaluate(() => MaweBoot.DATA.segments[0].disabled)).toBe(true);
+  expect(await page.evaluate(() => AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments[0].disabled)).toBe(true);
   await page.locator('#undo-btn').click();
   popup = await openPopup(page);
   await expect(status()).toHaveText('已移除');

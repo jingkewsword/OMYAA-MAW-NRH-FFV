@@ -25,7 +25,7 @@ declare const __STICKER_ROOT_JSON__: string;
 declare const __STICKER_URL_PREFIX_JSON__: string;
 declare const __SERVER_CONFIG_JSON__: any;
 
-/** 毫秒整数。JSON_SCHEMA.md：segments[*].start/end 必须为整数毫秒。 */
+/** 毫秒整数。工程契约：tracks[*].segments[*].start/end 必须为整数毫秒。 */
 type Milliseconds = number;
 
 interface ProjectSegmentItem {
@@ -39,20 +39,42 @@ interface AssCueOverride { pos?: { x: number; y: number }; scale?: number; }
 interface ProjectColorMark { name: string; value?: string | null; start?: number; end?: number; }
 interface ProjectGroupRef { name: string; headIdx: number; }
 interface ProjectSegment {
-  id?: string;
+  id: string;
   start: Milliseconds;
   end: Milliseconds;
   text: string;
   disabled?: boolean;
   speaker?: string;
   assOverride?: AssCueOverride;
-  color?: string | ProjectColorMark;
-  color_ref?: ProjectGroupRef | null;
-  sticker?: unknown;
-  sticker_ref?: ProjectGroupRef | null;
-  /** 运行时脏标记：保存前清点修改过的段，不进工程 JSON。 */
+  color_group_id?: string;
+  sticker_group_id?: string;
+  assStyle?: Record<string, any>;
   _dirty?: boolean;
   items?: ProjectSegmentItem[];
+}
+
+interface ProjectTrack {
+  id: string;
+  role: 'main' | 'secondary' | 'overlay';
+  name: string;
+  enabled: boolean;
+  segments: ProjectSegment[];
+  language?: string;
+  language_source?: string;
+  split_mode?: string;
+  split_mode_override?: string;
+  timestamp_granularity?: string;
+  model?: string;
+  preserve_punctuation?: boolean;
+  source_name?: string;
+}
+
+interface ProjectBinding {
+  id: string;
+  source: { track_id: string; segment_id: string };
+  target: { track_id: string; segment_id: string };
+  start_offset_ms: Milliseconds;
+  end_offset_ms: Milliseconds;
 }
 
 interface ProjectMediaMetadata {
@@ -79,15 +101,18 @@ interface ProjectOverlayTrack {
 }
 
 interface ProjectData {
-  schema?: string;
-  segments: ProjectSegment[];
+  schema: 'moy.asr.project.v2';
+  tracks: ProjectTrack[];
+  styles?: Array<Record<string, unknown>>;
+  bindings: ProjectBinding[];
+  bilingual: { display_mode: string; active_track_id?: string };
+  subtitle_groups?: {
+    next_id: number;
+    color: Array<{ id: string; value: Record<string, unknown> }>;
+    sticker: Array<{ id: string; value: Record<string, unknown> }>;
+  };
   media?: string;
-  language?: string;
-  language_source?: string;
-  split_mode?: string;
   timed_text_edit_view?: 'rows' | 'single';
-  timestamp_granularity?: string;
-  model?: string;
   media_metadata?: ProjectMediaMetadata;
   audio_processing?: { gain_db: number; target_lufs: number; peak_ceiling_dbtp: number };
   timebase?: Record<string, unknown>;
@@ -97,8 +122,6 @@ interface ProjectData {
   script_alignment?: unknown;
   workspace?: unknown;
   preview?: Record<string, unknown>;
-  overlay_track?: ProjectOverlayTrack;
-  multi_subtitle?: unknown;
 }
 
 // 冻结门面契约：模块通过 global.MaweXxx = Object.freeze({...}) 挂载，
@@ -121,6 +144,9 @@ interface MaweBootApi {
 
 interface MaweExportSrtApi {
   cleanupMainSegments: () => ProjectSegment[];
+  cleanupPreviewSegment: (segment: ProjectSegment) => ProjectSegment;
+  setCleanupProjectionCacheEnabled: (enabled: boolean) => void;
+  isCleanupProjectionCacheEnabled: () => boolean;
   currentAssVideoResolution: any;
   assExportOptions: any;
   buildAss: any;
@@ -189,6 +215,7 @@ declare const activeExtensionSegments: any;
 interface Window {
   MaweExportContext: any;
   MaweCuePanelWiring: any;
+  MaweSpeakerLabels: any;
   MaweOverlaySplitMerge: any;
   MaweAssStorageWiring: any;
   MaweAssManagerWiring: any;
@@ -235,6 +262,8 @@ declare var MaweHost: MaweHostApi;
 interface Window { MaweHost: MaweHostApi; }
 
 type SelectionTrack = 'main' | 'extension' | 'overlay';
+interface CueRef { track_id: string; segment_id: string; }
+interface SelectionSnapshot { refs: CueRef[]; current: CueRef | null; anchors: Record<SelectionTrack, CueRef | null>; }
 interface SelectionIndices extends Iterable<number> {
   readonly size: number;
   has(index: number): boolean;
@@ -248,7 +277,16 @@ interface MaweStateApi {
   readonly selection: {
     mainAnchor: number; extensionAnchor: number; overlayAnchor: number;
     indices(kind: SelectionTrack): SelectionIndices;
-    add(kind: SelectionTrack, index: number): void;
+    add(kind: SelectionTrack, index: number, options?: { activate?: boolean }): void;
+    addRef(ref: CueRef, options?: { activate?: boolean }): void;
+    activateRef(ref: CueRef): void;
+    removeRef(ref: CueRef): boolean;
+    replaceRefs(refs: Iterable<CueRef>, active?: CueRef | null): void;
+    getSelectedCueRefs(): CueRef[];
+    getCurrentCueRef(): CueRef | null;
+    getCurrentTrack(): ProjectTrack | null;
+    snapshot(): SelectionSnapshot;
+    restore(snapshot: SelectionSnapshot): void;
     remove(kind: SelectionTrack, index: number): boolean;
     clear(kind: SelectionTrack): void;
     replace(kind: SelectionTrack, indices: Iterable<number>): void;
@@ -264,8 +302,16 @@ interface MaweStateApi {
     currentCuePanelIdx: number; currentCuePanelKind: SelectionTrack; currentCuePanelTrackId: string | null;
     cuePanelUndoPushed: boolean; cuePanelUndoRecord: any; cuePanelTextEditSnapshot: any; cuePanelCanceling: boolean };
   readonly editing: { editingState: any; extensionEditingState: any };
-  readonly changes: { projectImportDirty: boolean; gapRemoveDirty: boolean; previewGeometryDirty: boolean; audioProcessingDirty: boolean };
+  readonly changes: { projectImportDirty: boolean; gapRemoveDirty: boolean; previewGeometryDirty: boolean; audioProcessingDirty: boolean; processingOverridesDirty: boolean };
   hasProjectChanges(pendingText?: boolean): boolean;
+  readonly projectEpoch: number;
+  projectFingerprint(value?: any): string;
+  persistenceSnapshot(value: any): any;
+  setSnapshotReader(reader: () => any): void;
+  beginProjectSession(): void;
+  establishProjectCheckpoint(options?: { repaired?: boolean }): void;
+  rememberSessionHighlights(): void;
+  restoreSessionHighlights(): void;
   segmentsFingerprint(): string;
   noteSavedSegments(fingerprint?: string): void;
   markSaved(): void;
@@ -310,6 +356,7 @@ interface Window {
   MaweAssFrame?: { notifyProjectChanged?(): void };
   webkitAudioContext?: typeof AudioContext;
   AsrGapRemoveCore: {
+    createCleanupRetainedProjector(gapRemove: unknown): (segments: ProjectSegment[]) => ProjectSegment[];
     projectCleanupRetainedSegments(segments: ProjectSegment[], gapRemove: unknown): ProjectSegment[];
     getCleanupScopeItems(segment: ProjectSegment, gap: unknown): ProjectSegmentItem[];
     isGapRemoveDisplayProtected(gap: import('../media/waveform/waveform-types.js').Gap): boolean;

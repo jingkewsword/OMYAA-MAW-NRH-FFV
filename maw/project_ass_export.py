@@ -27,7 +27,8 @@ from maw.ass_styles import (
 )
 from maw.colors import COLOR_PALETTE
 from maw.postprocess_ai_cleanup_items import cleaned_srt_segments
-from maw.project import PROJECT_SCHEMA
+from maw.project import normalize_project, ProjectValidationFailed
+from maw.track_output import select_export_tracks
 from maw.script_alignment import project_cleanup_retained_segments
 
 PROJECT_SUBTITLE_EXTENSIONS: frozenset[str] = frozenset({".mosp", ".json"})
@@ -85,27 +86,9 @@ def _ass_color_style(value: object) -> str:
     return text if text in {"text", "speaker", "stroke", "none"} else "text"
 
 
-def _effective_color_name(segment: Mapping[str, object], segments: list[object]) -> str | None:
-    direct = segment.get("color")
-    if isinstance(direct, Mapping):
-        name = direct.get("name")
-        if isinstance(name, str) and name:
-            return name
-    reference = segment.get("color_ref")
-    if isinstance(reference, Mapping):
-        head_index = reference.get("headIdx")
-        if isinstance(head_index, int) and 0 <= head_index < len(segments):
-            head = segments[head_index]
-            if isinstance(head, Mapping):
-                head_color = head.get("color")
-                if isinstance(head_color, Mapping):
-                    name = head_color.get("name")
-                    if isinstance(name, str) and name:
-                        return name
-        name = reference.get("name")
-        if isinstance(name, str) and name:
-            return name
-    return None
+def _effective_color_name(segment: Mapping[str, object], groups: Mapping[str, object]) -> str | None:
+    value = groups.get(str(segment.get("color_group_id") or ""))
+    return str(value.get("name") or "") or None if isinstance(value, Mapping) else None
 
 
 def escape_ass_text(text: object) -> str:
@@ -167,23 +150,24 @@ def _overlay_base_style(family: str, size: int, color: str, margin_v: int) -> di
     return style
 
 
-def _main_event(segment: Mapping[str, object], segments: list[object], *, color_style: str) -> str | None:
+def _main_event(segment: Mapping[str, object], groups: Mapping[str, object], *, color_style: str,
+                prefix: str = "", layer: int = 0) -> str | None:
     times = _cue_times(segment)
     if times is None:
         return None
     start_cs, end_cs = times
-    color_name = _effective_color_name(segment, segments)
+    color_name = _effective_color_name(segment, groups)
     style_name = (
-        color_name.upper()
+        f"{prefix}{color_name.upper()}"
         if color_style in {"text", "stroke"} and color_name in ASS_COLOR_STYLE_NAMES
-        else "Default"
+        else (prefix.rstrip() or "Default")
     )
     text = escape_ass_text(segment.get("text"))
-    return f"Dialogue: 0,{_format_ass_time(start_cs)},{_format_ass_time(end_cs)},{style_name},,0,0,0,,{text}"
+    return f"Dialogue: {layer},{_format_ass_time(start_cs)},{_format_ass_time(end_cs)},{style_name},,0,0,0,,{text}"
 
 
 def _overlay_events(
-    segments: list[object], *, color_style: str, family: str, size: int, color: str,
+    segments: list[object], *, groups: Mapping[str, object], color_style: str, family: str, size: int, color: str,
 ) -> tuple[list[str], list[str]]:
     events: list[str] = []
     enabled = [s for s in segments if isinstance(s, Mapping) and s.get("disabled") is not True]
@@ -196,7 +180,7 @@ def _overlay_events(
             continue
         start_cs = max(0, _round_half_up(start / 10))
         end_cs = max(start_cs + 1, _round_half_up(end / 10))
-        color_name = _effective_color_name(segment, segments)
+        color_name = _effective_color_name(segment, groups)
         style_name = (
             f"Overlay {color_name.upper()}"
             if color_style in {"text", "stroke"} and color_name in ASS_COLOR_STYLE_NAMES
@@ -228,46 +212,71 @@ def render_project_ass(
     *,
     title: str,
     play_resolution: tuple[int, int],
+    mode: str = "main",
 ) -> str:
     """把工程渲染为基础 ASS（编辑器非 ASS 模式导出分支的 Python 复刻）。"""
-
+    try:
+        project = normalize_project(dict(project))
+    except ProjectValidationFailed as error:
+        raise ProjectSubtitleError(str(error)) from error
+    groups = {group["id"]: group["value"] for group in project["subtitle_groups"]["color"]}
     play_res_x = max(1, int(play_resolution[0]))
     play_res_y = max(1, int(play_resolution[1]))
     preview = project.get("preview")
     appearance: Mapping[str, object] = (
         preview.get("subtitle") if isinstance(preview, Mapping) and isinstance(preview.get("subtitle"), Mapping) else {}
     )
+    labels = appearance.get("speaker_labels")
+    if (project.get("annotation_mode") == "speaker" and isinstance(labels, Mapping)
+            and labels.get("mapping_enabled", labels.get("enabled", False))
+            and (labels.get("enabled", True) or labels.get("export_enabled", False))):
+        raise ProjectSubtitleError("基础 ASS 输出尚未支持独立身份姓名；请关闭姓名前缀，或使用编辑器的 ASS 导出。")
     family = _font_family(appearance.get("font_family"))
     size = _font_size(appearance, play_res_y)
     color = _primary_color(appearance)
     color_style = _ass_color_style(appearance.get("ass_color_style"))
 
-    raw_segments = project.get("segments")
+    try:
+        selected = select_export_tracks(project, mode)
+    except ValueError as error:
+        raise ProjectSubtitleError(str(error)) from error
+    main = next((track for track in selected if track["role"] == "main"), None)
+    overlay = next((track for track in selected if track["role"] == "overlay"), None)
+    secondary = next((track for track in selected if track["role"] == "secondary"), None)
+    raw_segments = main["segments"] if main else []
     if not isinstance(raw_segments, list):
         raise ProjectSubtitleError("工程中没有字幕段落。")
     main_segments = cleaned_srt_segments(
         project,
         project_cleanup_retained_segments(raw_segments, project.get("gap_remove")),
     )
-    # color_ref.headIdx addresses the original project array, even when cleanup drops empty cues.
     events = [
         event
         for segment in main_segments
         if isinstance(segment, Mapping) and segment.get("disabled") is not True
         and isinstance(segment.get("text"), str) and segment["text"].strip()
-        and (event := _main_event(segment, raw_segments, color_style=color_style)) is not None
+        and (event := _main_event(segment, groups, color_style=color_style)) is not None
     ]
 
-    overlay_track = project.get("overlay_track")
-    overlay_segments: list[object] = []
-    if isinstance(overlay_track, Mapping) and overlay_track.get("enabled") is True:
-        raw_overlay = overlay_track.get("segments")
-        if isinstance(raw_overlay, list):
-            overlay_segments = raw_overlay
+    overlay_segments = overlay["segments"] if overlay else []
     overlay_lines, overlay_events = _overlay_events(
-        overlay_segments, color_style=color_style, family=family, size=size, color=color,
+        overlay_segments, groups=groups, color_style=color_style, family=family, size=size, color=color,
     )
     events.extend(overlay_events)
+    secondary_lines: list[str] = []
+    if secondary:
+        secondary_style = _stroke_base_style(family, size, color)
+        secondary_lines.append(ass_style_line(secondary_style, name="Secondary"))
+        if color_style in {"text", "stroke"}:
+            for name, value in COLOR_PALETTE:
+                variant = dict(secondary_style)
+                variant["primaryColor" if color_style == "text" else "outlineColor"] = value
+                secondary_lines.append(ass_style_line(variant, name=f"Secondary {name.upper()}"))
+        events.extend(event for segment in secondary["segments"]
+                      if isinstance(segment, Mapping) and segment.get("disabled") is not True
+                      and isinstance(segment.get("text"), str) and segment["text"].strip()
+                      and (event := _main_event(segment, groups, color_style=color_style,
+                                                prefix="Secondary ", layer=1)) is not None)
     if not events:
         raise ProjectSubtitleError("工程中没有可用的字幕条目，无法烧录。")
 
@@ -294,6 +303,7 @@ def render_project_ass(
             variant["outlineColor"] = value
             header.append(ass_style_line(variant, name=name.upper()))
     header.extend(overlay_lines)
+    header.extend(secondary_lines)
     return "\n".join([*header, "", "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text", *events, ""])
 
 
@@ -313,6 +323,7 @@ def load_burn_project(path: Path) -> tuple[dict[str, object], str]:
         raise ProjectSubtitleError(f"工程文件不是有效的 JSON：{error}") from error
     if not isinstance(payload, dict):
         raise ProjectSubtitleError("工程文件内容不是 JSON 对象。")
-    if "schema" in payload and payload["schema"] != PROJECT_SCHEMA:
-        raise ProjectSubtitleError(f"不支持的工程版本；烧录仅支持 {PROJECT_SCHEMA}。")
-    return payload, path.stem
+    try:
+        return normalize_project(payload), path.stem
+    except ProjectValidationFailed as error:
+        raise ProjectSubtitleError(str(error)) from error
