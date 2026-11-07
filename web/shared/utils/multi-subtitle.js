@@ -226,10 +226,36 @@ export function createUtilsModule(dependencies) {
     const mainById = new Map((Array.isArray(mainSegments) ? mainSegments : [])
       .map((segment) => [stableId(segment?.id), segment]));
     const trackById = new Map((multiSubtitle.tracks || []).map((track) => [track.id, track]));
+    // Index referenced tracks lazily and incrementally for this call only.
+    // A track with one early binding need not scan its entire segment array.
+    const extensionIndexes = new Map();
     (multiSubtitle.bindings || []).forEach((binding) => {
       const main = mainById.get(binding.main_segment_ids?.[0]);
       const track = trackById.get(binding.track_id);
-      const extension = track?.segments?.find((segment) => segment.id === binding.extension_segment_ids?.[0]);
+      const segments = track?.segments;
+      let extension;
+      if (segments != null) {
+        const id = binding.extension_segment_ids?.[0];
+        if (!Array.isArray(segments)) {
+          extension = segments.find((segment) => segment.id === id);
+        } else {
+          let index = extensionIndexes.get(track);
+          if (!index) {
+            index = { byId: new Map(), cursor: 0 };
+            extensionIndexes.set(track, index);
+          }
+          // NaN never matches strict equality, even against another NaN.
+          const matchable = !Number.isNaN(id);
+          if (matchable && index.byId.has(id)) extension = index.byId.get(id);
+          else while (index.cursor < segments.length) {
+            // Like find, access a hole/null only if the search reaches it.
+            const segment = segments[index.cursor++];
+            const segmentId = segment.id;
+            if (!index.byId.has(segmentId)) index.byId.set(segmentId, segment);
+            if (segmentId === id) { extension = segment; break; }
+          }
+        }
+      }
       if (!main || !extension) return;
       binding.start_offset_ms = Math.round(Number(extension.start) - Number(main.start));
       binding.end_offset_ms = Math.round(Number(extension.end) - Number(main.end));
