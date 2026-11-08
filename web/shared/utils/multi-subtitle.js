@@ -206,6 +206,28 @@ export function createUtilsModule(dependencies) {
     }) || null;
   }
 
+  // The dual-column list only needs a boolean marker for each extension cue.
+  // Build this for one render, so later binding edits cannot leave it stale.
+  function buildBoundExtensionIdSet(multiSubtitle, trackId) {
+    const bound = new Set();
+    const bindings = Array.isArray(multiSubtitle?.bindings) ? multiSubtitle.bindings : [];
+    for (const binding of bindings) {
+      // Fall back to bindingForSegment for unusual non-normalized records.
+      if (!binding) return null;
+      if (trackId && binding.track_id !== trackId) continue;
+      if (binding.main_segment_ids != null && !Array.isArray(binding.main_segment_ids)
+          && typeof binding.main_segment_ids !== 'string') return null;
+      if (binding.extension_segment_ids != null && !Array.isArray(binding.extension_segment_ids)) return null;
+      for (const id of binding.extension_segment_ids || []) bound.add(id);
+    }
+    return bound;
+  }
+
+  function boundExtensionIdSetHas(bound, segmentId) {
+    const id = stableId(segmentId);
+    return Boolean(id && bound.has(id));
+  }
+
 
   function buildSubtitleBinding(mainSegment, extensionSegment, trackId, id = null) {
     const main = mainSegment || {};
@@ -226,10 +248,36 @@ export function createUtilsModule(dependencies) {
     const mainById = new Map((Array.isArray(mainSegments) ? mainSegments : [])
       .map((segment) => [stableId(segment?.id), segment]));
     const trackById = new Map((multiSubtitle.tracks || []).map((track) => [track.id, track]));
+    // Index referenced tracks lazily and incrementally for this call only.
+    // A track with one early binding need not scan its entire segment array.
+    const extensionIndexes = new Map();
     (multiSubtitle.bindings || []).forEach((binding) => {
       const main = mainById.get(binding.main_segment_ids?.[0]);
       const track = trackById.get(binding.track_id);
-      const extension = track?.segments?.find((segment) => segment.id === binding.extension_segment_ids?.[0]);
+      const segments = track?.segments;
+      let extension;
+      if (segments != null) {
+        const id = binding.extension_segment_ids?.[0];
+        if (!Array.isArray(segments)) {
+          extension = segments.find((segment) => segment.id === id);
+        } else {
+          let index = extensionIndexes.get(track);
+          if (!index) {
+            index = { byId: new Map(), cursor: 0 };
+            extensionIndexes.set(track, index);
+          }
+          // NaN never matches strict equality, even against another NaN.
+          const matchable = !Number.isNaN(id);
+          if (matchable && index.byId.has(id)) extension = index.byId.get(id);
+          else while (index.cursor < segments.length) {
+            // Like find, access a hole/null only if the search reaches it.
+            const segment = segments[index.cursor++];
+            const segmentId = segment.id;
+            if (!index.byId.has(segmentId)) index.byId.set(segmentId, segment);
+            if (segmentId === id) { extension = segment; break; }
+          }
+        }
+      }
       if (!main || !extension) return;
       binding.start_offset_ms = Math.round(Number(extension.start) - Number(main.start));
       binding.end_offset_ms = Math.round(Number(extension.end) - Number(main.end));
@@ -520,5 +568,5 @@ export function createUtilsModule(dependencies) {
     };
   }
 
-  return Object.freeze({ MULTI_SUBTITLE_DISPLAY_MODES, MULTI_SUBTITLE_SCHEMA, MULTI_SUBTITLE_SPLIT_MODES, MULTI_SUBTITLE_TOLERANCE_MS, bindingForSegment, buildMultiDisplayRows, buildSubtitleBinding, matchSubtitleSegments, mergeMainAndOverlaySegments, moveSegmentBetweenTracks, normalizeMultiSubtitle, normalizeMultiSubtitleProject, normalizeOverlayTrack, rebuildBindingOffsets, removeSubtitleBindings, resolveMergedGroupInheritance, swapMainAndExtensionSubtitle });
+  return Object.freeze({ MULTI_SUBTITLE_DISPLAY_MODES, MULTI_SUBTITLE_SCHEMA, MULTI_SUBTITLE_SPLIT_MODES, MULTI_SUBTITLE_TOLERANCE_MS, bindingForSegment, buildBoundExtensionIdSet, boundExtensionIdSetHas, buildMultiDisplayRows, buildSubtitleBinding, matchSubtitleSegments, mergeMainAndOverlaySegments, moveSegmentBetweenTracks, normalizeMultiSubtitle, normalizeMultiSubtitleProject, normalizeOverlayTrack, rebuildBindingOffsets, removeSubtitleBindings, resolveMergedGroupInheritance, swapMainAndExtensionSubtitle });
 }
