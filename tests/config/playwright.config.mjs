@@ -31,3 +31,5 @@ export default defineConfig({
     },
   ],
 });
+
+// CI governance temporary full-shard acceptance.
