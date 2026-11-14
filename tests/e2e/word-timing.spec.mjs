@@ -28,6 +28,100 @@ test.beforeEach(async ({ page }) => {
 });
 const word = (page, index) => page.locator(`.waveform-word-block[data-segment-idx="0"][data-item-idx="${index}"]`).first();
 
+test('consecutive word drags do not open quick edit and remain independently undoable', async ({ page }) => {
+  await setWordTiming(page);
+  const before = await source(page);
+  for (let i = 0; i < 2; i++) {
+    const box = await word(page, 0).boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 + 15, box.y + box.height / 2, { steps: 3 });
+    await page.mouse.up();
+    await expect(page.locator('.waveform-cue-quick-edit')).toHaveCount(0);
+    if (i === 0) expect((await source(page)).items[0].start).toBeGreaterThan(before.items[0].start);
+  }
+  const after = await source(page);
+  await page.keyboard.press('Control+z');
+  expect((await source(page)).items[0].start).toBeLessThan(after.items[0].start);
+  await page.keyboard.press('Control+z');
+  expect((await source(page)).items).toEqual(before.items);
+});
+
+test('word double click opens only after the second release, including small pointer jitter', async ({ page }) => {
+  await setWordTiming(page);
+  const box = await word(page, 0).boundingBox();
+  const x = box.x + box.width / 2, y = box.y + box.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + 1, y + 1);
+  await page.mouse.up();
+  await page.mouse.down();
+  await expect(page.locator('.waveform-cue-quick-edit')).toHaveCount(0);
+  await page.mouse.up();
+  await expect(page.locator('.waveform-cue-quick-edit textarea')).toBeVisible();
+  expect(await page.evaluate(() => document.getElementById('player').paused)).toBe(true);
+});
+
+test('click then drag and drag back to origin do not become a double click', async ({ page }) => {
+  await setWordTiming(page);
+  const before = await source(page);
+  const box = await word(page, 0).boundingBox();
+  const x = box.x + box.width / 2, y = box.y + box.height / 2;
+  await page.mouse.click(x, y);
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + 15, y);
+  await page.mouse.move(x, y);
+  await page.mouse.up();
+  await expect(page.locator('.waveform-cue-quick-edit')).toHaveCount(0);
+  expect((await source(page)).items).toEqual(before.items);
+  await page.mouse.click(x, y);
+  await expect(page.locator('.waveform-cue-quick-edit')).toHaveCount(0);
+});
+
+test('cancelled and modified word gestures do not supply a double-click candidate', async ({ page }) => {
+  await setWordTiming(page);
+  const box = await word(page, 0).boundingBox();
+  const x = box.x + box.width / 2, y = box.y + box.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+  await page.mouse.click(x, y);
+  await expect(page.locator('.waveform-cue-quick-edit')).toHaveCount(0);
+  await page.keyboard.down('Control');
+  await page.mouse.click(x, y);
+  await page.keyboard.up('Control');
+  await page.mouse.click(x, y);
+  await expect(page.locator('.waveform-cue-quick-edit')).toHaveCount(0);
+});
+
+test('word handle and window blur clear a preceding click candidate', async ({ page }) => {
+  await setWordTiming(page);
+  let box = await word(page, 0).boundingBox();
+  let x = box.x + box.width / 2, y = box.y + box.height / 2;
+  await page.mouse.click(x, y);
+  const handle = word(page, 0).locator('.waveform-cue-handle.right');
+  await handle.click({ force: true });
+  box = await word(page, 0).boundingBox();
+  x = box.x + box.width / 2; y = box.y + box.height / 2;
+  await page.mouse.click(x, y);
+  await expect(page.locator('.waveform-cue-quick-edit')).toHaveCount(0);
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+  await page.mouse.click(x, y);
+  await expect(page.locator('.waveform-cue-quick-edit')).toHaveCount(0);
+});
+
+test('an intervening click outside the word clears its candidate', async ({ page }) => {
+  await setWordTiming(page);
+  const box = await word(page, 0).boundingBox();
+  const x = box.x + box.width / 2, y = box.y + box.height / 2;
+  await page.mouse.click(x, y);
+  await page.locator('#waveform-pane').click({ position: { x: 5, y: 5 }, force: true });
+  await page.mouse.click(x, y);
+  await expect(page.locator('.waveform-cue-quick-edit')).toHaveCount(0);
+});
+
 test('Q preserves the viewed waveform time when the playhead is offscreen', async ({ page }) => {
   const media = join(tempDir, 'long-wave.wav'), project = join(tempDir, 'long-wave.mosp');
   generateWav(media, 120);

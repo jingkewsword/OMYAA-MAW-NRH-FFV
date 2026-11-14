@@ -266,8 +266,9 @@ export interface WaveformState {
   _cueQuickEditOutside: ((event: PointerEvent) => void) | null;
   _cueQuickEditKey: ((event: KeyboardEvent) => void) | null;
   _wordQuickEditDoubleClickTime: number;
-  _wordQuickEditClick: {index: number; itemIndex: number; time: number;
-    clientX: number; clientY: number} | null;
+  _wordQuickEditClick: {segment: Cue; itemIndex: number; time: number;
+    clientX: number; clientY: number; clear: () => void} | null;
+  clearWordQuickEditClick(): void;
   markerDrag: MarkerDragState | null; markerCreateDrag: MarkerDragState | null;
   _markerDragMove: (event: PointerEvent) => void; _markerDragEnd: (event: PointerEvent) => void;
   _markerDragCancel: () => void;
@@ -301,5 +302,6 @@ export interface WordDragState {
   geometry: RowGeometry; pointer: number; clientX: number; clientY: number;
   moved: boolean; command: EditorTransaction | null; original: Cue;
   indices: number[]; resize: boolean; edge: string; seam: boolean; itemIndex: number;
+  clickTime: number; previousClick: WaveformInstance['_wordQuickEditClick'];
   move?: (event: PointerEvent) => void; up?: (event: PointerEvent) => void; cancel?: () => void;
 }
