@@ -104,13 +104,22 @@ async function timestamp(page) {
   } else await page.goto(fileUrl('tools/timestamp-compare.html'));
 }
 
-async function setTheme(page, theme) {
+async function setTheme(page, theme, diagnostic = false) {
+  if (diagnostic) console.log(`[compact-diagnostic] ${new Date().toISOString()} theme=${theme} start`);
   await page.evaluate(theme => {document.documentElement.dataset.theme = theme;}, theme);
   // Wait for real color transitions before capturing or comparing their settled state.
-  await page.evaluate(async () => {
+  await page.evaluate(async diagnostic => {
     void document.body.offsetHeight;
-    await Promise.all(document.getAnimations().map(animation => animation.finished.catch(() => {})));
-  });
+    const animations = document.getAnimations();
+    const timer = diagnostic && setTimeout(() => console.log('[compact-diagnostic] pending animations', JSON.stringify(animations.filter(a => a.playState !== 'finished').map(a => ({
+      playState: a.playState, currentTime: a.currentTime, type: a.constructor.name,
+      property: a.transitionProperty || a.animationName || null,
+      target: a.effect?.target?.outerHTML?.slice(0, 200) || null,
+    })))), 3000);
+    try { await Promise.all(animations.map(animation => animation.finished.catch(() => {}))); }
+    finally { if (timer) clearTimeout(timer); }
+  }, diagnostic);
+  if (diagnostic) console.log(`[compact-diagnostic] ${new Date().toISOString()} theme=${theme} complete`);
 }
 
 async function measure(input) {
@@ -343,12 +352,16 @@ test('dashboard compact shows only title and two actions while status and ignore
 });
 
 test('long compact checklist preserves 15px text and bounded layout across breakpoints', async ({page}, testInfo) => {
+  const diagnostic = process.env.MAW_COMPACT_DIAGNOSTIC === '1';
+  if (diagnostic) page.on('console', message => { if (message.text().startsWith('[compact-diagnostic]')) console.log(`${new Date().toISOString()} ${message.text()}`); });
+  if (diagnostic) console.log(`[compact-diagnostic] ${new Date().toISOString()} test start`);
   const output = generateChecklist(testInfo,true); await page.goto(fileUrl(output));
   await page.locator('.tool-density').click();
   const measurements = [];
   for (const theme of ['dark','light']) {
-    await setTheme(page,theme);
+    await setTheme(page,theme,diagnostic);
     for (const width of [320,375,414,768,979,980,981,1440]) {
+      if (diagnostic) console.log(`[compact-diagnostic] ${new Date().toISOString()} theme=${theme} width=${width} start`);
       await page.setViewportSize({width,height:900});
       const measurement = await page.evaluate(() => {
         const start=performance.now(); void document.querySelector('.content').offsetHeight;
@@ -359,6 +372,7 @@ test('long compact checklist preserves 15px text and bounded layout across break
       expect(await page.locator('.item label').first().evaluate(node => getComputedStyle(node).fontSize)).toBe('15px');
       measurements.push({width,theme,...measurement});
       if (width === 375 || width === 1440) await page.screenshot({path:testInfo.outputPath(`long-checklist-${width}-${theme}.png`)});
+      if (diagnostic) console.log(`[compact-diagnostic] ${new Date().toISOString()} theme=${theme} width=${width} complete`);
     }
   }
   const reflow = await page.evaluate(() => {

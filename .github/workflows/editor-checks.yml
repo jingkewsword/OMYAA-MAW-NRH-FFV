@@ -1,7 +1,6 @@
 name: Editor build and contracts
 
 on:
-  pull_request:
   workflow_dispatch:
   push:
     branches: [main]
