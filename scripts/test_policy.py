@@ -15,6 +15,7 @@ MEDIA_MODULES = {"test_ffprobe_failure_integration", "test_gap_removed_audio_exp
                  "test_media_cache", "test_quapeaks_generation",
                  "test_thumbnail_jobs_integration", "test_thumbnail_server"}
 MEDIA_CLASSES = {
+    ('test_fcp7_png', 'RenderTests'),
     ("test_audio_loudness", "RealLoudnessTests"),
     ("test_burn_video_export", "BurnVideoPrecisionTests"),
     ("test_media_keyframes", "RealKeyframeInspectorTests"),
@@ -49,12 +50,17 @@ MEDIA_METHODS = {
     "test_source_items_fill_keeps_asr_text_and_publishes_only_complete_output",
     "test_source_items_fill_uses_selected_audio_track_and_original_offsets",
 }
+MEDIA_IDENTITIES = {
+    ('test_fcp7_png_api', 'PngJobHttpTests', 'test_render_publish_and_repeated_export_preserve_prior_package'),
+    ('test_waveform', 'WaveformExtractionTests', 'test_extraction_sends_stderr_to_a_file_not_a_pipe'),
+}
 NODE_BROWSER = {"test_asr_presets_browser.mjs", "test_ass_canvas_raster.mjs", "test_shared_tooltip_browser.mjs"}
 NODE_TOOLS = {"test_ns_rewrite_scope.mjs", "test_refactor_layout_tools.mjs", "test_type_gate.mjs",
               "test_verification_checklist.mjs"}
 CHECKLIST_PYTHON = ("tests.test_verification_checklist", "tests.test_verification_checklist_build")
 CHECKLIST_NODE = "tests/test_verification_checklist.mjs"
 CHECKLIST_SPEC = "tests/e2e/verification-checklist.spec.mjs"
+CHECKLIST_SPECS = (CHECKLIST_SPEC, "tests/e2e/tool-compact.spec.mjs", "tests/e2e/tool-pages.spec.mjs")
 DEV_PYTHON = ("tests.test_project_contract", "tests.test_project_io", "tests.test_project_backups")
 DEV_NODE = ("test_editor_runtime.mjs", "test_editor_state.mjs", "test_editor_commands.mjs",
             "test_editor_host.mjs", "test_editor_history_gestures.mjs")
@@ -71,6 +77,8 @@ def python_pack(test_id: str) -> str:
     if "LongMediaGeneratedFixtureTests" in parts or method == "test_eleven_minute_real_audio_preserves_acoustic_offsets":
         return "long-media"
     if any(owner == module and name in parts for owner, name in MEDIA_CLASSES):
+        return "media"
+    if any(owner == module and cls in parts and method == name for owner, cls, name in MEDIA_IDENTITIES):
         return "media"
     if module == "test_thumbnails" and "ThumbnailIntegrationTests" in parts:
         return "media"
@@ -152,10 +160,13 @@ E2E_FAMILIES = (
     (("waveform", "reapeaks", "quapeaks", "media_cache", "playback", "seek", "audition"), ("waveform-", "playback-", "playhead-", "hover-seek", "subtitle-seek", "cue-context", "media-controls", "gap-", "filmstrip")),
     (("thumbnail", "filmstrip"), ("filmstrip", "waveform-view-performance", "settings-structure")),
     (("segmentation", "punctuation", "word_timing", "word-timing", "timed-text", "text-tools", "split", "merge"), ("word-timing", "timed-text", "split-", "keyboard-timing", "editor-text-tools", "launcher-resegment")),
-    (("ass_", "ass-", "/ass.", "font", "subtitle-preview"), ("ass-", "subtitle-preview", "bilingual-label", "burn-video-jobs", "editor-help-srt-burn", "sticker-preview-lifecycle")),
+    (("ass_", "ass-", "/ass.", "font", "subtitle-preview"), ("ass-", "warma-i18n", "subtitle-preview", "bilingual-label", "burn-video-jobs", "editor-help-srt-burn", "sticker-preview-lifecycle")),
+    (("ass-style", "ass-storage"), ("warma-presets",)),
     (("export", "fcp7", "otio"), ("ass-export", "fcp7-export", "otio-export", "gap-", "multi-subtitle", "speaker-label", "waveform-history", "editor-menu-focus", "burn-video-jobs", "editor-help-srt-burn")),
+    (("fcp7", "editor-dynamic-exports", "export-plan", "editor-export-srt"), ("fcp7-png",)),
     (("sticker", "burn-video"), ("burn-video-jobs", "editor-help-srt-burn", "ass-export", "sticker-preview-lifecycle")),
     (("marker", "speaker", "overlay", "multi-subtitle", "multi_subtitle"), ("marker", "speaker-label", "overlay-track", "multi-subtitle")),
+    (("marker",), ("ai-cleanup-marker-restore",)),
     (("cue-scroll", "cue-list", "cue-render"), ("cue-", "click-behavior", "layout-feedback")),
     (("tooltip",), ("shared-tooltip", "launcher-keycaps")),
     (("onboarding",), ("onboarding", "new-project")),
@@ -253,7 +264,7 @@ def select_packs(paths: list[str], *, release: bool = False) -> dict:
             continue
         if path.startswith("tools/verification-checklist/"):
             selected.update({"tools", "e2e"})
-            e2e_specs.add("tests/e2e/verification-checklist.spec.mjs")
+            e2e_specs.update(CHECKLIST_SPECS)
             continue
         if path.startswith("tests/e2e/") and path.endswith(".spec.mjs"):
             scope = spec_scope(path)
