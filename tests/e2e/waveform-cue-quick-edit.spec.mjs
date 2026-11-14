@@ -531,6 +531,36 @@ test('字词码模式：双击字词块弹出字词气泡，等长改字同步�
   await expect(popup).toHaveCount(0);
 });
 
+test('word double click uses first click position and falls back when the visible anchor is briefly unavailable', async ({ page }) => {
+  await openEditor(page);
+  await page.evaluate(() => { MaweWordTiming.setEnabled(true); MaweCoreState.waveformEditor.scroll.scrollTop = 0; });
+  const word = page.locator('.waveform-word-block[data-segment-idx="0"][data-item-idx="0"]').first();
+  await expect(word).toBeVisible();
+  const label = await word.locator('.waveform-word-label').boundingBox();
+  const y = label.y + label.height / 2;
+  await page.mouse.click(label.x + 1, y);
+  await page.mouse.click(label.x + label.width - 1, y);
+  const textarea = page.locator('.waveform-cue-quick-edit textarea');
+  await expect(textarea).toBeFocused();
+  expect(await textarea.evaluate(el => el.selectionStart)).toBe(0);
+  await textarea.press('Delete');
+  await textarea.press('X');
+  await textarea.press('Enter');
+  await expect(page.locator('.cue[data-idx="0"] .text')).toContainText('X一句原文');
+
+  await page.evaluate(() => {
+    const editor = MaweCoreState.waveformEditor;
+    const original = editor.firstVisibleWordBlock;
+    editor.firstVisibleWordBlock = function (...args) {
+      editor.firstVisibleWordBlock = original;
+      return null;
+    };
+  });
+  const box = await word.boundingBox();
+  await page.mouse.dblclick(box.x + box.width / 2, box.y + box.height / 2);
+  await expect(textarea).toHaveValue('X一');
+});
+
 test('word-playback: 双击字词编辑不切换播放，随后双击空白波形仍切换播放', async ({ page }) => {
   await openEditor(page);
   await page.evaluate(() => {
