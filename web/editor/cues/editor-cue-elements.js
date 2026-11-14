@@ -204,7 +204,7 @@ export function initMaweCueElements() {
 
 
 
-  function buildMultiCueColumn(segment, index, track, kind) {
+  function buildMultiCueColumn(segment, index, track, kind, boundExtensionIds = null) {
     const column = document.createElement('div');
     column.className = `multi-cue-column ${kind}`;
     if (!segment) {
@@ -225,8 +225,10 @@ export function initMaweCueElements() {
     setTextHtml(text, segment.text || '', MaweDom.searchEl.value);
     column.append(header, text);
     if (kind === 'extension') {
-      const binding = MaweMultiSubtitleCore.bindingForExtensionIndex(index, track);
-      if (!binding) column.classList.add('unbound');
+      const isBound = boundExtensionIds === null
+        ? Boolean(MaweMultiSubtitleCore.bindingForExtensionIndex(index, track))
+        : window.AsrEditorUtils.boundExtensionIdSetHas(boundExtensionIds, segment.id);
+      if (!isBound) column.classList.add('unbound');
       column.dataset.extIdx = String(index);
     } else {
       column.dataset.mainIdx = String(index);
@@ -244,7 +246,7 @@ export function initMaweCueElements() {
 
 
 
-  function buildDualCueEl(mainIndex, extensionIndex, track) {
+  function buildDualCueEl(mainIndex, extensionIndex, track, boundExtensionIds = null) {
     const main = mainIndex == null ? null : MaweBoot.DATA.segments[mainIndex];
     const extension = extensionIndex == null ? null : track.segments[extensionIndex];
     const el = document.createElement('div');
@@ -258,7 +260,7 @@ export function initMaweCueElements() {
     if (extensionIndex != null) el.dataset.extIdx = String(extensionIndex);
     el.append(
       buildMultiCueColumn(main, mainIndex ?? -1, track, 'main'),
-      buildMultiCueColumn(extension, extensionIndex ?? -1, track, 'extension'),
+      buildMultiCueColumn(extension, extensionIndex ?? -1, track, 'extension', boundExtensionIds),
     );
     if (main) bindCueEvents(el, mainIndex);
     if (extension) {
