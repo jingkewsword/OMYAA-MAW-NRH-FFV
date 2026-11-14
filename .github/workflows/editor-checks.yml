@@ -555,11 +555,12 @@ jobs:
         run: pnpm run build
       - name: Discover original seven fixed specs
         env:
-          PLAYWRIGHT_JSON_OUTPUT_NAME: .artifacts/independent-fixed/fixed.json
+          PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ github.workspace }}/.artifacts/independent-fixed/fixed.json
         run: |
           mkdir -p .artifacts/independent-fixed
           git rev-parse HEAD > .artifacts/independent-fixed/revision.txt
           pnpm exec playwright test --config=tests/config/playwright.config.mjs --project=chromium --forbid-only --workers=2 --retries=0 --list --reporter=json tests/e2e/editor-bundle.spec.mjs tests/e2e/editor-transactions.spec.mjs tests/e2e/editor-text-tools.spec.mjs tests/e2e/ass-cue-position.spec.mjs tests/e2e/sticker-preview-lifecycle.spec.mjs tests/e2e/warma-presets.spec.mjs tests/e2e/warma-i18n.spec.mjs
+          test -s "$PLAYWRIGHT_JSON_OUTPUT_NAME"
       - uses: actions/upload-artifact@v6
         if: always()
         with:
