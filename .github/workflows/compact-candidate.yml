@@ -1,0 +1,61 @@
+name: Compact checklist candidate validation
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        scope: [single, suite]
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.28.4
+          run_install: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22.23.4'
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: '0.13.4'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - run: uv sync --frozen --group dev
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: sudo apt-get update && sudo apt-get install --yes ffmpeg
+      - name: Run original test selection with observation
+        env:
+          MAW_E2E_PYTHON: ${{ github.workspace }}/.venv/bin/python
+          DIAGNOSTIC_SCOPE: ${{ matrix.scope }}
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p .artifacts/compact-diagnostic
+          if [[ "$DIAGNOSTIC_SCOPE" == single ]]; then
+            pnpm exec playwright test --config=tests/config/playwright.config.mjs --project=chromium tests/e2e/tool-compact.spec.mjs --grep 'long compact checklist preserves 15px text and bounded layout across breakpoints' 2>&1 | tee .artifacts/compact-diagnostic/console.log
+          else
+            uv run --no-sync python scripts/run_check.py --timeout 300 -- node node_modules/@playwright/test/cli.js test --config=tests/config/playwright.config.mjs --project=chromium tests/e2e/tool-pages.spec.mjs tests/e2e/tool-compact.spec.mjs tests/e2e/tool-markdown.spec.mjs tests/e2e/timestamp-compare.spec.mjs tests/e2e/verification-checklist.spec.mjs tests/e2e/term-report.spec.mjs tests/e2e/changelog-write-lock.spec.mjs 2>&1 | tee .artifacts/compact-diagnostic/console.log
+          fi
+      - name: Preserve logs, trace and screenshots
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: compact-diagnostic-${{ matrix.scope }}
+          path: |
+            .artifacts/compact-diagnostic/
+            .artifacts/checks/
+            test-results/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
