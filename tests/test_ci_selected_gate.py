@@ -144,6 +144,41 @@ class RequiredGateTests(unittest.TestCase):
         self.assertIn("tests/test_readme_content_sync.mjs", website)
         self.assertIn("--pack website", website)
 
+    def test_full_browser_substitutes_only_the_fixed_editor_step(self):
+        workflow = (ROOT / ".github/workflows/editor-checks.yml").read_text(encoding="utf-8")
+        upstream = workflow.split("\n  upstream-editor:\n", 1)[1].split("\n  documentation:\n", 1)[0]
+        fixed = upstream.split("- name: Real file and HTTP editor", 1)[1].split("\n      - ", 1)[0]
+        tools = upstream.split("- name: Independent browser tool pages", 1)[1].split("\n      - ", 1)[0]
+        self.assertIn("needs.selection.outputs.light != 'true' && (needs.selection.result != 'success' || needs.selection.outputs.light != 'false' || needs.selection.outputs.editor_e2e != 'true')", fixed)
+        for spec in ("editor-bundle", "editor-transactions", "editor-text-tools", "ass-cue-position", "sticker-preview-lifecycle", "warma-presets", "warma-i18n"):
+            self.assertIn(f"tests/e2e/{spec}.spec.mjs", fixed)
+        self.assertIn("if: ${{ needs.selection.outputs.light != 'true' }}", tools)
+        self.assertIn("scripts/run_check.py --timeout 300", tools)
+        for step in ("pnpm run test:unit", "OCR term extraction and runtime cleanup contracts", "Required media failure compatibility"):
+            self.assertIn(step, upstream)
+
+    def test_full_browser_gate_must_succeed_and_invalid_selection_fails_closed(self):
+        state = jobs("docs", "editor-e2e")
+        self.assertEqual(check_gate(state), [])
+        for result in (None, "failure", "cancelled", "skipped"):
+            changed = copy.deepcopy(state)
+            if result is None:
+                del changed["browser-gates"]
+            else:
+                changed["browser-gates"]["result"] = result
+            self.assertIn("browser-gates", check_gate(changed))
+        for value in (None, "", "unknown"):
+            changed = copy.deepcopy(state)
+            if value is None:
+                del changed["selection"]["outputs"]["editor_e2e"]
+            else:
+                changed["selection"]["outputs"]["editor_e2e"] = value
+            with self.assertRaises(ValueError):
+                check_gate(changed)
+        selection = jobs("docs", "e2e", specs='["tests/e2e/tool-compact.spec.mjs"]')
+        selection["browser-gates"]["result"] = "skipped"
+        self.assertEqual(check_gate(selection), [])
+
     def test_selection_failure_never_succeeds_even_with_valid_outputs(self):
         for result in ("failure", "cancelled", "skipped"):
             with self.subTest(result=result):

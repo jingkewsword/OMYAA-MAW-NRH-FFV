@@ -28,6 +28,17 @@ else:
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKS = ("docs", "common", "browser", "smoke", "media", "long-media", "lifecycle", "tools", "e2e", "editor-e2e", "website", "manual")
+# The full browser gate substitutes the original fixed editor-spec command.
+# Assert each displaced consumer contributes at least one discovered case.
+FULL_EDITOR_REQUIRED_SPECS = (
+    "tests/e2e/editor-bundle.spec.mjs",
+    "tests/e2e/editor-transactions.spec.mjs",
+    "tests/e2e/editor-text-tools.spec.mjs",
+    "tests/e2e/ass-cue-position.spec.mjs",
+    "tests/e2e/sticker-preview-lifecycle.spec.mjs",
+    "tests/e2e/warma-presets.spec.mjs",
+    "tests/e2e/warma-i18n.spec.mjs",
+)
 
 
 def windows_short_path(path: str) -> str:
@@ -200,6 +211,8 @@ def prepare_browser(name, command, directory, shard, specs, selection, results):
             raise ValueError(f"Browser discovery failed; log={result['log']}")
         report = json.loads(report_path.read_text(encoding="utf-8"))
         required_specs = [arg for arg in command if arg.startswith("tests/e2e/") and arg.endswith(".spec.mjs")]
+        if selection == "editor-e2e" and label == "full":
+            required_specs = FULL_EDITOR_REQUIRED_SPECS
         return report, discovery(report, required_specs)
 
     full_report, full_ids = capture("full", full_command)
