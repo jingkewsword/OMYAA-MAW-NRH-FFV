@@ -52,6 +52,7 @@ export function initMaweTextProcess() {
   let session = 0;
   let reading = false;
   let writing = false;
+  let scopeRevision = 0;
   let expanded = false;
   let showUnchanged = false;
   let importRequest;
@@ -602,7 +603,9 @@ export function initMaweTextProcess() {
     }
     const fingerprint = () => JSON.stringify([steps, selectedPreset]);
     const initial = fingerprint();
+    const initialSteps = JSON.stringify(steps);
     const initialScope = selectedOnly.checked;
+    const initialScopeRevision = scopeRevision;
     const ok = await refresh();
     if (session !== current) return;
     reading = false;
@@ -610,8 +613,23 @@ export function initMaweTextProcess() {
       if (ok) showStorageReady();
       else showStorageStatus('无法读取用户配置', 'error');
     }
-    if (!replaceSelection && fingerprint() === initial) loadDefault({ preserveScope: selectedOnly.checked !== initialScope });
-    else {
+    const scopeChanged = selectedOnly.checked !== initialScope || scopeRevision !== initialScopeRevision;
+    const editingSteps = stepList.contains(document.activeElement);
+    if (!replaceSelection && fingerprint() === initial && !editingSteps) {
+      loadDefault({ preserveScope: scopeChanged });
+    } else {
+      if (!replaceSelection) {
+        const { presets, defaultPresetId } = window.MaweProcessing.library;
+        const preset = presets.find(({ id }) => id === defaultPresetId);
+        const project = projectOverride('text');
+        const nextId = project === undefined ? preset?.id || '' : '';
+        const nextSteps = structuredClone(project ?? preset?.steps ?? []);
+        if (!nextId && !nextSteps.length && project?.length !== 0) nextSteps.push(createStep('replace'));
+        if (selectedPreset !== nextId || initialSteps !== JSON.stringify(nextSteps)) selectedPreset = '';
+        // An in-flight refresh may narrow an edit, but must not silently
+        // expand an existing selected-only edit to the whole track.
+        if (!scopeChanged && !selectedOnly.checked) setPresetScope(project === undefined ? preset?.scope : undefined);
+      }
       renderPresets();
       schedulePreview();
     }
@@ -671,7 +689,7 @@ export function initMaweTextProcess() {
     if (menu) dismissMenu(menu);
     else closeTextProcessModal();
   }, true);
-  selectedOnly.addEventListener('change', schedulePreview);
+  selectedOnly.addEventListener('change', () => { scopeRevision++; schedulePreview(); });
   apply.addEventListener('click', confirm);
   $('text-preset-add-rule').addEventListener('click', () => {
     // 第一次添加其他步骤时，让它接替尚未编辑的预填项。
