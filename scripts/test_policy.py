@@ -203,10 +203,9 @@ def select_packs(paths: list[str], *, release: bool = False) -> dict:
     """Unknown paths broaden; absence of a reliable diff also broadens."""
     selected = {"docs"}
     reasons = ["documentation navigation is always checked"]
-    preview = release
     e2e_specs = set()
     if release or not paths:
-        return {"packs": sorted(ALL_MERGE | selected), "preview": True, "e2e_specs": [],
+        return {"packs": sorted(ALL_MERGE | selected), "e2e_specs": [],
                 "reasons": ["release or unavailable change list: expand all required packs"]}
     for original in paths:
         path = original.replace("\\", "/").removeprefix("./")
@@ -217,7 +216,6 @@ def select_packs(paths: list[str], *, release: bool = False) -> dict:
                      "website/public/releases/", "website/public/release-assets/")
         if path.startswith(generated):
             selected.update(ALL_MERGE)
-            preview = True
             reasons.append(f"generated website input requires full verification: {path}")
             continue
         if (path in {"README.md", "docs/INDEX.md", "website/README.md"}
@@ -252,7 +250,6 @@ def select_packs(paths: list[str], *, release: bool = False) -> dict:
                 reasons.append(f"independent browser spec: {path}")
             elif scope == "missing":
                 selected.update(ALL_MERGE)
-                preview = True
                 reasons.append(f"missing browser spec and its consumers: {path}")
             else:
                 selected.update(ALL_MERGE)
@@ -261,7 +258,6 @@ def select_packs(paths: list[str], *, release: bool = False) -> dict:
         # Shared test infrastructure/locks/workflows can invalidate every gate.
         if path.startswith(("scripts/test_", "scripts/run_", "scripts/browser_results", "scripts/check_test_gate", ".github/workflows/", "tests/e2e/", "tests/fixtures/", "tests/config/")) or path in {"pyproject.toml", "uv.lock", "package.json", "pnpm-lock.yaml", "playwright.config.mjs"}:
             selected.update(ALL_MERGE)
-            preview = True
             reasons.append(f"shared infrastructure: {path}")
             continue
         if path.startswith("tests/test_"):
@@ -296,18 +292,16 @@ def select_packs(paths: list[str], *, release: bool = False) -> dict:
             if any(token in path for token in ("waveform", "reapeaks", "quapeaks", "script_timestamp", "project", "history")):
                 selected.add("long-media")
         elif path.startswith(("resources/", "scripts/build-", "scripts/verify_", "scripts/packaging/", "runtime/", "local-runtime/", "ocr-runtime/", "moss-runtime/")) or path in {"MAW.spec", "requirements.txt"}:
-            preview = True
             selected.update({"tools", "media"})
             if path in {"scripts/build-editor.mjs", "scripts/build-launcher.mjs"}:
                 selected.add("editor-e2e")
         else:
             selected.update(ALL_MERGE)
-            preview = True
             reasons.append(f"unknown path: {path}")
     if "editor-e2e" in selected:
         selected.discard("e2e")
         e2e_specs.clear()
-    return {"packs": sorted(selected), "preview": preview, "reasons": reasons, "e2e_specs": sorted(e2e_specs),
+    return {"packs": sorted(selected), "reasons": reasons, "e2e_specs": sorted(e2e_specs),
             "tools_scope": checklist_tools_scope(paths)}
 
 
