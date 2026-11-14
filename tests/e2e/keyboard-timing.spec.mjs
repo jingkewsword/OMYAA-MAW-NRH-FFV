@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   cleanupTempDir,
@@ -679,44 +679,102 @@ test('dual mode links both edges via the seam zone while side handles trim indep
 });
 
 test('silent save waits for a held independent dual-mode cue handle', async ({ page }) => {
-  await loadAttachedCues(page, true, 'dual');
-  await page.evaluate(() => MaweSettings.updateEditorSettings({ autoSaveProject: false }));
-  const original = await readTimings(page);
-  const historyBefore = await page.evaluate(() => MaweHistory.editorHistory.undoLength());
-  const saves = [];
-  page.on('request', request => {
-    if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/project') {
-      saves.push(request.postDataJSON().project.segments.map(({ start, end }) => ({ start, end })));
-    }
-  });
-  const handle = page.locator('.waveform-cue-block[data-idx="0"] .waveform-cue-handle.right').first();
-  const box = await stableVisibleBoundingBox(page, handle);
-  const row = handle.locator('xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " waveform-row ")][1]');
-  const rowBox = await row.boundingBox();
-  const rowStart = Number(await row.getAttribute('data-start-ms'));
-  const rowEnd = Number(await row.getAttribute('data-end-ms'));
-  const x = box.x + box.width / 2, y = box.y + box.height / 2;
-  await page.mouse.move(x, y);
-  await page.mouse.down();
-  await expect(page.locator('#waveform-pane')).toHaveClass(/cue-drag-active/);
-  await page.mouse.move(x - rowBox.width * 500 / (rowEnd - rowStart), y, { steps: 5 });
-  const expected = [
-    { start: 5000, end: 9500 },
-    { start: 10000, end: 18000 },
-    { start: 25000, end: 30000 },
-  ];
-  await expect.poll(() => readTimings(page)).toEqual(expected);
-  expect(await page.evaluate(() => MaweProjectSave.saveCurrentProject({ silent: true }))).toBe(false);
-  expect(saves).toEqual([]);
-  expect(await readTimings(page)).toEqual(expected);
-  await page.mouse.up();
-  expect(await readTimings(page)).toEqual(expected);
-  expect(await page.evaluate(() => MaweHistory.editorHistory.undoLength())).toBe(historyBefore + 1);
-  expect(await page.evaluate(() => MaweProjectSave.saveCurrentProject({ silent: true }))).toBe(true);
-  expect(saves.at(-1)).toEqual(expected);
-  expect(JSON.parse(readFileSync(join(tempDir, 'project.json'), 'utf8')).segments.map(({ start, end }) => ({ start, end }))).toEqual(expected);
-  await page.keyboard.press('Control+z');
-  await expect.poll(() => readTimings(page)).toEqual(original);
+  const isolatedDir = makeTempDir('dual-handle-save');
+  let isolatedServer;
+  let testFailure;
+  try {
+    const mediaPath = join(isolatedDir, 'synthetic.wav');
+    const projectPath = join(isolatedDir, 'project.json');
+    generateWav(mediaPath, DURATION_MS / 1000);
+    generateProjectJson(projectPath);
+    const project = JSON.parse(readFileSync(projectPath, 'utf8'));
+    project.segments = [
+      { id: 'dual-a', start: 5000, end: 10000, text: 'First', items: [{ start: 5000, end: 10000, text: 'First' }] },
+      { id: 'dual-b', start: 10000, end: 18000, text: 'Second', items: [{ start: 10000, end: 18000, text: 'Second' }] },
+      { id: 'dual-c', start: 25000, end: 30000, text: 'Third', items: [{ start: 25000, end: 30000, text: 'Third' }] },
+    ];
+    delete project.multi_subtitle;
+    writeFileSync(projectPath, JSON.stringify(project), 'utf8');
+    isolatedServer = await startServer(projectPath, mediaPath, await findFreePort());
+    await page.addInitScript(() => localStorage.setItem('moy.asr.editor.settings.v1', JSON.stringify({
+      autoSaveProject: false, autoSnapAdjacentCues: true, adjacentBoundaryMode: 'dual',
+    })));
+    const saves = [];
+    page.on('request', request => {
+      if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/project') {
+        saves.push(request.postDataJSON().project.segments.map(({ start, end }) => ({ start, end })));
+      }
+    });
+    const saveAndWaitForResponse = async () => {
+      const [response, save] = await Promise.allSettled([
+        page.waitForResponse(response => response.request().method() === 'POST'
+          && new URL(response.url()).pathname === '/api/project', { timeout: 5000 }),
+        page.evaluate(() => MaweProjectSave.saveCurrentProject({ silent: true })),
+      ]);
+      const errors = [];
+      if (response.status === 'rejected') errors.push(response.reason);
+      if (save.status === 'rejected') errors.push(save.reason);
+      else if (save.value !== true) errors.push(new Error('Project save did not succeed'));
+      if (errors.length) throw new AggregateError(errors, 'Project save or response failed');
+      expect(response.value.status()).toBe(200);
+    };
+    await page.goto(isolatedServer.url);
+    await expect.poll(() => page.evaluate(() => ({
+      inFlight: MaweServerSave.projectSaveInFlight, checkpoint: MaweServerSave.projectCheckpointInFlight,
+      flush: MaweServerSave.autoSaveFlushTimer,
+    }))).toEqual({ inFlight: false, checkpoint: false, flush: null });
+    const original = await readTimings(page);
+    await saveAndWaitForResponse();
+    const diskBefore = readFileSync(projectPath, 'utf8');
+    expect(JSON.parse(diskBefore).segments.map(({ start, end }) => ({ start, end }))).toEqual(original);
+    await expect.poll(() => page.evaluate(() => ({
+      inFlight: MaweServerSave.projectSaveInFlight, checkpoint: MaweServerSave.projectCheckpointInFlight,
+      flush: MaweServerSave.autoSaveFlushTimer,
+    }))).toEqual({ inFlight: false, checkpoint: false, flush: null });
+    const baselineCount = saves.length;
+    expect(baselineCount).toBe(1);
+    const historyBefore = await page.evaluate(() => MaweHistory.editorHistory.undoLength());
+    const handle = page.locator('.waveform-cue-block[data-idx="0"] .waveform-cue-handle.right').first();
+    const box = await stableVisibleBoundingBox(page, handle);
+    const row = handle.locator('xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " waveform-row ")][1]');
+    const rowBox = await row.boundingBox();
+    const rowStart = Number(await row.getAttribute('data-start-ms'));
+    const rowEnd = Number(await row.getAttribute('data-end-ms'));
+    const x = box.x + box.width / 2, y = box.y + box.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await expect(page.locator('#waveform-pane')).toHaveClass(/cue-drag-active/);
+    await page.mouse.move(x - rowBox.width * 500 / (rowEnd - rowStart), y, { steps: 5 });
+    const expected = [
+      { start: 5000, end: 9500 },
+      { start: 10000, end: 18000 },
+      { start: 25000, end: 30000 },
+    ];
+    await expect.poll(() => readTimings(page)).toEqual(expected);
+    expect(await page.evaluate(() => MaweServerSave.projectSaveInFlight || MaweServerSave.projectCheckpointInFlight)).toBe(false);
+    expect(await page.evaluate(() => MaweProjectSave.saveCurrentProject({ silent: true }))).toBe(false);
+    expect(await page.evaluate(() => MaweServerSave.projectSaveInFlight || MaweServerSave.projectCheckpointInFlight)).toBe(false);
+    expect(saves.length).toBe(baselineCount);
+    expect(readFileSync(projectPath, 'utf8')).toBe(diskBefore);
+    expect(await readTimings(page)).toEqual(expected);
+    await page.mouse.up();
+    expect(await readTimings(page)).toEqual(expected);
+    expect(await page.evaluate(() => MaweHistory.editorHistory.undoLength())).toBe(historyBefore + 1);
+    await saveAndWaitForResponse();
+    expect(saves.length).toBe(baselineCount + 1);
+    expect(saves.at(-1)).toEqual(expected);
+    expect(JSON.parse(readFileSync(projectPath, 'utf8')).segments.map(({ start, end }) => ({ start, end }))).toEqual(expected);
+    await page.keyboard.press('Control+z');
+    await expect.poll(() => readTimings(page)).toEqual(original);
+  } catch (error) {
+    testFailure = error;
+  } finally {
+    const errors = testFailure ? [testFailure] : [];
+    try { await isolatedServer?.stop(); } catch (error) { errors.push(error); }
+    try { cleanupTempDir(isolatedDir); } catch (error) { errors.push(error); }
+    if (errors.length === 1) throw errors[0];
+    if (errors.length > 1) throw new AggregateError(errors, 'Test or cleanup failed');
+  }
 });
 
 test('shared seams align exactly, stay hidden across an 80ms gap, and use accent feedback', async ({ page }) => {
