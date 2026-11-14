@@ -257,3 +257,5 @@
 ### 媒体分层与可信报告
 
 [打开记录](logs/release1.10.0-beta.1/261023_媒体分层与可信报告/验证记录.md)
+
+[CI 验收故障注入](ci-governance-intentionally-missing-20261115.md)
