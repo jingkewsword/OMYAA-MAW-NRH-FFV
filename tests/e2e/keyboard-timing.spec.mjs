@@ -1264,6 +1264,171 @@ test('A/D adjusts a held subtitle block and a held shared boundary', async ({ pa
   ]);
 });
 
+for (const finish of ['commit', 'cancellation', 'no movement']) {
+  test(`autosave waits for held boundary ${finish}`, async ({ page }) => {
+    await page.clock.install();
+    await loadAttachedCues(page, true);
+    await page.evaluate(() => MaweSettings.updateEditorSettings({ autoSaveProject: true, cueMoveStepMs: 100 }));
+    const saves = [];
+    page.on('request', (request) => {
+      if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/project') {
+        saves.push(request.postDataJSON().project.segments.map(({ start, end }) => ({ start, end })));
+      }
+    });
+    const block = page.locator('.waveform-cue-block[data-track="main"][data-idx="0"]').first();
+    const blockBox = await stableVisibleBoundingBox(page, block);
+    await page.mouse.move(blockBox.x + blockBox.width / 2, blockBox.y + blockBox.height / 2);
+    await page.mouse.down();
+    await page.keyboard.press('d');
+    await page.mouse.up();
+    const beforeBoundary = [
+      { start: 5100, end: 10100 },
+      { start: 10100, end: 18000 },
+      { start: 25000, end: 30000 },
+    ];
+    await expect.poll(() => readTimings(page)).toEqual(beforeBoundary);
+    const boundary = page.locator('.waveform-cue-boundary[data-track="main"][data-left-idx="0"]').first();
+    const box = await boundary.boundingBox();
+    expect(box).not.toBeNull();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await expect(page.locator('#waveform-pane')).toHaveClass(/shared-boundary-drag-active/);
+    if (finish !== 'no movement') await page.keyboard.press('d');
+    const preview = finish === 'no movement' ? beforeBoundary : [
+      { start: 5100, end: 10200 },
+      { start: 10200, end: 18000 },
+      { start: 25000, end: 30000 },
+    ];
+    await expect.poll(() => readTimings(page)).toEqual(preview);
+    expect(await page.evaluate(() => MaweServerSave.autoSaveFlushTimer)).not.toBeNull();
+    await page.clock.runFor(500);
+    expect(saves).toEqual([]);
+    expect(await readTimings(page)).toEqual(preview);
+    if (finish === 'cancellation') await page.keyboard.press('Escape');
+    await page.mouse.up();
+    const expected = finish === 'commit' ? preview : beforeBoundary;
+    await expect.poll(() => readTimings(page)).toEqual(expected);
+    await page.clock.runFor(500);
+    await expect.poll(() => saves.length).toBeGreaterThan(0);
+    expect(saves.at(-1)).toEqual(expected);
+    if (finish === 'commit') {
+      await page.keyboard.press('Control+z');
+      await expect.poll(() => readTimings(page)).toEqual(beforeBoundary);
+    }
+  });
+}
+
+for (const saveAs of [false, true]) {
+  test(`explicit ${saveAs ? 'save as' : 'save'} commits a held boundary once`, async ({ page }) => {
+    await loadAttachedCues(page, true);
+    await page.evaluate(() => MaweSettings.updateEditorSettings({ autoSaveProject: false, cueMoveStepMs: 100 }));
+    const original = await readTimings(page);
+    const historyBefore = await page.evaluate(() => MaweHistory.editorHistory.undoLength());
+    const boundary = page.locator('.waveform-cue-boundary[data-track="main"][data-left-idx="0"]').first();
+    await expect(boundary).toBeVisible();
+    const box = await boundary.boundingBox();
+    expect(box).not.toBeNull();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await expect(page.locator('#waveform-pane')).toHaveClass(/shared-boundary-drag-active/);
+    await page.keyboard.press('d');
+    await page.evaluate(async (asNew) => {
+      window.__heldSave = { writes: 0, content: '' };
+      const handle = { name: 'saved.mosp', async createWritable() {
+        return { async write(blob) { window.__heldSave.writes++; window.__heldSave.content = await blob.text(); }, async close() {} };
+      } };
+      if (asNew) window.showSaveFilePicker = async () => handle;
+      else MaweServerSave.projectFileHandle = handle;
+      if (asNew) await MaweProjectSave.saveProjectAsToFile();
+      else await MaweProjectSave.saveCurrentProject();
+    }, saveAs);
+    const expected = [
+      { start: 5000, end: 10100 },
+      { start: 10100, end: 18000 },
+      { start: 25000, end: 30000 },
+    ];
+    expect(await page.evaluate(() => ({ writes: window.__heldSave.writes, timings: JSON.parse(window.__heldSave.content).segments.map(({ start, end }) => ({ start, end })) })))
+      .toEqual({ writes: 1, timings: expected });
+    await page.mouse.up();
+    expect(await readTimings(page)).toEqual(expected);
+    expect(await page.evaluate(() => MaweHistory.editorHistory.undoLength())).toBe(historyBefore + 1);
+    await page.keyboard.press('Control+z');
+    await expect.poll(() => readTimings(page)).toEqual(original);
+  });
+}
+
+for (const gesture of ['alt cue', 'shared boundary']) {
+  test(`explicit save cancels unchanged ${gesture} without clicking`, async ({ page }) => {
+    await loadAttachedCues(page, true);
+    await page.evaluate(() => {
+      MaweSettings.updateEditorSettings({ autoSaveProject: false, clickBehavior: 'select-and-play' });
+      window.__heldSave = { writes: 0, content: '' };
+      MaweServerSave.projectFileHandle = { name: 'saved.mosp', async createWritable() {
+        return { async write(blob) { window.__heldSave.writes++; window.__heldSave.content = await blob.text(); }, async close() {} };
+      } };
+    });
+    const target = gesture === 'alt cue'
+      ? page.locator('.waveform-cue-block[data-track="main"][data-idx="0"]').first()
+      : page.locator('.waveform-cue-boundary[data-track="main"][data-left-idx="0"]').first();
+    const box = await target.boundingBox();
+    expect(box).not.toBeNull();
+    const historyBefore = await page.evaluate(() => MaweHistory.editorHistory.undoLength());
+    if (gesture === 'alt cue') await page.keyboard.down('Alt');
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    if (gesture === 'alt cue') await page.keyboard.up('Alt');
+    await expect(page.locator('#waveform-pane')).toHaveClass(/cue-drag-active/);
+    const selection = await page.evaluate(() => [...MaweState.selection.indices('main')].sort());
+    expect(await page.locator('#player').evaluate(player => player.paused)).toBe(true);
+    await page.evaluate(() => MaweProjectSave.saveCurrentProject());
+    expect(await page.locator('#player').evaluate(player => player.paused)).toBe(true);
+    await expect(page.locator('#waveform-pane')).not.toHaveClass(/cue-drag-active/);
+    await page.mouse.up();
+    expect(await page.locator('#player').evaluate(player => player.paused)).toBe(true);
+    expect(await page.evaluate(() => [...MaweState.selection.indices('main')].sort())).toEqual(selection);
+    expect(await page.evaluate(() => Boolean(MaweBoot.DATA.segments[0].disabled))).toBe(false);
+    expect(await page.evaluate(() => MaweHistory.editorHistory.undoLength())).toBe(historyBefore);
+    expect(await page.evaluate(() => ({ writes: window.__heldSave.writes, disabled: Boolean(JSON.parse(window.__heldSave.content).segments[0].disabled) })))
+      .toEqual({ writes: 1, disabled: false });
+  });
+}
+
+test('save as commits a drag started while the picker was open', async ({ page }) => {
+  await loadAttachedCues(page, true);
+  await page.evaluate(() => {
+    MaweSettings.updateEditorSettings({ autoSaveProject: false, cueMoveStepMs: 100 });
+    window.__heldSave = { writes: 0, content: '' };
+    const handle = { name: 'saved.mosp', async createWritable() {
+      return { async write(blob) { window.__heldSave.writes++; window.__heldSave.content = await blob.text(); }, async close() {} };
+    } };
+    window.showSaveFilePicker = () => new Promise(resolve => { window.__resolveHeldPicker = () => resolve(handle); });
+    window.__heldSavePromise = MaweProjectSave.saveProjectAsToFile();
+  });
+  await expect.poll(() => page.evaluate(() => typeof window.__resolveHeldPicker)).toBe('function');
+  const original = await readTimings(page);
+  const historyBefore = await page.evaluate(() => MaweHistory.editorHistory.undoLength());
+  const boundary = page.locator('.waveform-cue-boundary[data-track="main"][data-left-idx="0"]').first();
+  const box = await boundary.boundingBox();
+  expect(box).not.toBeNull();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await expect(page.locator('#waveform-pane')).toHaveClass(/shared-boundary-drag-active/);
+  await page.keyboard.press('d');
+  await page.evaluate(async () => { window.__resolveHeldPicker(); await window.__heldSavePromise; });
+  const expected = [
+    { start: 5000, end: 10100 },
+    { start: 10100, end: 18000 },
+    { start: 25000, end: 30000 },
+  ];
+  expect(await page.evaluate(() => ({ writes: window.__heldSave.writes, timings: JSON.parse(window.__heldSave.content).segments.map(({ start, end }) => ({ start, end })) })))
+    .toEqual({ writes: 1, timings: expected });
+  await page.mouse.up();
+  expect(await readTimings(page)).toEqual(expected);
+  expect(await page.evaluate(() => MaweHistory.editorHistory.undoLength())).toBe(historyBefore + 1);
+  await page.keyboard.press('Control+z');
+  await expect.poll(() => readTimings(page)).toEqual(original);
+});
+
 test('A also compresses an attached preceding cue', async ({ page }) => {
   await loadAttachedCues(page, true);
   await toggleGlobalSettings(page);
