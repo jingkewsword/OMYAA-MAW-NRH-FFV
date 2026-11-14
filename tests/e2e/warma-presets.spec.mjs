@@ -15,6 +15,81 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
+for (const scenario of ['same', 'changed-focused', 'changed-focused-unedited', 'changed-unfocused', 'scope-edited', 'scope-roundtrip', 'changed-selected-to-all']) {
+  test(`delayed preset refresh preserves editing and scope: ${scenario}`, async ({ page }) => {
+    await page.evaluate(() => {
+      MaweBoot.DATA.segments.push({ id: 'two', start: 2000, end: 4000, text: '嗯 456' });
+      MaweCuePanel.renderAll();
+      MaweSelection.selectOnly(0);
+    });
+    if (scenario !== 'same') {
+      const previous = { schema: 'moy.asr.text_processing_presets.v2', revision: 1, defaultPresetId: 'old',
+        presets: [{ id: 'old', name: 'Old default', scope: scenario === 'changed-selected-to-all' ? 'selected' : 'all', steps: [
+          { type: 'replace', find: '', replacement: '', regex: false, caseSensitive: false },
+        ] }] };
+      const seed = route => route.fulfill({ json: previous });
+      await page.route('**/api/text-processing-presets', seed);
+      await page.evaluate(() => { MaweTextProcess.openTextProcessModal(); });
+      await expect(page.locator('#text-preset-select')).toHaveValue('old');
+      await page.locator('#text-process-cancel').click();
+      await page.unroute('**/api/text-processing-presets', seed);
+    }
+    let release;
+    let intercepted;
+    const hold = new Promise(resolve => { release = resolve; });
+    const waiting = new Promise(resolve => { intercepted = resolve; });
+    await page.route('**/api/text-processing-presets', async route => {
+      const response = await route.fetch();
+      const realLibrary = await response.json();
+      intercepted();
+      await hold;
+      const json = scenario === 'same' ? realLibrary : {
+        ...realLibrary, defaultPresetId: 'new-default',
+        presets: [{ id: 'new-default', name: 'New default', scope: ['scope-edited', 'changed-selected-to-all'].includes(scenario) ? 'all' : 'selected', steps: [{ type: 'trim' }] }],
+      };
+      await route.fulfill({ response, json });
+    });
+    await page.evaluate(() => { MaweTextProcess.openTextProcessModal(); });
+    await waiting;
+    const input = page.getByRole('textbox', { name: '查找', exact: true });
+    try {
+      if (scenario === 'scope-edited' || scenario === 'scope-roundtrip') {
+        await page.locator('#text-process-selected-only').check();
+        if (scenario === 'scope-roundtrip') await page.locator('#text-process-selected-only').uncheck();
+      }
+      else if (scenario !== 'changed-unfocused') {
+        await input.focus();
+        if (scenario === 'changed-focused' || scenario === 'changed-selected-to-all') await page.keyboard.insertText('嗯');
+        await input.evaluate(node => { window.__originalTextProcessInput = node; node.setSelectionRange(0, 0); });
+      }
+    } finally { release(); }
+    await expect(page.locator('#text-preset-status')).toHaveAttribute('data-state', 'success');
+    const select = page.locator('#text-preset-select');
+    const selectedOnly = page.locator('#text-process-selected-only');
+    if (scenario === 'same') {
+      await expect(input).toBeFocused();
+      expect(await input.evaluate(node => node === window.__originalTextProcessInput && node.selectionStart === 0)).toBe(true);
+      await page.keyboard.insertText('嗯');
+      await expect(input).toHaveValue('嗯');
+      await expect(page.locator('#text-process-preview')).toContainText('处理后： 123');
+    } else if (['changed-focused', 'changed-focused-unedited', 'changed-selected-to-all'].includes(scenario)) {
+      await expect(input).toBeFocused();
+      if (scenario === 'changed-focused-unedited') await page.keyboard.insertText('嗯');
+      await expect(input).toHaveValue('嗯');
+      await expect(select).toHaveValue('');
+      await expect(selectedOnly).toBeChecked();
+      await expect(page.locator('#text-process-preview')).toContainText('处理后： 123');
+      await page.locator('#text-process-confirm').click();
+      await expect.poll(() => page.evaluate(() => MaweBoot.DATA.segments.map(({ text }) => text))).toEqual([' 123', '嗯 456']);
+    } else {
+      await expect(select).toHaveValue('new-default');
+      if (scenario === 'scope-roundtrip') await expect(selectedOnly).not.toBeChecked();
+      else await expect(selectedOnly).toBeChecked();
+      await expect(page.locator('#text-preset-rules > li')).toContainText(['修剪前后空白']);
+    }
+  });
+}
+
 test('preset rules preview, persist, reload and undo', async ({ page }, info) => {
   await page.evaluate(() => MaweTextProcess.openTextProcessModal());
   const status = page.locator('#text-preset-status');
