@@ -20,7 +20,7 @@ class WindowsCacheGateTests(unittest.TestCase):
         script = textwrap.dedent(match.group(1))
         namespace = "test_thumbnail_cache.ThumbnailCacheTests.test_symlink_registration_matches_resolved_source_namespace"
         modules = ("test_thumbnail_cache", "test_thumbnail_jobs_integration", "test_thumbnail_server", "test_reapeaks_fixture")
-        generated = ["test_reapeaks_fixture.GeneratedFixtureTests.test_" + source + "_generated_matches_fixture"
+        generated = ["test_reapeaks_fixture." + ("LongMediaGeneratedFixtureTests" if source == "tone30" else "GeneratedFixtureTests") + ".test_" + source + "_generated_matches_fixture"
                      for source in ("tone30", "tone_dual", "tone_48k")]
         selected = ["tests." + namespace, *[m + ".Contract.test_valid" for m in modules[1:]], *generated]
         good = {"selected_ids": selected,

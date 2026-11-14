@@ -83,6 +83,11 @@
 
 ## 工程说明
 
+<a name="engineering-test-groups"></a>
+### 测试分组与夹具边界
+
+[打开正文](engineering/TEST_GROUPS.md)
+
 <a name="engineering-long-commands"></a>
 ### Agent 长命令防卡死指南（Windows / PowerShell 5.1）
 
