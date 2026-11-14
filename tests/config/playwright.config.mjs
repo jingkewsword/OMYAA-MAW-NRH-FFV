@@ -31,3 +31,5 @@ export default defineConfig({
     },
   ],
 });
+
+// Temporary full-shard integration acceptance trigger.
