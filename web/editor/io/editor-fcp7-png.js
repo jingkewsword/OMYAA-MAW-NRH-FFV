@@ -70,3 +70,5 @@ export async function runFcp7PngExport({ plan, ass, layers, imageFormat = 'png',
     }
   }
 }
+
+// CI governance temporary mixed-change acceptance.
