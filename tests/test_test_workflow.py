@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 import re
 from pathlib import Path
 import sys
@@ -23,7 +24,8 @@ from scripts.test_policy import ALL_MERGE, PYTHON_PACKS, select_packs
 
 class TestWorkflowTests(unittest.TestCase):
     def test_plan_and_github_output_do_not_predict_windows_preview(self):
-        for paths in (("CHANGELOG.md",), ("README.md",), ("README.md", "maw/project.py")):
+        for paths in (("CHANGELOG.md",), ("README.md",), ("README.md", "maw/project.py"),
+                      ("README.md", "CHANGELOG.md")):
             with self.subTest(paths=paths), tempfile.TemporaryDirectory() as directory:
                 output_file = Path(directory) / "github-output"
                 arguments = ["--stage", "merge", "--plan-only", "--github-output", str(output_file)]
@@ -35,7 +37,28 @@ class TestWorkflowTests(unittest.TestCase):
                 plan, _ = json.JSONDecoder().raw_decode(out.getvalue())
                 self.assertNotIn("preview", plan)
                 self.assertNotIn("preview=", output_file.read_text(encoding="utf-8"))
-                self.assertNotIn("preview", json.loads(next((Path(directory) / ".artifacts/test-workflow").glob("*/plan.json")).read_text(encoding="utf-8")))
+                saved = next((Path(directory) / ".artifacts/test-workflow").glob("*/plan.json"))
+                self.assertNotIn("preview", json.loads(saved.read_text(encoding="utf-8")))
+
+    def test_upstream_windows_packaging_still_uses_light_scope(self):
+        from scripts import ci_impact
+
+        base = "a" * 40
+        for paths, expected in ((("README.md",), "true"), (("CHANGELOG.md",), "false"),
+                                (("README.md", "CHANGELOG.md"), "false")):
+            with self.subTest(paths=paths), tempfile.TemporaryDirectory() as directory:
+                output = Path(directory) / "github-output"
+                replies = [base + "\n", ("\0".join(paths) + "\0").encode()]
+                with patch.dict(os.environ, {"GITHUB_EVENT_NAME": "pull_request", "PR_BASE_SHA": base,
+                                            "GITHUB_OUTPUT": str(output)}), \
+                        patch.object(ci_impact.subprocess, "check_output", side_effect=replies), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    ci_impact.main()
+                self.assertEqual(output.read_text(encoding="utf-8"), f"light={expected}\n")
+        workflow = (ROOT / ".github/workflows/pr-release-windows.yml").read_text(encoding="utf-8")
+        for step in ("Build MAW bundle", "Upload MAW-lite release preview"):
+            content = workflow.split(f"- name: {step}\n", 1)[1].split("\n      - ", 1)[0]
+            self.assertIn("needs.selection.outputs.light != 'true'", content)
 
     def test_cli_checklist_scope_and_mixed_browser_consumer(self):
         source = 'tools/verification-checklist/build.py'
