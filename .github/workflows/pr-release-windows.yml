@@ -1,8 +1,7 @@
 name: Preview Windows Release
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
+  # Trial only: pull_request trigger temporarily disabled.
   workflow_dispatch:
 
 permissions:
