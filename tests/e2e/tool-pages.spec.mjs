@@ -170,7 +170,11 @@ test('generated checklist is standalone, preserves legacy progress and expands n
 test('changelog editor preserves edit/preview behavior without writing repository files',async({page},testInfo)=>{
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto(fileUrl('tools/changelog-editor/index.html'));
-  await page.evaluate(async text=>{await loadClText(text,'测试载入');},readFileSync(resolve('CHANGELOG.md'),'utf8'));
+  const changelog=readFileSync(resolve('CHANGELOG.md'),'utf8').replace(
+    /^## \[未发布\][^\S\r\n]*$/m,
+    '$&\n\n- **占位条目** ： 示例内容',
+  );
+  await page.evaluate(async text=>{await loadClText(text,'测试载入');},changelog);
   await expect(page.locator('#split-wrap')).toBeVisible();
   const input=page.locator('#cards textarea').first();
   await input.fill((await input.inputValue())+' 测试');
