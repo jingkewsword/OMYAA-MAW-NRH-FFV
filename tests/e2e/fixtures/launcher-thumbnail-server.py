@@ -30,7 +30,13 @@ api = LauncherApi(paths=LauncherPaths(root=ROOT, env_path=project.parent / "unus
 try:
     with mock.patch("maw.gui_web.process_group_kwargs", side_effect=owned_fixture_group_kwargs):
         result = api.start_server({"jsonPath": str(project), "port": port, "guiLang": "zh"})
-    print(json.dumps({**result, "fixtureServerPid": getattr(api.server_process, "pid", None)}), flush=True)
+    server_pid = getattr(api.server_process, "pid", None)
+    diagnostic_processes = []
+    if sys.platform == "win32":
+        from windows_ebusy_observe import process_info
+        diagnostic_processes = [process_info(pid) for pid in (os.getpid(), server_pid) if pid]
+    print(json.dumps({**result, "fixtureServerPid": server_pid, "fixturePid": os.getpid(),
+                      "diagnosticProcesses": diagnostic_processes}), flush=True)
     if not result.get("ok"):
         raise SystemExit(1)
     if "--exit-after-start" in sys.argv:

@@ -1,0 +1,53 @@
+name: Windows EBUSY diagnostic
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  node-common:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
+      MAW_CI_SHORT_TEMP: '1'
+      MAW_EBUSY_EVIDENCE_DIR: ${{ github.workspace }}/.artifacts/ebusy-evidence
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.28.4
+          run_install: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22.23.4'
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: '0.13.4'
+      - run: uv sync --frozen --group test --group dev --no-group build
+      - name: Install real media dependencies
+        shell: pwsh
+        run: |
+          choco install ffmpeg --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $binary = Get-ChildItem -LiteralPath "$env:ChocolateyInstall\lib\ffmpeg\tools" -Filter ffmpeg.exe -Recurse -File | Select-Object -First 1
+          if (-not $binary) { throw 'FFmpeg executable missing' }
+          $binary.Directory.FullName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Run required common pack with original node concurrency
+        run: uv run --no-sync python scripts/test_workflow.py --stage merge --pack common
+      - name: Preserve diagnostics and test results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: windows-ebusy-evidence
+          path: |
+            .artifacts/ebusy-evidence/
+            .artifacts/test-workflow/
+            .artifacts/checks/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
