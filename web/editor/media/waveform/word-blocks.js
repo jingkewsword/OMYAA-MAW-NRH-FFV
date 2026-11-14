@@ -88,7 +88,7 @@ export function createWordBlocks(dependencies) {
           this.focusWaveform();
           this.options.wordTiming.showMenu(event.clientX, event.clientY, index, entry.index);
         });
-        // 双击弹字词气泡在 beginWordDrag 里按 pointerdown 序列识别：
+        // 双击弹字词气泡在 endWordDrag 里按完整点击序列识别：
         // 选中刷新会重建字词条带，原生 dblclick 的目标元素不可靠。
         row.append(block);
       });
@@ -250,31 +250,9 @@ export function createWordBlocks(dependencies) {
       this.cancelWordDrag();
       this.cancelHoverSeekPreview();
       this.focusWaveform();
-      // 双击字词块 → 字词快速编辑气泡。字词条带在选中刷新时会重建替换
-      // 元素（原生 dblclick 的两次 click 目标不一致，不会触发），因此按
-      // pointerdown 序列自行识别双击（500ms 内两次按下同一字词，与系统
-      // 双击阈值一致）。光标映射用第一次按下的坐标对当前标签测量，与
-      // 字幕块行为一致；当前块找不到时回退 openWordQuickEditAtIndex
-      //（合成锚点 + rAF 重试）。
       const now = Date.now();
       const lastWordClick = this._wordQuickEditClick;
-      this._wordQuickEditClick = {
-        index, itemIndex, time: now, clientX: event.clientX, clientY: event.clientY,
-      };
-      if (lastWordClick && lastWordClick.index === index && lastWordClick.itemIndex === itemIndex
-          && now - lastWordClick.time <= 500) {
-        this._wordQuickEditClick = null;
-        this._wordQuickEditDoubleClickTime = now;
-        const block = this.firstVisibleWordBlock(index, itemIndex);
-        if (block) {
-          this.openWordQuickEdit(index, itemIndex, block, {
-            clientX: lastWordClick.clientX, clientY: lastWordClick.clientY,
-          });
-        } else {
-          this.openWordQuickEditAtIndex(index, itemIndex, null);
-        }
-        return;
-      }
+      this.clearWordQuickEditClick();
       const geometry = this.captureRowGeometry(row);
       const timing = resolveTiming(this.options.getCueTiming?.());
       const pointer = timing.fromMs(this.pointerTimeMs(event, row, geometry));
@@ -294,6 +272,9 @@ export function createWordBlocks(dependencies) {
         original: { ...segment, items: JSON.parse(JSON.stringify(segment.items)) },
         indices: resize ? [itemIndex] : [...this.options.wordTiming.getSelection(segment)],
         resize, edge, seam, itemIndex,
+        clickTime: now,
+        previousClick: !resize && lastWordClick && lastWordClick.segment === segment
+          && lastWordClick.itemIndex === itemIndex && now - lastWordClick.time <= 500 ? lastWordClick : null,
       };
       this.wordDrag = drag;
       drag.move = next => this.updateWordDrag(next);
@@ -348,15 +329,53 @@ export function createWordBlocks(dependencies) {
     endWordDrag(event) {
       const drag = this.wordDrag;
       if (!drag || event.pointerId !== drag.pointerId) return;
-      if (drag.moved) this.updateWordDrag(event);
+      if (drag.moved || Math.hypot(event.clientX - drag.clientX, event.clientY - drag.clientY) >= 3) this.updateWordDrag(event);
+      if (this.wordDrag !== drag) return;
       this.detachWordDrag(drag);
       if (!drag.command || !this.options.commitWordEdit(drag.command, drag.segment)) this.refreshWordBlocks();
+      const index = this.options.getSegments('main').indexOf(drag.segment);
+      const release = document.elementFromPoint(event.clientX, event.clientY);
+      const target = release?.closest('.waveform-word-block');
+      if (drag.moved || drag.resize || index < 0 || !target || release?.closest('.waveform-cue-handle')
+          || event.ctrlKey || event.metaKey || event.shiftKey
+          || Number(target?.getAttribute('data-segment-idx')) !== index
+          || Number(target?.getAttribute('data-item-idx')) !== drag.itemIndex) return;
+      if (drag.previousClick) {
+        this._wordQuickEditDoubleClickTime = Date.now();
+        const block = this.firstVisibleWordBlock(index, drag.itemIndex);
+        if (block) this.openWordQuickEdit(index, drag.itemIndex, block, drag.previousClick);
+        else this.openWordQuickEditAtIndex(index, drag.itemIndex, null);
+      } else {
+        const click = { segment: drag.segment, itemIndex: drag.itemIndex, time: drag.clickTime,
+          clientX: drag.clientX, clientY: drag.clientY, clear: () => {} };
+        const timer = setTimeout(() => this.clearWordQuickEditClick(), 500);
+        const blur = () => this.clearWordQuickEditClick();
+        const outside = next => {
+          const element = /** @type {Element} */ (next.target);
+          const block = element.closest?.('.waveform-word-block');
+          if (next.button !== 0 || next.ctrlKey || next.metaKey || next.shiftKey
+              || element.closest?.('.waveform-cue-handle') || !block
+              || this.options.getSegments('main')[Number(block.getAttribute('data-segment-idx'))] !== click.segment
+              || Number(block.getAttribute('data-item-idx')) !== click.itemIndex) this.clearWordQuickEditClick();
+        };
+        click.clear = () => { clearTimeout(timer); window.removeEventListener('blur', blur); window.removeEventListener('pointerdown', outside, true); };
+        this._wordQuickEditClick = click;
+        window.addEventListener('blur', blur, { once: true });
+        window.addEventListener('pointerdown', outside, true);
+      }
+    }
+
+    /** @this {import('./waveform-types.js').WaveformInstance} */
+    clearWordQuickEditClick() {
+      this._wordQuickEditClick?.clear();
+      this._wordQuickEditClick = null;
     }
 
     /** @this {import('./waveform-types.js').WaveformInstance} */
     cancelWordDrag() {
       const drag = this.wordDrag;
       if (!drag) return;
+      this.clearWordQuickEditClick();
       this.detachWordDrag(drag);
       if (drag.command) drag.command.cancel();
       this.options.wordTiming.clearSelection();

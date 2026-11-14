@@ -182,14 +182,7 @@ test('接线契约：字词码模式放开字幕块编辑，双击字词块弹�
   const wiring = fs.readFileSync(
     path.join(root, 'web/editor/media/editor-waveform-init.js'), 'utf8');
   assert.ok(!wiring.includes('onMainCueDoubleClickBlocked'));
-  // 字词块双击在 beginWordDrag 内按 pointerdown 序列识别（选中刷新会
-  // 重建字词条带，原生 dblclick 目标不可靠），并用首次按下坐标做光标
-  // 定位；提交经 onWordQuickEditText 走句文本区间替换 + 字词文本同步。
-  const wordBlocks = fs.readFileSync(
-    path.join(root, 'web/editor/media/waveform/word-blocks.js'), 'utf8');
-  assert.ok(wordBlocks.includes('this.openWordQuickEdit(index, itemIndex, block, {'));
-  assert.ok(wordBlocks.includes('clientX: lastWordClick.clientX, clientY: lastWordClick.clientY,'));
-  assert.ok(wordBlocks.includes('this.openWordQuickEditAtIndex(index, itemIndex, null)'));
+  // 双击定位、提交和不可见块回退由浏览器交互测试覆盖。
   assert.ok(wiring.includes('onWordQuickEditText: (segmentIndex, itemIndex, text)'));
   assert.ok(wiring.includes('wordCharRanges(previousText, segment.items || [])'));
   assert.ok(wiring.includes('MaweWordTiming.syncTextChange(segment, previousText)'));
