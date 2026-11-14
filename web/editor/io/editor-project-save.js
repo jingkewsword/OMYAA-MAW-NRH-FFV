@@ -114,7 +114,11 @@ jsonEl.title = window.MAWE_I18N?.translateText?.(text) || text;
       if (!silent) MaweHint.flashHint('当前服务器未绑定工程；请先导出 .mosp，再重新打开该文件', 'invalid');
       return false;
     }
-if (MaweServerSave.projectSaveInFlight || MaweServerSave.projectCheckpointInFlight) return false;
+if (MaweServerSave.projectSaveInFlight || MaweServerSave.projectCheckpointInFlight) {
+  if (silent && !backupOnly && MaweCoreState.waveformEditor?.drag) MaweServerSave.scheduleAutoSaveFlush();
+  return false;
+}
+if (!prepareWaveformDragForSave(silent, backupOnly)) return false;
 flushInlineEditsForSave();
 const projectJson = MaweJsonRepair.buildJson();
 const fingerprint = projectSaveFingerprint();
@@ -170,7 +174,11 @@ const saveUrl = MaweBoot.SERVER_CONFIG.saveUrl;
     const current = () => epoch === MaweProjectLoad.projectBindingEpoch && generation === MaweState.projectLoadGeneration;
     if (MaweState.projectLoadPending) return false;
     if (!MaweServerSave.projectFileHandle) return false;
-if (MaweServerSave.projectSaveInFlight || MaweServerSave.projectCheckpointInFlight) return false;
+if (MaweServerSave.projectSaveInFlight || MaweServerSave.projectCheckpointInFlight) {
+  if (silent && MaweCoreState.waveformEditor?.drag) MaweServerSave.scheduleAutoSaveFlush();
+  return false;
+}
+if (!prepareWaveformDragForSave(silent)) return false;
 flushInlineEditsForSave();
 const projectJson = MaweJsonRepair.buildJson({ forFileExport: true });
 const fingerprint = projectSaveFingerprint();
@@ -192,6 +200,20 @@ markProjectSaved(handle.name, null, { silent, fingerprint, contentFingerprint })
   }
 
 
+
+  // A silent save must not flush the panel's old timing over a drag preview.
+  // Explicit saves finish the gesture so the saved project and undo agree.
+  function prepareWaveformDragForSave(silent, backupOnly = false) {
+    const waveform = MaweCoreState.waveformEditor;
+    const drag = waveform?.drag;
+    if (!drag) return true;
+    if (silent) {
+      if (!backupOnly) MaweServerSave.scheduleAutoSaveFlush();
+      return false;
+    }
+    waveform.endCueDrag({ type: drag.changed ? 'pointerup' : 'pointercancel', pointerId: drag.pointerId, ...drag.lastPointerPosition });
+    return true;
+  }
 
   // 统一保存入口：句柄目标优先（最近一次新建/另存为选定的文件），否则写回服务器绑定工程。
   async function saveCurrentProject({ silent = false } = {}) {
@@ -216,6 +238,7 @@ markProjectSaved(handle.name, null, { silent, fingerprint, contentFingerprint })
     const generation = MaweState.projectLoadGeneration;
     const current = () => epoch === MaweProjectLoad.projectBindingEpoch && generation === MaweState.projectLoadGeneration;
     if (MaweState.projectLoadPending) return false;
+    if (!prepareWaveformDragForSave(false)) return false;
     if (MaweInlineEdit.editingState) MaweInlineEdit.finishEdit(true);
     if (MaweInlineEdit.extensionEditingState) MaweInlineEdit.finishExtensionEdit(true);
     MaweCuePanel.commitCuePanelEdit();
@@ -239,6 +262,7 @@ markProjectSaved(handle.name, null, { silent, fingerprint, contentFingerprint })
       let fingerprint, contentFingerprint;
       await MaweHost.files.writeBlob(handle, () => {
         if (!current()) throw new DOMException('工程已切换', 'AbortError');
+        prepareWaveformDragForSave(false);
         flushInlineEditsForSave();
         const projectJson = MaweJsonRepair.buildJson({ forFileExport: true });
         fingerprint = projectSaveFingerprint();
