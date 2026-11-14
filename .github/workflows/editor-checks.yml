@@ -209,7 +209,9 @@ jobs:
           retention-days: 7
 
       - name: Real file and HTTP editor
-        if: ${{ needs.selection.outputs.light != 'true' }}
+        # The final gate requires the full four-shard result when selected.
+        # Do not substitute it when selection is uncertain.
+        if: ${{ needs.selection.outputs.light != 'true' && (needs.selection.result != 'success' || needs.selection.outputs.light != 'false' || needs.selection.outputs.editor_e2e != 'true') }}
         env:
           MAW_E2E_PYTHON: ${{ github.workspace }}/.venv/bin/python
         run: pnpm exec playwright test --config=tests/config/playwright.config.mjs --project=chromium tests/e2e/editor-bundle.spec.mjs tests/e2e/editor-transactions.spec.mjs tests/e2e/editor-text-tools.spec.mjs tests/e2e/ass-cue-position.spec.mjs tests/e2e/sticker-preview-lifecycle.spec.mjs tests/e2e/warma-presets.spec.mjs tests/e2e/warma-i18n.spec.mjs
