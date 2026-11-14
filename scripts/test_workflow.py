@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 import ctypes
 import importlib.util
 import json
@@ -67,6 +67,25 @@ def select_ci_short_temp(stack: ExitStack, environment: dict) -> tuple[Path, str
             pass
         probe.cleanup()
     raise OSError("No candidate temporary location provides a distinct, same-file Windows 8.3 alias")
+
+
+def ci_short_temp_enabled(packs) -> bool:
+    return (os.environ.get("GITHUB_ACTIONS") == "true" and os.environ.get("MAW_CI_SHORT_TEMP") == "1"
+            and os.name == "nt" and "common" in packs)
+
+
+@contextmanager
+def temporary_environment(values: dict[str, str]):
+    previous = {name: os.environ.get(name) for name in values}
+    try:
+        os.environ.update(values)
+        yield
+    finally:
+        for name, value in previous.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
 
 
 def changed_paths(base_ref: str | None) -> list[str]:
@@ -268,7 +287,7 @@ def write_execution_summary(output_dir, plan, results, not_run, exit_code, *, st
         for name in not_run:
             lines.append(f"| {name} | not-run | — | — | — | — |")
         if error:
-            lines.extend(["", f"Preparation failed: {error}"])
+            lines.extend(["", f"Workflow error ({status or 'unknown'}): {error}"])
         lines.extend(["", "Reports and logs are in the test evidence artifact. Python counts are aggregate; individual passing outcomes are not recorded.", ""])
         with open(destination, "a", encoding="utf-8") as stream:
             stream.write("\n".join(lines))
@@ -360,96 +379,113 @@ def main(argv=None) -> int:
     # Explicit interpreter settings avoid implicit environment synchronization.
     os.environ.setdefault("MAW_TEST_PYTHON", sys.executable)
     os.environ.setdefault("MAW_E2E_PYTHON", sys.executable)
-    with ExitStack() as stack:
-        if (os.environ.get("GITHUB_ACTIONS") == "true" and os.environ.get("MAW_CI_SHORT_TEMP") == "1"
-                and os.name == "nt" and "common" in packs):
-            try:
+    results = []
+    phase = "preparation"
+    failure_status = None
+    failure_error = None
+    active_gate = None
+    try:
+        with ExitStack() as stack:
+            if ci_short_temp_enabled(packs):
                 temp_root, location = select_ci_short_temp(stack, os.environ)
-            except OSError as error:
-                write_execution_summary(output_dir, plan, [], [name for name, _, _ in steps], 1,
-                                        status="short-temp-unavailable", error=str(error))
-                print(str(error))
-                return 1
-            plan["temp_location"] = location
-            (output_dir / "plan.json").write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-            print(f"Windows CI temporary location: {location}")
-            temp = temp_root / "workflow-temp"
-        else:
+                plan["python_common_temp_location"] = location
+                (output_dir / "plan.json").write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+                print(f"Windows CI python-common temporary location: {location}")
+                short_temp = temp_root / "workflow-temp"
+                short_temp.mkdir()
+            else:
+                short_temp = None
             temp = output_dir / "tmp"
-        temp.mkdir()
-        for key in ("TEMP", "TMP", "TMPDIR"):
-            os.environ[key] = str(temp)
-        results = []
-        for name, command, timeout in steps:
-            browser_record = None
-            if name in {"editor-http-smoke", "browser-regressions"}:
+            temp.mkdir()
+            for key in ("TEMP", "TMP", "TMPDIR"):
+                os.environ[key] = str(temp)
+            phase = "execution"
+            for name, command, timeout in steps:
+                active_gate = name
+                browser_record = None
+                if name in {"editor-http-smoke", "browser-regressions"}:
+                    try:
+                        browser_record = prepare_browser(name, command, output_dir,
+                            args.browser_shard if name == "browser-regressions" else None,
+                            specs if "e2e" in packs and name == "browser-regressions" else [],
+                            "smoke" if name == "editor-http-smoke" else "e2e" if "e2e" in packs else "editor-e2e", results)
+                    except (OSError, ValueError, KeyError, TypeError) as error:
+                        print(str(error))
+                        results.append({"gate": name, "status": "invalid-discovery", "exit_code": 1, "error": str(error)})
+                        break
+                    if not browser_record["planned_ids"]:
+                        browser_record["status"] = "empty-shard"
+                        browser_record["diagnostic_counts"] = {"passed": 0, "failures": 0, "skipped": 0, "flaky": 0}
+                        (output_dir / f"{name}-browser-run.json").write_text(json.dumps(browser_record, indent=2) + "\n", encoding="utf-8")
+                        results.append({"gate": name, "status": "empty-shard", "exit_code": 0})
+                        print(f"{name}: explicit zero-assignment shard of a nonempty full scope")
+                        continue
+                browser_report = output_dir / f"{name}.json"
+                os.environ["PLAYWRIGHT_JSON_OUTPUT_NAME"] = str(browser_report)
+                if name == "python-common" and short_temp is not None:
+                    with temporary_environment({key: str(short_temp) for key in ("TEMP", "TMP", "TMPDIR")}):
+                        result = execute(name, command, timeout)
+                else:
+                    result = execute(name, command, timeout)
+                code = result["exit_code"]
+                result["process_status"] = result.get("status", "unknown")
+                if "--report" in command:
+                    result["counts"] = report_counts("python", Path(command[command.index("--report") + 1]))
+                elif name.startswith("node-"):
+                    result["counts"] = report_counts("node", output_dir / f"{name}.xml")
+                elif browser_record:
+                    result["counts"] = browser_diagnostic_counts(browser_report)
+                    browser_record["diagnostic_counts"] = dict(result["counts"])
                 try:
-                    browser_record = prepare_browser(name, command, output_dir,
-                        args.browser_shard if name == "browser-regressions" else None,
-                        specs if "e2e" in packs and name == "browser-regressions" else [],
-                        "smoke" if name == "editor-http-smoke" else "e2e" if "e2e" in packs else "editor-e2e", results)
-                except (OSError, ValueError, KeyError, TypeError) as error:
+                    if not code and "--report" in command:
+                        report = json.loads(Path(command[command.index("--report") + 1]).read_text(encoding="utf-8"))
+                        if (not report["selected_ids"] or report["run"] != len(report["selected_ids"])
+                                or report["exit_code"] != 0
+                                or any(report[key] for key in ("failures", "errors", "expected_failures", "unexpected_successes"))
+                                or any(not skip["platform_not_applicable"] for skip in report["skips"])):
+                            raise ValueError("Required Python report is empty or contains unverified outcomes")
+                    if not code and name.startswith("node-"):
+                        xml = ET.parse(output_dir / f"{name}.xml")
+                        if not xml.findall(".//testcase") or any(xml.findall(f".//{tag}") for tag in ("skipped", "failure", "error")):
+                            raise ValueError("Required Node report is empty or contains non-passing cases")
+                    if not code and browser_record:
+                        report = json.loads(browser_report.read_text(encoding="utf-8"))
+                        if browser_config(report) != browser_record["scope"]["config"]:
+                            raise ValueError("Browser runtime configuration differs from discovery")
+                        browser_record.update(verify_run(browser_record["planned_ids"], report))
+                        result["counts"]["selected"] = len(browser_record["planned_ids"])
+                        result["counts"]["allowed_skipped"] = len(browser_record["allowed_skipped_ids"])
+                        if subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip() != browser_record["scope"]["revision"]:
+                            raise ValueError("Git revision changed while the browser gate was running")
+                        browser_record["status"] = "passed"
+                except (OSError, ValueError, KeyError, TypeError, ET.ParseError) as error:
+                    code = 1
+                    result.update(exit_code=1, status="invalid-required-report", error=str(error))
                     print(str(error))
-                    results.append({"gate": name, "status": "invalid-discovery", "exit_code": 1, "error": str(error)})
-                    break
-                if not browser_record["planned_ids"]:
-                    browser_record["status"] = "empty-shard"
-                    browser_record["diagnostic_counts"] = {"passed": 0, "failures": 0, "skipped": 0, "flaky": 0}
+                if browser_record:
+                    if code:
+                        browser_record["status"] = "failed"
                     (output_dir / f"{name}-browser-run.json").write_text(json.dumps(browser_record, indent=2) + "\n", encoding="utf-8")
-                    results.append({"gate": name, "status": "empty-shard", "exit_code": 0})
-                    print(f"{name}: explicit zero-assignment shard of a nonempty full scope")
-                    continue
-            browser_report = output_dir / f"{name}.json"
-            os.environ["PLAYWRIGHT_JSON_OUTPUT_NAME"] = str(browser_report)
-            result = execute(name, command, timeout)
-            code = result["exit_code"]
-            result["process_status"] = result.get("status", "unknown")
-            if "--report" in command:
-                result["counts"] = report_counts("python", Path(command[command.index("--report") + 1]))
-            elif name.startswith("node-"):
-                result["counts"] = report_counts("node", output_dir / f"{name}.xml")
-            elif browser_record:
-                result["counts"] = browser_diagnostic_counts(browser_report)
-                browser_record["diagnostic_counts"] = dict(result["counts"])
-            try:
-                if not code and "--report" in command:
-                    report = json.loads(Path(command[command.index("--report") + 1]).read_text(encoding="utf-8"))
-                    if (not report["selected_ids"] or report["run"] != len(report["selected_ids"])
-                            or report["exit_code"] != 0
-                            or any(report[key] for key in ("failures", "errors", "expected_failures", "unexpected_successes"))
-                            or any(not skip["platform_not_applicable"] for skip in report["skips"])):
-                        raise ValueError("Required Python report is empty or contains unverified outcomes")
-                if not code and name.startswith("node-"):
-                    xml = ET.parse(output_dir / f"{name}.xml")
-                    if not xml.findall(".//testcase") or any(xml.findall(f".//{tag}") for tag in ("skipped", "failure", "error")):
-                        raise ValueError("Required Node report is empty or contains non-passing cases")
-                if not code and browser_record:
-                    report = json.loads(browser_report.read_text(encoding="utf-8"))
-                    if browser_config(report) != browser_record["scope"]["config"]:
-                        raise ValueError("Browser runtime configuration differs from discovery")
-                    browser_record.update(verify_run(browser_record["planned_ids"], report))
-                    result["counts"]["selected"] = len(browser_record["planned_ids"])
-                    result["counts"]["allowed_skipped"] = len(browser_record["allowed_skipped_ids"])
-                    if subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip() != browser_record["scope"]["revision"]:
-                        raise ValueError("Git revision changed while the browser gate was running")
-                    browser_record["status"] = "passed"
-            except (OSError, ValueError, KeyError, TypeError, ET.ParseError) as error:
-                code = 1
-                result.update(exit_code=1, status="invalid-required-report", error=str(error))
-                print(str(error))
-            if browser_record:
+                results.append(result)
                 if code:
-                    browser_record["status"] = "failed"
-                (output_dir / f"{name}-browser-run.json").write_text(json.dumps(browser_record, indent=2) + "\n", encoding="utf-8")
-            results.append(result)
-            if code:
-                print("\n".join(dict.fromkeys(result["diagnostics"] + result["tail"])))
-                break
-        completed = {result["gate"] for result in results}
-        not_run = [name for name, _, _ in steps if name not in completed]
-        exit_code = next((r["exit_code"] for r in results if r["exit_code"]), 0)
-        write_execution_summary(output_dir, plan, results, not_run, exit_code)
-        return 1 if exit_code else 0
+                    print("\n".join(dict.fromkeys(result["diagnostics"] + result["tail"])))
+                    break
+            phase = "cleanup"
+    except OSError as error:
+        failure_status = {"preparation": "short-temp-preparation-failed",
+                          "execution": "execution-error", "cleanup": "short-temp-cleanup-failed"}[phase]
+        failure_error = str(error)
+        if phase == "execution" and active_gate and not any(result["gate"] == active_gate for result in results):
+            results.append({"gate": active_gate, "status": "execution-error", "exit_code": 1, "error": failure_error})
+        print(f"{failure_status}: {error}")
+    completed = {result["gate"] for result in results}
+    not_run = [name for name, _, _ in steps if name not in completed]
+    exit_code = next((result["exit_code"] for result in results if result["exit_code"]), 0)
+    if failure_status and not exit_code:
+        exit_code = 1
+    write_execution_summary(output_dir, plan, results, not_run, exit_code,
+                            status=failure_status, error=failure_error)
+    return 1 if exit_code else 0
 
 
 if __name__ == "__main__":
