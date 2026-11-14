@@ -1449,6 +1449,24 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.waveform-cue-quick-edit-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+.waveform-cue-quick-edit-help {
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--amber-hover);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.waveform-cue-quick-edit-help:hover { text-decoration: underline; }
 .waveform-cue-quick-edit-text {
   width: 100%;
   box-sizing: border-box;
@@ -1468,11 +1486,6 @@
   outline: none;
   border-color: var(--accent);
   box-shadow: var(--focus-ring);
-}
-.waveform-cue-quick-edit-hint {
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: 11px;
 }
 /* 气泡三角：默认在弹窗底部指向下方（弹窗位于字幕块上方）；贴顶翻到
    下方时改为顶部指向上方。--cue-quick-edit-arrow-x 由 JS 按指针位置写入。 */
@@ -1514,8 +1527,10 @@
 .waveform-basic .waveform-row-shell .waveform-row { inset: 48px 0 auto; width: 100%; }
 .waveform-filmstrip { display: block; position: absolute; top: 0; left: 1px; width: calc(100% - 2px); height: 48px; cursor: crosshair; border-radius: var(--radius-sm); }
 
-#waveform-thumbnail-setting { margin: 8px 0; flex-wrap: wrap; }
-#waveform-thumbnail-decode-setting { margin: 8px 0; padding-left: 22px; }
+#waveform-thumbnail-setting { display: flex; flex: 0 0 100%; min-width: 0; align-items: center; overflow-x: auto; margin: 8px 0; }
+.waveform-settings-section .waveform-inline-checkbox { margin-left: 16px; }
+.waveform-settings-section .waveform-cue-tooltip-setting { flex: 0 0 100%; margin: 8px 0; }
+#waveform-thumbnail-decode-setting[hidden] { display: none; }
 /* 状态文字仅保留给辅助技术：select 的 tooltip 已展示同样内容（
    updateThumbnailStatus 会同步写父级 title），可见行冗余移除。
    不用 display:none——该 span 挂 aria-live 且被 select 与补间开关
