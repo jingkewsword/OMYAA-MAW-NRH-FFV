@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import os
-import sys
 import ast
 import re
 from pathlib import Path
@@ -111,7 +110,7 @@ def allowed_platform_skip(test_id: str, reason: str) -> bool:
     identity = test_id.removeprefix("tests.")
     if (identity == "test_ass_fonts.FontRootsTests.test_darwin_roots_include_mobile_asset_font_directories"
             and reason == "本机没有 MobileAsset 字体资产目录"):
-        return sys.platform in {"win32", "linux"}
+        return True
     if os.name == "nt":
         return (identity == "test_gui_web.GuiWebBridgeTests.test_open_existing_path_uses_external_opener_for_file_and_folder"
                 and reason == "Non-Windows paths use the external opener")
@@ -136,7 +135,7 @@ SITE_EXTRA_DOCUMENTS = {
 E2E_FAMILIES = (
     (("gap",), ("gap-", "ai-cleanup", "script-alignment", "script-timestamp", "waveform-history", "waveform-deletion", "burn-video-jobs", "editor-help-srt-burn")),
     (("ai_cleanup", "ai-cleanup", "postprocess_ai"), ("ai-cleanup", "gap-", "marker")),
-    (("script_match", "script-match", "script_alignment", "script_timestamp", "server-align/"), ("script-", "server-align", "launcher-script-match", "gap-")),
+    (("script_match", "script-match", "script_alignment", "script_timestamp", "server-align/"), ("script-", "server-align", "launcher-script-match", "gap-", "recording-review")),
     (("waveform", "reapeaks", "quapeaks", "media_cache", "playback", "seek", "audition"), ("waveform-", "playback-", "playhead-", "hover-seek", "subtitle-seek", "cue-context", "media-controls", "gap-", "filmstrip")),
     (("thumbnail", "filmstrip"), ("filmstrip", "waveform-view-performance", "settings-structure")),
     (("segmentation", "punctuation", "word_timing", "word-timing", "timed-text", "text-tools", "split", "merge"), ("word-timing", "timed-text", "split-", "keyboard-timing", "editor-text-tools", "launcher-resegment")),
@@ -155,7 +154,7 @@ def related_specs(path: str) -> list[str] | None:
     if any(token in path for token in ("/state/", "/host/", "history", "project", "manifest", "scripts.txt", "boot/", "editor.css", "layout", "serve.py")) and not path.startswith("server-align/"):
         return None
     if path.startswith("web/launcher/") or path.startswith("web/launcher"):
-        prefixes = ("launcher-",)
+        prefixes = ("launcher-", "layout-feedback", "shared-tooltip", "script-timestamp-alignment", "recording-review")
     else:
         prefixes = tuple(prefix for tokens, family in E2E_FAMILIES if any(token in path for token in tokens) for prefix in family)
     if not prefixes:

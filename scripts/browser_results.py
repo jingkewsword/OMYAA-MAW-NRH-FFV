@@ -2,21 +2,30 @@
 from __future__ import annotations
 
 
-SCHEMA = "maw.browser-run.v1"
+SCHEMA = "maw.browser-run.v2"
+RETIRED_SKIP_REASON = "便携模式已弃维护，2.0 移除 HTML，见 #336 后回归分析"
+RETIRED_PORTABLE_CASES = {
+    ("editor-bundle.spec.mjs", "minified portable bundle preserves non-default data, paths and generated language"),
+    ("editor-bundle.spec.mjs", "file executes every source and preserves project/export/undo behavior"),
+    ("editor-text-tools.spec.mjs", "portable file uses the same fade rules and SRT export settings"),
+    ("editor-text-tools.spec.mjs", "portable editor saves and reloads presets in its browser storage"),
+    ("warma-presets.spec.mjs", "portable pages reject a stale preset library save"),
+}
 
 
 def browser_cases(report: dict) -> dict[str, dict]:
     found = {}
 
-    def visit(suite):
+    def visit(suite, parents=()):
         for spec in suite.get("specs", []):
             for test in spec["tests"]:
                 identity = f"{spec['id']}@{test['projectId']}"
                 if identity in found:
                     raise ValueError(f"Duplicate browser case: {identity}")
-                found[identity] = test
+                found[identity] = {**test, "_file": spec.get("file", "").replace("\\", "/"),
+                                   "_title_path": (*parents, spec.get("title", ""))}
         for child in suite.get("suites", []):
-            visit(child)
+            visit(child, (*parents, child.get("title", "")))
 
     for suite in report["suites"]:
         visit(suite)
@@ -61,7 +70,7 @@ def discovery(report: dict, required_specs=()) -> list[str]:
     return sorted(cases)
 
 
-def verify_run(expected: list[str], report: dict) -> list[str]:
+def verify_run(expected: list[str], report: dict) -> dict[str, list[str]]:
     browser_config(report)
     if not expected or report.get("errors"):
         raise ValueError("Required browser run is empty or contains global errors")
@@ -69,13 +78,23 @@ def verify_run(expected: list[str], report: dict) -> list[str]:
     if set(cases) != set(expected):
         missing, extra = set(expected) - set(cases), set(cases) - set(expected)
         raise ValueError(f"Browser coverage mismatch: {len(missing)} missing, {len(extra)} extra")
+    passed, skipped = [], []
     for identity, test in cases.items():
         results = test["results"]
-        if (test["expectedStatus"] != "passed" or test["status"] != "expected"
-                or len(results) != 1 or results[0]["status"] != "passed"
-                or results[0].get("retry", 0) != 0):
-            raise ValueError(f"Browser case did not pass exactly once: {identity}")
+        single = len(results) == 1 and results[0].get("retry", 0) == 0
+        if single and test["expectedStatus"] == "passed" and test["status"] == "expected" and results[0]["status"] == "passed":
+            passed.append(identity)
+            continue
+        annotations = [a.get("description") for a in test.get("annotations", []) if a.get("type") == "skip"]
+        approved = (len(test["_title_path"]) == 1 and (test["_file"], test["_title_path"][0]) in RETIRED_PORTABLE_CASES
+                    and test["projectId"] == "chromium" and annotations == [RETIRED_SKIP_REASON])
+        if (approved and single and test["expectedStatus"] == "skipped" and test["status"] == "skipped"
+                and results[0]["status"] == "skipped" and not results[0].get("errors")):
+            skipped.append(identity)
+            continue
+        raise ValueError(f"Browser case did not pass or match an approved skip: {identity}")
     stats = report["stats"]
-    if stats["expected"] != len(expected) or any(stats[key] for key in ("unexpected", "skipped", "flaky")):
+    if (stats["expected"] != len(passed) or stats["skipped"] != len(skipped)
+            or any(stats[key] for key in ("unexpected", "flaky"))):
         raise ValueError("Required browser statistics contain failure, skip, flaky result, or count mismatch")
-    return sorted(cases)
+    return {"passed_ids": sorted(passed), "allowed_skipped_ids": sorted(skipped)}

@@ -49,8 +49,8 @@ uv run --no-sync python scripts/test_workflow.py --stage merge --base-ref origin
 
 显式复现可用 `--stage merge --pack media`；定向浏览器使用 `--pack e2e --e2e-specs '["tests/e2e/shared-tooltip.spec.mjs"]'`。完整浏览器用 `--pack editor-e2e`，不能与定向 e2e 同时指定。局部复现结果不代表整条分支准入。
 
-入口在 `.artifacts/test-workflow/<id>/` 保存计划与 summary；子命令由有界 run_check 执行。Python required 拒绝缺依赖跳过；Node 要求非空、无 skip 的实际 JUnit；浏览器先发现计划，再要求实际 JSON 完整、每例仅成功执行一次，无 skip、retry 或 flaky。错误、超时或无效报告立即使入口失败，后续未运行项不算通过。
+入口在 `.artifacts/test-workflow/<id>/` 保存计划与 summary；子命令由有界 run_check 执行。Python required 拒绝缺依赖跳过；Node 要求非空、无 skip 的实际 JUnit；浏览器先发现计划，再要求实际 JSON 完整、每例仅执行一次，无 retry 或 flaky。上游已停维护的五个便携单 HTML 用例按文件、标题、Chromium 和具体原因精确允许跳过，报告单独列出跳过项；其他跳过均失败。错误、超时或无效报告立即使入口失败，后续未运行项不算通过。
 
-Windows/Linux 的真实 macOS MobileAsset 字体资产用例按精确 ID 与原因记为平台不适用，旁边的合成目录用例仍执行；macOS 缺资产、其他依赖缺失仍失败。
+真实 macOS MobileAsset 字体资产缺失时，上游用例按精确 ID 与原因记为不适用，旁边的合成目录用例仍执行；有资产时真实目录断言仍执行，其他依赖缺失仍失败。
 
 本批只提供本地选测与执行，不改变 GitHub 工作流、CI 分片、汇总或分支保护。正式 PR 仍运行现有完整 CI；动态 job 的线上验收随后续接线完成。

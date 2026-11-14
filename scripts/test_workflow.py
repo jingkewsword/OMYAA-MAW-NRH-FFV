@@ -138,7 +138,7 @@ def prepare_browser(name, command, directory, specs, selection, results):
              "worktree_clean": not subprocess.check_output(["git", "status", "--porcelain=v1"], text=True).strip(),
              "config": browser_config(full_report), "selection": selection, "specs": list(specs), "case_ids": full_ids}
     return {"schema": SCHEMA, "scope": scope,
-            "planned_ids": planned, "passed_ids": [], "status": "pending"}
+            "planned_ids": planned, "passed_ids": [], "allowed_skipped_ids": [], "status": "pending"}
 
 
 def main(argv=None) -> int:
@@ -162,7 +162,7 @@ def main(argv=None) -> int:
     plan = select_packs(paths, release=args.stage == "release")
     packs = args.pack or plan["packs"]
     specs = json.loads(args.e2e_specs) if args.e2e_specs else plan["e2e_specs"]
-    if not isinstance(specs, list) or any(not isinstance(path, str) or not path.startswith("tests/e2e/")
+    if not isinstance(specs, list) or any(not isinstance(path, str) or not path.startswith("tests/e2e/") or not path.endswith(".spec.mjs")
             or ".." in Path(path).parts or not (ROOT / path).is_file() for path in specs):
         parser.error("e2e-specs must contain existing repository spec paths")
     if "e2e" in packs and not specs:
@@ -243,7 +243,7 @@ def main(argv=None) -> int:
                 report = json.loads(browser_report.read_text(encoding="utf-8"))
                 if browser_config(report) != browser_record["scope"]["config"]:
                     raise ValueError("Browser runtime configuration differs from discovery")
-                browser_record["passed_ids"] = verify_run(browser_record["planned_ids"], report)
+                browser_record.update(verify_run(browser_record["planned_ids"], report))
                 if subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip() != browser_record["scope"]["revision"]:
                     raise ValueError("Git revision changed while the browser gate was running")
                 browser_record["status"] = "passed"

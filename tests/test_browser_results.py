@@ -43,7 +43,7 @@ class BrowserResultsTests(unittest.TestCase):
 
     def test_missing_failed_skipped_flaky_and_retried_cases_fail(self):
         expected = discovery(sample_report())
-        self.assertEqual(verify_run(expected, sample_report()), expected)
+        self.assertEqual(verify_run(expected, sample_report()), {"passed_ids": expected, "allowed_skipped_ids": []})
         for fault in ("missing", "failed", "skipped", "flaky", "retry", "global-error"):
             report = sample_report()
             case = report["suites"][0]["specs"][0]["tests"][0]
@@ -59,6 +59,36 @@ class BrowserResultsTests(unittest.TestCase):
                 report["errors"] = [{"message": "teardown failed"}]
             with self.subTest(fault=fault), self.assertRaises(ValueError):
                 verify_run(expected, report)
+
+    def test_only_exact_upstream_retired_portable_skip_is_accepted(self):
+        report = sample_report()
+        spec = report["suites"][0]["specs"][0]
+        spec.update(file="editor-bundle.spec.mjs", title="file executes every source and preserves project/export/undo behavior")
+        case = spec["tests"][0]
+        reason = "便携模式已弃维护，2.0 移除 HTML，见 #336 后回归分析"
+        case.update(expectedStatus="skipped", status="skipped", annotations=[{"type": "skip", "description": reason}],
+                    results=[{"status": "skipped", "retry": 0}])
+        report["stats"].update(expected=1, skipped=1)
+        result = verify_run(["one@chromium", "two@chromium"], report)
+        self.assertEqual(result, {"passed_ids": ["two@chromium"], "allowed_skipped_ids": ["one@chromium"]})
+        for fault in ("file", "title", "project", "reason", "retry", "missing-result", "stats"):
+            bad = json.loads(json.dumps(report))
+            broken = bad["suites"][0]["specs"][0]
+            test = broken["tests"][0]
+            if fault in ("file", "title"):
+                broken[fault] += "-other"
+            elif fault == "project":
+                test["projectId"] = "firefox"
+            elif fault == "reason":
+                test["annotations"][0]["description"] = "other reason"
+            elif fault == "retry":
+                test["results"][0]["retry"] = 1
+            elif fault == "stats":
+                bad["stats"]["skipped"] = 0
+            else:
+                test["results"] = []
+            with self.subTest(fault=fault), self.assertRaises(ValueError):
+                verify_run(["one@" + ("firefox" if fault == "project" else "chromium"), "two@chromium"], bad)
 
 
 class RealPlaywrightDiscoveryTests(unittest.TestCase):
@@ -78,6 +108,10 @@ class RealPlaywrightDiscoveryTests(unittest.TestCase):
                     "import {test,expect} from '@playwright/test';\n"
                     f"test('case{index}a',()=>expect(1).toBe(1));\n"
                     f"test('case{index}b',()=>expect(2).toBe(2));\n", encoding="utf-8")
+            (fixture / "editor-bundle.spec.mjs").write_text(
+                "import {test} from '@playwright/test';\n"
+                "test('file executes every source and preserves project/export/undo behavior', () => {"
+                "test.skip(true, '便携模式已弃维护，2.0 移除 HTML，见 #336 后回归分析'); });\n", encoding="utf-8")
             command = [node, str(cli), "test", "--config", str(config), "--project=chromium", "--forbid-only", "--retries=0", "--reporter=json"]
 
             def invoke(extra=()):
@@ -90,7 +124,10 @@ class RealPlaywrightDiscoveryTests(unittest.TestCase):
             expected = discovery(json.loads(full.stdout))
             runtime = invoke()
             self.assertEqual(runtime.returncode, 0, runtime.stderr[:1000])
-            self.assertEqual(verify_run(expected, json.loads(runtime.stdout)), expected)
+            verified = verify_run(expected, json.loads(runtime.stdout))
+            self.assertEqual(len(verified["passed_ids"]), 4)
+            self.assertEqual(len(verified["allowed_skipped_ids"]), 1)
+            self.assertEqual(sorted(verified["passed_ids"] + verified["allowed_skipped_ids"]), expected)
             (fixture / "part1.spec.mjs").write_text("import {test} from '@playwright/test'; test.only('focus',()=>{});\n", encoding="utf-8")
             focused = invoke()
             self.assertNotEqual(focused.returncode, 0)

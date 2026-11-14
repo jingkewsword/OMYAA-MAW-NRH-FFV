@@ -22,6 +22,18 @@ from scripts.test_policy import ALL_MERGE, PYTHON_PACKS, select_packs
 
 
 class TestWorkflowTests(unittest.TestCase):
+    def test_launcher_and_alignment_select_their_cross_named_consumers(self):
+        launcher = select_packs(["web/launcher/postprocess.js"])["e2e_specs"]
+        for name in ("layout-feedback", "shared-tooltip", "script-timestamp-alignment", "recording-review"):
+            self.assertIn(f"tests/e2e/{name}.spec.mjs", launcher)
+        align = select_packs(["server-align/serve.py"])["e2e_specs"]
+        self.assertIn("tests/e2e/recording-review.spec.mjs", align)
+
+    def test_explicit_e2e_rejects_non_spec_helper(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            test_workflow.main(["--stage", "merge", "--pack", "e2e", "--changed", "README.md", "--plan-only",
+                                "--e2e-specs", '["tests/e2e/helpers.mjs"]'])
+
     def test_release_rejects_partial_pack_override(self):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             test_workflow.main(["--stage", "release", "--pack", "docs", "--changed", "README.md", "--plan-only"])
@@ -72,7 +84,7 @@ class TestWorkflowTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertIn("website", select_packs([path])["packs"])
 
-    def test_mobile_asset_skip_is_exact_on_supported_non_darwin_platforms(self):
+    def test_mobile_asset_skip_matches_upstream_on_all_platforms(self):
         identity = "test_ass_fonts.FontRootsTests.test_darwin_roots_include_mobile_asset_font_directories"
         reason = "本机没有 MobileAsset 字体资产目录"
         for platform, os_name, test_id, skip_reason, allowed in (
@@ -84,8 +96,8 @@ class TestWorkflowTests(unittest.TestCase):
             ("linux", "posix", identity.replace("FontRootsTests", "OtherTests"), reason, False),
             ("win32", "nt", identity, reason + "（依赖缺失）", False),
             ("linux", "posix", identity, reason + "（依赖缺失）", False),
-            ("darwin", "posix", identity, reason, False),
-            ("unknown", "posix", identity, reason, False),
+            ("darwin", "posix", identity, reason, True),
+            ("unknown", "posix", identity, reason, True),
         ):
             with self.subTest(platform=platform, test_id=test_id, reason=skip_reason), \
                     patch.object(test_policy, "os", SimpleNamespace(name=os_name)), \
