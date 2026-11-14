@@ -9,7 +9,7 @@ if __package__:
 else:
     from test_workflow import preparation
 
-FLAGS = ("app", "common", "browser", "smoke", "media", "long_media", "lifecycle", "tools", "website", "e2e", "editor_e2e", "application", "real_media", "preview")
+FLAGS = ("app", "common", "browser", "smoke", "media", "long_media", "lifecycle", "tools", "website", "e2e", "editor_e2e", "application", "real_media")
 
 
 def check_gate(jobs: dict) -> list[str]:
@@ -30,7 +30,7 @@ def check_gate(jobs: dict) -> list[str]:
                            specs, outputs["tools_scope"])
     if any(outputs[key] != str(value).lower() for key, value in expected.items()):
         raise ValueError("Preparation flags do not match selected consumers")
-    if ((outputs["app"] == "false" and any(outputs[flag] == "true" for flag in FLAGS if flag not in ("app", "website", "preview")))
+    if ((outputs["app"] == "false" and any(outputs[flag] == "true" for flag in FLAGS if flag not in ("app", "website")))
             or outputs["e2e"] == outputs["editor_e2e"] == "true"):
         raise ValueError("Contradictory required selector flags")
     for name, flag in (("editor", "app"), ("website", "website")):

@@ -22,6 +22,21 @@ from scripts.test_policy import ALL_MERGE, PYTHON_PACKS, select_packs
 
 
 class TestWorkflowTests(unittest.TestCase):
+    def test_plan_and_github_output_do_not_predict_windows_preview(self):
+        for paths in (("CHANGELOG.md",), ("README.md",), ("README.md", "maw/project.py")):
+            with self.subTest(paths=paths), tempfile.TemporaryDirectory() as directory:
+                output_file = Path(directory) / "github-output"
+                arguments = ["--stage", "merge", "--plan-only", "--github-output", str(output_file)]
+                for path in paths:
+                    arguments.extend(("--changed", path))
+                with patch.object(test_workflow, "ROOT", Path(directory)), \
+                        patch.object(test_workflow.os, "chdir"), contextlib.redirect_stdout(io.StringIO()) as out:
+                    self.assertEqual(test_workflow.main(arguments), 0)
+                plan, _ = json.JSONDecoder().raw_decode(out.getvalue())
+                self.assertNotIn("preview", plan)
+                self.assertNotIn("preview=", output_file.read_text(encoding="utf-8"))
+                self.assertNotIn("preview", json.loads(next((Path(directory) / ".artifacts/test-workflow").glob("*/plan.json")).read_text(encoding="utf-8")))
+
     def test_cli_checklist_scope_and_mixed_browser_consumer(self):
         source = 'tools/verification-checklist/build.py'
         for extra, scope, prepared in (([], 'checklist', False),
@@ -126,7 +141,6 @@ class TestWorkflowTests(unittest.TestCase):
         with patch.object(test_policy, "spec_scope", return_value="missing"):
             plan = select_packs(["tests/e2e/verification-checklist.spec.mjs"])
         self.assertTrue(ALL_MERGE.issubset(plan["packs"]))
-        self.assertTrue(plan["preview"])
 
     def test_selected_node_pack_cannot_succeed_when_its_files_are_missing(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(test_workflow, "ROOT", Path(directory)):
@@ -242,7 +256,6 @@ class TestWorkflowTests(unittest.TestCase):
             with self.subTest(path=path):
                 plan = select_packs([path])
                 self.assertEqual(plan["packs"], ["docs", "website"])
-                self.assertEqual(plan["preview"], path in test_policy.SITE_TOOL_PATHS)
                 self.assertEqual(test_workflow.preparation(plan["packs"]),
                                  {"application": False, "real_media": False})
         steps = list(test_workflow.commands(["website"], ROOT / ".artifacts"))
@@ -263,15 +276,6 @@ class TestWorkflowTests(unittest.TestCase):
                 self.assertTrue(ALL_MERGE.issubset(select_packs([path])["packs"]))
         self.assertTrue(ALL_MERGE.issubset(select_packs([])["packs"]))
 
-    def test_windows_preview_keeps_application_and_shared_changes(self):
-        for path in ("web/launcher/modules/provider-memory.js", "maw/thumbnails.py",
-                     "maw/quapeaks.py", "web/editor/state/editor-state.js",
-                     "tests/e2e/keyboard-timing.spec.mjs", "uv.lock", "unknown-boundary.py"):
-            with self.subTest(path=path):
-                self.assertTrue(select_packs([path])["preview"])
-        self.assertFalse(select_packs(["docs/user/WORKFLOW.md"])["preview"])
-        self.assertTrue(select_packs(["docs/user/WORKFLOW.md", "web/launcher/modules/provider-memory.js"])["preview"])
-
     def test_core_builders_require_complete_browser_collection(self):
         leaf = "tests/e2e/verification-checklist.spec.mjs"
         for builder in ("scripts/build-editor.mjs", "scripts/build-launcher.mjs"):
@@ -280,7 +284,6 @@ class TestWorkflowTests(unittest.TestCase):
                     plan = select_packs(paths)
                     self.assertEqual(set(plan["packs"]),
                                      {"docs", "common", "browser", "smoke", "media", "tools", "editor-e2e"})
-                    self.assertTrue(plan["preview"])
                     self.assertEqual(plan["e2e_specs"], [], "full collection supersedes leaf-only scope")
 
     def test_media_changes_preserve_real_long_fixture(self):
@@ -312,7 +315,6 @@ class TestWorkflowTests(unittest.TestCase):
             with self.subTest(path=path):
                 plan = select_packs([path])
                 self.assertEqual(plan["packs"], ["docs", "website"] if path in test_policy.SITE_TOOL_PATHS else ["docs"])
-                self.assertTrue(plan["preview"])
                 commands = list(test_workflow.commands(plan["packs"], ROOT / ".artifacts"))
                 self.assertEqual([name for name, _, _ in commands if not name.startswith("website-")],
                                  ["docs-navigation", "release-docs", "docs-regressions"])
@@ -329,7 +331,6 @@ class TestWorkflowTests(unittest.TestCase):
                 self.assertTrue(expected.issubset(tool_ids), "tool-only changes must run Markdown/HTML regressions")
                 plan = select_packs([f"tests/{module}.py"])
                 self.assertEqual(plan["packs"], ["docs", "tools"])
-                self.assertTrue(plan["preview"])
         for path in ("scripts/check_docs_extra.py", "tools/filmstrip-lab/backend.py", "tools/unknown/check.py"):
             with self.subTest(unknown_tool=path):
                 self.assertTrue(ALL_MERGE.issubset(select_packs([path])["packs"]))
@@ -341,7 +342,6 @@ class TestWorkflowTests(unittest.TestCase):
         plan = select_packs([spec])
         self.assertEqual(plan["packs"], ["docs", "e2e"])
         self.assertEqual(plan["e2e_specs"], [spec])
-        self.assertTrue(plan["preview"])
         self.assertEqual(select_packs([spec, other])["e2e_specs"], sorted([spec, other]))
         self.assertEqual(select_packs([spec, "scripts/check_docs.py"])["e2e_specs"], [spec])
         leaf = select_packs(["web/shared/tooltip.js"])
@@ -366,7 +366,6 @@ class TestWorkflowTests(unittest.TestCase):
                 plan = select_packs([path])
                 self.assertEqual(plan["packs"], ["docs", "e2e", "tools"])
                 self.assertEqual(plan["e2e_specs"], sorted(test_policy.CHECKLIST_SPECS))
-                self.assertFalse(plan["preview"])
         mixed = select_packs(["tools/verification-checklist/build.py", "tests/e2e/shared-tooltip.spec.mjs"])
         self.assertEqual(mixed["e2e_specs"], sorted([*test_policy.CHECKLIST_SPECS, "tests/e2e/shared-tooltip.spec.mjs"]))
         shared = select_packs(["tools/verification-checklist/build.py", "uv.lock"])

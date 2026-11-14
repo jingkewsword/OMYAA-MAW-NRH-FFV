@@ -18,7 +18,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       light: ${{ steps.scope.outputs.light }}
-      preview: ${{ steps.plan.outputs.preview }}
       app: ${{ steps.plan.outputs.app }}
       application: ${{ steps.plan.outputs.application }}
       real_media: ${{ steps.plan.outputs.real_media }}

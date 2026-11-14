@@ -101,7 +101,7 @@ class RequiredGateTests(unittest.TestCase):
                 self.assertTrue(light_path(path))
                 self.assertIn("website", select_packs([path])["packs"])
         for path in ("website/src/pages/docs/generated.md", "website/public/docs-assets/a.png",
-                     "docs/engineering/DEVELOPMENT.md", "maw/project.py"):
+                     "CHANGELOG.md", "docs/engineering/DEVELOPMENT.md", "maw/project.py"):
             with self.subTest(path=path):
                 self.assertFalse(light_path(path))
         self.assertFalse(all(light_path(path) for path in ("README.md", "maw/project.py")))
@@ -111,6 +111,7 @@ class RequiredGateTests(unittest.TestCase):
         from scripts import ci_impact
         base = "a" * 40
         scenarios = (([base + "\n", b"README.md\0docs/user/FAQ.md\0"], "true"),
+                     ([base + "\n", b"CHANGELOG.md\0"], "false"),
                      ([base + "\n", b"README.md\0maw/project.py\0"], "false"),
                      (["b" * 40 + "\n"], "false"),
                      ([base + "\n", OSError("diff failed")], "false"))
@@ -161,7 +162,7 @@ class RequiredGateTests(unittest.TestCase):
                         state["selection"]["outputs"][key] = value
                     with self.assertRaises((ValueError, KeyError)):
                         check_gate(state)
-        for key in ("preview", "e2e_specs"):
+        for key in ("e2e_specs",):
             with self.subTest(missing=key):
                 state = jobs("docs")
                 del state["selection"]["outputs"][key]

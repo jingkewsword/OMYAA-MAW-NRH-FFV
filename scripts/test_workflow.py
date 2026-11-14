@@ -346,7 +346,6 @@ def main(argv=None) -> int:
             for name in PACKS:
                 output.write(f"{name.replace('-', '_')}={str(name in packs).lower()}\n")
             output.write(f"app={str(bool(set(packs) - {'docs', 'website'})).lower()}\n")
-            output.write(f"preview={str(plan['preview']).lower()}\n")
             output.write(f"e2e_specs={json.dumps(specs)}\n")
             output.write(f"tools_scope={tools_scope}\n")
             for name, needed in plan['preparation'].items():
