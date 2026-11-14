@@ -31,3 +31,5 @@ export default defineConfig({
     },
   ],
 });
+
+// Temporary acceptance marker: require the full browser shard set.
