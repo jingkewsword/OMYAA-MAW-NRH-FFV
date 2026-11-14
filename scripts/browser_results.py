@@ -139,6 +139,34 @@ def combine_shards(records: list[dict], total: int, revision: str) -> dict:
     return {"status": "passed", "revision": revision, "shards": total, "cases": len(full), "passed": passed_count, "allowed_skipped": skipped_count, "scope": reference}
 
 
+def diagnostic_shards(records: list[dict], total: int) -> dict:
+    """Raw runtime statistics are diagnostic only and never prove coverage."""
+    keys = ("passed", "failures", "skipped", "flaky")
+    shards = []
+    indices = []
+    for record in records:
+        if not isinstance(record, dict):
+            record = {}
+        shard = record.get("shard", {})
+        if not isinstance(shard, dict):
+            shard = {}
+        index = shard.get("current")
+        if type(index) is not int:
+            index = None
+        indices.append(index)
+        counts = record.get("diagnostic_counts", {})
+        if not isinstance(counts, dict):
+            counts = {}
+        shards.append({"shard": index, "status": record.get("status", "unknown"),
+                       "counts": {key: counts.get(key, "unknown") if type(counts.get(key)) is int
+                                  and counts[key] >= 0 else "unknown" for key in keys}})
+    complete = len(records) == total and set(indices) == set(range(1, total + 1))
+    totals = {key: sum(item["counts"][key] for item in shards)
+              if complete and all(type(item["counts"][key]) is int for item in shards) else "unknown"
+              for key in keys}
+    return {"label": "raw runtime statistics, not coverage validation", "shards": shards, "totals": totals}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--reports", type=Path, required=True)
@@ -146,11 +174,21 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=Path(".artifacts/browser-coverage.json"))
     args = parser.parse_args()
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+    records = []
+    read_error = None
+    for path in sorted(args.reports.rglob("browser-regressions-browser-run.json")):
+        try:
+            records.append(json.loads(path.read_text(encoding="utf-8")))
+        except (OSError, ValueError) as error:
+            records.append({})
+            read_error = f"Unreadable shard report {path}: {error}"
     try:
-        records = [json.loads(path.read_text(encoding="utf-8")) for path in sorted(args.reports.rglob("browser-regressions-browser-run.json"))]
+        if read_error:
+            raise ValueError(read_error)
         result = combine_shards(records, args.total, revision)
     except (OSError, ValueError, KeyError, TypeError) as error:
         result = {"status": "failed", "error": str(error)}
+    result["diagnostic"] = diagnostic_shards(records, args.total)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({key: value for key, value in result.items() if key != "scope"}))

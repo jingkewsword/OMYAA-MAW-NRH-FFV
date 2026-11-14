@@ -167,7 +167,7 @@ class PreviewWorkflowContractTests(CompactContainerAssertions, unittest.TestCase
         self.assertIn("intentionallySkipped ?", workflow)
 
 
-class ExecutionReceiptTests(unittest.TestCase):
+class ExecutionReceiptTests(CompactContainerAssertions, unittest.TestCase):
     def test_completed_process_with_nonzero_exit_is_reported_failed(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

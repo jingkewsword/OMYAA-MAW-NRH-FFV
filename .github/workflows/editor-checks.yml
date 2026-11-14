@@ -357,6 +357,7 @@ jobs:
         id: execute-packs
         env:
           COMMON: ${{ needs.selection.outputs.common }}
+          MAW_CI_SHORT_TEMP: ${{ needs.selection.outputs.common == 'true' && '1' || '0' }}
           BROWSER: ${{ needs.selection.outputs.browser }}
           SMOKE: ${{ needs.selection.outputs.smoke }}
           MEDIA: ${{ needs.selection.outputs.media }}
