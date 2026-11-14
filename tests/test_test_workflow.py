@@ -22,6 +22,53 @@ from scripts.test_policy import ALL_MERGE, PYTHON_PACKS, select_packs
 
 
 class TestWorkflowTests(unittest.TestCase):
+    def test_launcher_and_alignment_select_their_cross_named_consumers(self):
+        launcher = select_packs(["web/launcher/postprocess.js"])["e2e_specs"]
+        for name in ("layout-feedback", "shared-tooltip", "script-timestamp-alignment", "recording-review"):
+            self.assertIn(f"tests/e2e/{name}.spec.mjs", launcher)
+        align = select_packs(["server-align/serve.py"])["e2e_specs"]
+        self.assertIn("tests/e2e/recording-review.spec.mjs", align)
+
+    def test_explicit_e2e_rejects_non_spec_helper(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            test_workflow.main(["--stage", "merge", "--pack", "e2e", "--changed", "README.md", "--plan-only",
+                                "--e2e-specs", '["tests/e2e/helpers.mjs"]'])
+
+    def test_release_rejects_partial_pack_override(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            test_workflow.main(["--stage", "release", "--pack", "docs", "--changed", "README.md", "--plan-only"])
+
+    def test_changed_paths_includes_staged_changes_even_if_worktree_reverts_them(self):
+        def run(args, **_kwargs):
+            if "--cached" in args:
+                return SimpleNamespace(stdout=b"web/editor/changed.js\0")
+            if args[1] == "diff":
+                return SimpleNamespace(stdout=b"README.md\0")
+            return SimpleNamespace(stdout=b"")
+        with patch.object(test_workflow.subprocess, "run", side_effect=run):
+            self.assertEqual(test_workflow.changed_paths(None), ["README.md", "web/editor/changed.js"])
+
+    def test_imported_load_tests_hook_broadens_selection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "test_dynamic.py"
+            source.write_text("from helper import load_tests\nclass Existing:\n    def test_basic(self): pass\n", encoding="utf-8")
+            self.assertEqual(test_policy.source_test_ids(source), [])
+
+    def test_changed_website_sync_script_checks_its_selection_contract(self):
+        plan = select_packs(["website/scripts/sync-maw-docs.mjs"])
+        self.assertTrue({"website", "tools"}.issubset(plan["packs"]))
+
+    def test_missing_browser_spec_broadens_to_all_required_consumers(self):
+        with patch.object(test_policy, "spec_scope", return_value="missing"):
+            plan = select_packs(["tests/e2e/verification-checklist.spec.mjs"])
+        self.assertTrue(ALL_MERGE.issubset(plan["packs"]))
+        self.assertTrue(plan["preview"])
+
+    def test_selected_node_pack_cannot_succeed_when_its_files_are_missing(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(test_workflow, "ROOT", Path(directory)):
+            with self.assertRaisesRegex(ValueError, "No Node tests found"):
+                list(test_workflow.commands(["browser"], Path(directory)))
+
     def test_dev_all_includes_each_component_kernel(self):
         all_gates = [name for name, _, _ in test_workflow.commands([], ROOT, dev=True, component="all")]
         separate = [name for component in ("python", "editor", "launcher")
@@ -37,7 +84,7 @@ class TestWorkflowTests(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertIn("website", select_packs([path])["packs"])
 
-    def test_mobile_asset_skip_is_exact_on_supported_non_darwin_platforms(self):
+    def test_mobile_asset_skip_matches_upstream_on_all_platforms(self):
         identity = "test_ass_fonts.FontRootsTests.test_darwin_roots_include_mobile_asset_font_directories"
         reason = "本机没有 MobileAsset 字体资产目录"
         for platform, os_name, test_id, skip_reason, allowed in (
@@ -49,8 +96,8 @@ class TestWorkflowTests(unittest.TestCase):
             ("linux", "posix", identity.replace("FontRootsTests", "OtherTests"), reason, False),
             ("win32", "nt", identity, reason + "（依赖缺失）", False),
             ("linux", "posix", identity, reason + "（依赖缺失）", False),
-            ("darwin", "posix", identity, reason, False),
-            ("unknown", "posix", identity, reason, False),
+            ("darwin", "posix", identity, reason, True),
+            ("unknown", "posix", identity, reason, True),
         ):
             with self.subTest(platform=platform, test_id=test_id, reason=skip_reason), \
                     patch.object(test_policy, "os", SimpleNamespace(name=os_name)), \
@@ -509,6 +556,8 @@ class TestWorkflowTests(unittest.TestCase):
             "missing": None,
             "empty": "<testsuites><testsuite/></testsuites>",
             "skipped": '<testsuites><testsuite><testcase name="boundary"><skipped/></testcase></testsuite></testsuites>',
+            "failed": '<testsuites><testsuite><testcase name="boundary"><failure/></testcase></testsuite></testsuites>',
+            "error": '<testsuites><testsuite><testcase name="boundary"><error/></testcase></testsuite></testsuites>',
             "passed": '<testsuites><testsuite><testcase name="boundary"/></testsuite></testsuites>',
         }
         for outcome, xml in reports.items():

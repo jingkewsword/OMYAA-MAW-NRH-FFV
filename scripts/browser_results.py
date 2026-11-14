@@ -6,21 +6,30 @@ import json
 from pathlib import Path
 import subprocess
 
-SCHEMA = "maw.browser-run.v1"
+SCHEMA = "maw.browser-run.v2"
+RETIRED_SKIP_REASON = "便携模式已弃维护，2.0 移除 HTML，见 #336 后回归分析"
+RETIRED_PORTABLE_CASES = {
+    ("editor-bundle.spec.mjs", "minified portable bundle preserves non-default data, paths and generated language"),
+    ("editor-bundle.spec.mjs", "file executes every source and preserves project/export/undo behavior"),
+    ("editor-text-tools.spec.mjs", "portable file uses the same fade rules and SRT export settings"),
+    ("editor-text-tools.spec.mjs", "portable editor saves and reloads presets in its browser storage"),
+    ("warma-presets.spec.mjs", "portable pages reject a stale preset library save"),
+}
 
 
 def browser_cases(report: dict) -> dict[str, dict]:
     found = {}
 
-    def visit(suite):
+    def visit(suite, parents=()):
         for spec in suite.get("specs", []):
             for test in spec["tests"]:
                 identity = f"{spec['id']}@{test['projectId']}"
                 if identity in found:
                     raise ValueError(f"Duplicate browser case: {identity}")
-                found[identity] = test
+                found[identity] = {**test, "_file": spec.get("file", "").replace("\\", "/"),
+                                   "_title_path": (*parents, spec.get("title", ""))}
         for child in suite.get("suites", []):
-            visit(child)
+            visit(child, (*parents, child.get("title", "")))
 
     for suite in report["suites"]:
         visit(suite)
@@ -39,19 +48,33 @@ def browser_config(report: dict) -> dict:
             "workers": 2, "fullyParallel": False, "forbidOnly": True, "retries": 0}
 
 
-def discovery(report: dict) -> list[str]:
+def discovery(report: dict, required_specs=()) -> list[str]:
     browser_config(report)
     if report.get("errors"):
         raise ValueError("Browser discovery contains errors")
     cases = browser_cases(report)
     if any(test["expectedStatus"] != "passed" for test in cases.values()):
         raise ValueError("Required browser discovery contains skipped or expected-failure cases")
+    if required_specs:
+        files = set()
+        def visit(suite):
+            for spec in suite.get("specs", []):
+                if spec.get("tests"):
+                    files.add(spec["file"].replace("\\", "/"))
+            for child in suite.get("suites", []):
+                visit(child)
+        for suite in report["suites"]:
+            visit(suite)
+        missing = sorted(path.removeprefix("tests/e2e/") for path in required_specs
+                         if path.removeprefix("tests/e2e/") not in files)
+        if missing:
+            raise ValueError(f"Required spec has no discovered cases: {', '.join(missing)}")
     # --list reports every case as unexecuted/skipped. This is a planned set,
     # never runtime success; runtime requires an actual passing result below.
     return sorted(cases)
 
 
-def verify_run(expected: list[str], report: dict) -> list[str]:
+def verify_run(expected: list[str], report: dict) -> dict[str, list[str]]:
     browser_config(report)
     if not expected or report.get("errors"):
         raise ValueError("Required browser run is empty or contains global errors")
@@ -59,16 +82,26 @@ def verify_run(expected: list[str], report: dict) -> list[str]:
     if set(cases) != set(expected):
         missing, extra = set(expected) - set(cases), set(cases) - set(expected)
         raise ValueError(f"Browser coverage mismatch: {len(missing)} missing, {len(extra)} extra")
+    passed, skipped = [], []
     for identity, test in cases.items():
         results = test["results"]
-        if (test["expectedStatus"] != "passed" or test["status"] != "expected"
-                or len(results) != 1 or results[0]["status"] != "passed"
-                or results[0].get("retry", 0) != 0):
-            raise ValueError(f"Browser case did not pass exactly once: {identity}")
+        single = len(results) == 1 and results[0].get("retry", 0) == 0
+        if single and test["expectedStatus"] == "passed" and test["status"] == "expected" and results[0]["status"] == "passed":
+            passed.append(identity)
+            continue
+        annotations = [a.get("description") for a in test.get("annotations", []) if a.get("type") == "skip"]
+        approved = (len(test["_title_path"]) == 1 and (test["_file"], test["_title_path"][0]) in RETIRED_PORTABLE_CASES
+                    and test["projectId"] == "chromium" and annotations == [RETIRED_SKIP_REASON])
+        if (approved and single and test["expectedStatus"] == "skipped" and test["status"] == "skipped"
+                and results[0]["status"] == "skipped" and not results[0].get("errors")):
+            skipped.append(identity)
+            continue
+        raise ValueError(f"Browser case did not pass or match an approved skip: {identity}")
     stats = report["stats"]
-    if stats["expected"] != len(expected) or any(stats[key] for key in ("unexpected", "skipped", "flaky")):
+    if (stats["expected"] != len(passed) or stats["skipped"] != len(skipped)
+            or any(stats[key] for key in ("unexpected", "flaky"))):
         raise ValueError("Required browser statistics contain failure, skip, flaky result, or count mismatch")
-    return sorted(cases)
+    return {"passed_ids": sorted(passed), "allowed_skipped_ids": sorted(skipped)}
 
 
 def combine_shards(records: list[dict], total: int, revision: str) -> dict:
@@ -81,6 +114,7 @@ def combine_shards(records: list[dict], total: int, revision: str) -> dict:
             or reference.get("worktree_clean") is not True):
         raise ValueError("Full browser scope is empty, duplicated, or from another revision")
     owned, indexes = set(), set()
+    passed_count = skipped_count = 0
     for record in records:
         shard = record["shard"]
         index = shard["current"]
@@ -88,18 +122,21 @@ def combine_shards(records: list[dict], total: int, revision: str) -> dict:
                 or not 1 <= index <= total or index in indexes):
             raise ValueError("Shard metadata is duplicated or has a different revision/config/selection/scope")
         indexes.add(index)
-        planned, passed = record["planned_ids"], record["passed_ids"]
+        planned, passed, skipped = record["planned_ids"], record["passed_ids"], record["allowed_skipped_ids"]
         if len(planned) != len(set(planned)) or not set(planned).issubset(full) or owned.intersection(planned):
             raise ValueError("Shard plan contains duplicate, overlapping, or out-of-scope cases")
         if not planned:
-            if record["status"] != "empty-shard" or passed:
+            if record["status"] != "empty-shard" or passed or skipped:
                 raise ValueError("Zero-assignment shard must be explicit and contain no runtime results")
-        elif record["status"] != "passed" or sorted(passed) != sorted(planned):
+        elif (record["status"] != "passed" or len(passed + skipped) != len(set(passed + skipped))
+              or sorted(passed + skipped) != sorted(planned)):
             raise ValueError("Shard actual results do not match its plan")
+        passed_count += len(passed)
+        skipped_count += len(skipped)
         owned.update(planned)
     if owned != set(full):
         raise ValueError(f"Incomplete browser coverage: {len(set(full) - owned)} cases missing")
-    return {"status": "passed", "revision": revision, "shards": total, "cases": len(full), "scope": reference}
+    return {"status": "passed", "revision": revision, "shards": total, "cases": len(full), "passed": passed_count, "allowed_skipped": skipped_count, "scope": reference}
 
 
 def main() -> int:
@@ -110,7 +147,7 @@ def main() -> int:
     args = parser.parse_args()
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
     try:
-        records = [json.loads(path.read_text(encoding="utf-8")) for path in sorted(args.reports.rglob("browser-run.json"))]
+        records = [json.loads(path.read_text(encoding="utf-8")) for path in sorted(args.reports.rglob("browser-regressions-browser-run.json"))]
         result = combine_shards(records, args.total, revision)
     except (OSError, ValueError, KeyError, TypeError) as error:
         result = {"status": "failed", "error": str(error)}

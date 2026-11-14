@@ -13,7 +13,7 @@ FLAGS = ("app", "common", "browser", "smoke", "media", "long_media", "lifecycle"
 
 
 def check_gate(jobs: dict) -> list[str]:
-    required = ["selection", "debug-tools", "documentation"]
+    required = ["selection", "debug-tools", "upstream-editor", "documentation"]
     outputs = jobs["selection"]["outputs"]
     if any(outputs.get(flag) not in ("true", "false") for flag in FLAGS):
         raise ValueError("Missing or invalid required selector flags")
@@ -38,20 +38,37 @@ def check_gate(jobs: dict) -> list[str]:
         required.append("posix-contracts")
     if outputs["editor_e2e"] == "true":
         required.append("browser-gates")
-    return [name for name in required if jobs.get(name, {}).get("result") != "success"]
+    failed = {name for name in required if jobs.get(name, {}).get("result") != "success"}
+    failed.update(name for name, job in jobs.items() if job.get("result") in {"failure", "cancelled"})
+    return sorted(failed)
 
 
 def main() -> int:
+    jobs = {}
+    error = None
     try:
-        failed = check_gate(json.loads(os.environ["RESULTS"]))
-    except (KeyError, ValueError, TypeError) as error:
-        print(f"Required test gate failed: {error}")
-        return 1
-    if failed:
-        print("Required jobs did not succeed: " + ", ".join(failed))
-        return 1
-    print("Every selected required job and browser coverage gate succeeded")
-    return 0
+        jobs = json.loads(os.environ["RESULTS"])
+        failed = check_gate(jobs)
+    except (KeyError, ValueError, TypeError) as exc:
+        failed = ["invalid selection or job evidence"]
+        error = str(exc)
+    lines = ["## Required test gate", "", "### Selected scope", ""]
+    outputs = jobs.get("selection", {}).get("outputs", {})
+    lines.append("```json")
+    lines.append(json.dumps(outputs, ensure_ascii=False, indent=2))
+    lines.extend(["```", "", "### Job results", "", "| Job | Result |", "| --- | --- |"])
+    for name, result in sorted(jobs.items()):
+        lines.append(f"| {name} | {result.get('result', 'not-run')} |")
+    lines.extend(["", "Detailed plans, per-gate results, browser coverage and failure logs are in the workflow artifacts."])
+    if error:
+        lines.append(f"Selection or evidence error: {error}")
+    lines.append("Failed or missing required jobs: " + (", ".join(failed) if failed else "none"))
+    summary = "\n".join(lines) + "\n"
+    print(summary)
+    if destination := os.environ.get("GITHUB_STEP_SUMMARY"):
+        with open(destination, "a", encoding="utf-8") as stream:
+            stream.write(summary)
+    return int(bool(failed))
 
 
 if __name__ == "__main__":

@@ -28,9 +28,12 @@ PACKS = ("docs", "common", "browser", "smoke", "media", "long-media", "lifecycle
 
 
 def changed_paths(base_ref: str | None) -> list[str]:
-    args = ["git", "diff", "--name-only", "--no-renames", "-z", f"{base_ref}...HEAD" if base_ref else "HEAD"]
-    result = subprocess.run(args, cwd=ROOT, capture_output=True, check=True)
-    paths = [p for p in result.stdout.decode("utf-8").split("\0") if p]
+    args = ["git", "diff", "--name-only", "--no-renames", "-z"]
+    comparisons = [[*args, f"{base_ref}...HEAD"]] if base_ref else [args, [*args, "--cached"]]
+    paths = []
+    for comparison in comparisons:
+        result = subprocess.run(comparison, cwd=ROOT, capture_output=True, check=True)
+        paths.extend(p for p in result.stdout.decode("utf-8").split("\0") if p)
     if not base_ref:
         untracked = subprocess.run(["git", "ls-files", "--others", "--exclude-standard", "-z"],
                                   cwd=ROOT, capture_output=True, check=True)
@@ -87,9 +90,10 @@ def commands(packs: list[str], report_dir: Path, *, dev: bool = False, component
             targets = [str(p.relative_to(ROOT)) for p in sorted((ROOT / "tests").glob("*.mjs")) if node_pack(p.name) == pack]
             if pack == "tools" and tools_scope == "checklist":
                 targets = [CHECKLIST_NODE]
-            if targets:
-                yield f"node-{pack}", [node, "--test", "--test-reporter=spec", "--test-reporter-destination=stdout",
-                       "--test-reporter=junit", f"--test-reporter-destination={report_dir / ('node-' + pack + '.xml')}", *targets], 240
+            if not targets:
+                raise ValueError(f"No Node tests found for required pack: {pack}")
+            yield f"node-{pack}", [node, "--test", "--test-reporter=spec", "--test-reporter-destination=stdout",
+                   "--test-reporter=junit", f"--test-reporter-destination={report_dir / ('node-' + pack + '.xml')}", *targets], 240
         if pack == "smoke":
             yield "editor-http-smoke", [*playwright, "--reporter=line,json", f"--output={report_dir / 'smoke-artifacts'}", "tests/e2e/editor-bundle.spec.mjs", "tests/e2e/editor-transactions.spec.mjs"], 300
         if pack == "editor-e2e":
@@ -133,7 +137,8 @@ def prepare_browser(name, command, directory, shard, specs, selection, results):
         if result["exit_code"]:
             raise ValueError(f"Browser discovery failed; log={result['log']}")
         report = json.loads(report_path.read_text(encoding="utf-8"))
-        return report, discovery(report)
+        required_specs = [arg for arg in command if arg.startswith("tests/e2e/") and arg.endswith(".spec.mjs")]
+        return report, discovery(report, required_specs)
 
     full_report, full_ids = capture("full", full_command)
     if not full_ids:
@@ -151,7 +156,63 @@ def prepare_browser(name, command, directory, shard, specs, selection, results):
              "config": browser_config(full_report), "selection": selection, "specs": list(specs), "case_ids": full_ids}
     return {"schema": SCHEMA, "scope": scope,
             "shard": {"current": shard[0], "total": shard[1]} if shard else {"current": 1, "total": 1},
-            "planned_ids": planned, "passed_ids": [], "status": "pending"}
+            "planned_ids": planned, "passed_ids": [], "allowed_skipped_ids": [], "status": "pending"}
+
+
+def report_counts(kind, path):
+    keys = {"python": ("selected", "run", "failures", "errors", "skipped"),
+            "node": ("run", "failures", "errors", "skipped"),
+            "browser": ("passed", "failures", "skipped", "flaky")}[kind]
+    counts = dict.fromkeys(keys, "unknown")
+    try:
+        if kind == "node":
+            xml = ET.parse(path)
+            cases = xml.findall(".//testcase")
+            if cases:
+                counts.update(run=len(cases), failures=len(xml.findall(".//failure")),
+                              errors=len(xml.findall(".//error")), skipped=len(xml.findall(".//skipped")))
+        else:
+            report = json.loads(path.read_text(encoding="utf-8"))
+            if kind == "python":
+                if isinstance(report.get("selected_ids"), list):
+                    counts["selected"] = len(report["selected_ids"])
+                if isinstance(report.get("skips"), list):
+                    counts["skipped"] = len(report["skips"])
+                for name in ("run", "failures", "errors"):
+                    if type(report.get(name)) is int and report[name] >= 0:
+                        counts[name] = report[name]
+            else:
+                stats = report.get("stats", {})
+                for key, field in (("passed", "expected"), ("failures", "unexpected"), ("skipped", "skipped"), ("flaky", "flaky")):
+                    if type(stats.get(field)) is int and stats[field] >= 0:
+                        counts[key] = stats[field]
+    except (OSError, ValueError, TypeError, ET.ParseError):
+        pass
+    return counts
+
+
+def write_execution_summary(output_dir, plan, results, not_run, exit_code, *, status=None, error=None):
+    summary = {"plan": plan, "results": results, "not_run": not_run, "exit_code": exit_code}
+    if status:
+        summary["status"] = status
+    if error:
+        summary["error"] = error
+    (output_dir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    if destination := os.environ.get("GITHUB_STEP_SUMMARY"):
+        lines = ["## Test workflow execution", "", f"Selected packs: {', '.join(plan['packs']) or 'none'}", "",
+                 "| Gate | Result | Process status | Exit | Seconds | Counts |", "| --- | --- | --- | --- | --- | --- |"]
+        for result in results:
+            process_status = result.get("process_status", result.get("status", "unknown"))
+            outcome = "passed" if result["exit_code"] == 0 and result.get("status") not in {"timeout", "interrupted", "invalid-required-report", "invalid-discovery"} else "failed"
+            counts = result.get("counts", {})
+            lines.append(f"| {result['gate']} | {outcome} | {process_status} | {result['exit_code']} | {result.get('duration_seconds', '—')} | {json.dumps(counts, ensure_ascii=False)} |")
+        for name in not_run:
+            lines.append(f"| {name} | not-run | — | — | — | — |")
+        if error:
+            lines.extend(["", f"Preparation failed: {error}"])
+        lines.extend(["", "Reports and logs are in the test evidence artifact. Python counts are aggregate; individual passing outcomes are not recorded.", ""])
+        with open(destination, "a", encoding="utf-8") as stream:
+            stream.write("\n".join(lines))
 
 
 def main(argv=None) -> int:
@@ -170,12 +231,14 @@ def main(argv=None) -> int:
     parser.add_argument("--tools-scope", choices=("all", "checklist"), help="explicit tool consumer scope from the CI selector")
     parser.add_argument("--browser-shard", type=parse_shard, help="explicit browser partition; full success requires every shard")
     args = parser.parse_args(argv)
+    if args.stage == "release" and args.pack:
+        parser.error("release runs the full required set; use --stage merge for a partial pack")
     os.chdir(ROOT)
     paths = args.changed if args.changed is not None else changed_paths(args.base_ref)
     plan = select_packs(paths, release=args.stage == "release")
     packs = args.pack or plan["packs"]
     specs = json.loads(args.e2e_specs) if args.e2e_specs else plan["e2e_specs"]
-    if not isinstance(specs, list) or any(not isinstance(path, str) or not path.startswith("tests/e2e/")
+    if not isinstance(specs, list) or any(not isinstance(path, str) or not path.startswith("tests/e2e/") or not path.endswith(".spec.mjs")
             or ".." in Path(path).parts or not (ROOT / path).is_file() for path in specs):
         parser.error("e2e-specs must contain existing repository spec paths")
     if "e2e" in packs and not specs:
@@ -214,6 +277,12 @@ def main(argv=None) -> int:
     print(f"Evidence: {output_dir.relative_to(ROOT)}")
     if args.plan_only:
         return 0
+    try:
+        steps = list(commands(packs, output_dir, dev=args.stage == "dev" and not args.pack, component=args.component, specs=specs, shard=args.browser_shard, tools_scope=tools_scope))
+    except ValueError as error:
+        write_execution_summary(output_dir, plan, [], [], 1, status="invalid-plan", error=str(error))
+        print(str(error))
+        return 1
     required_modules = {"numpy", "soundfile"} if set(packs) & {"common", "media", "long-media"} else set()
     if "common" in packs or "tools" in packs and tools_scope != "checklist":
         required_modules.add("ruff")
@@ -225,8 +294,8 @@ def main(argv=None) -> int:
     if set(packs) & {"media", "long-media"}:
         missing.extend(name for name in ("ffmpeg", "ffprobe") if not shutil.which(name))
     if missing:
-        report = {"status": "required-dependency-missing", "missing": missing, "exit_code": 1, "plan": plan}
-        (output_dir / "summary.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        write_execution_summary(output_dir, plan, [], [name for name, _, _ in steps], 1,
+                                status="required-dependency-missing", error=", ".join(missing))
         print(f"Required dependencies missing: {', '.join(missing)}; gate not verified")
         return 1
     # Explicit interpreter settings avoid implicit environment synchronization.
@@ -237,7 +306,7 @@ def main(argv=None) -> int:
     for key in ("TEMP", "TMP", "TMPDIR"):
         os.environ[key] = str(temp)
     results = []
-    for name, command, timeout in commands(packs, output_dir, dev=args.stage == "dev" and not args.pack, component=args.component, specs=specs, shard=args.browser_shard, tools_scope=tools_scope):
+    for name, command, timeout in steps:
         browser_record = None
         if name in {"editor-http-smoke", "browser-regressions"}:
             try:
@@ -251,7 +320,7 @@ def main(argv=None) -> int:
                 break
             if not browser_record["planned_ids"]:
                 browser_record["status"] = "empty-shard"
-                (output_dir / "browser-run.json").write_text(json.dumps(browser_record, indent=2) + "\n", encoding="utf-8")
+                (output_dir / f"{name}-browser-run.json").write_text(json.dumps(browser_record, indent=2) + "\n", encoding="utf-8")
                 results.append({"gate": name, "status": "empty-shard", "exit_code": 0})
                 print(f"{name}: explicit zero-assignment shard of a nonempty full scope")
                 continue
@@ -259,6 +328,13 @@ def main(argv=None) -> int:
         os.environ["PLAYWRIGHT_JSON_OUTPUT_NAME"] = str(browser_report)
         result = execute(name, command, timeout)
         code = result["exit_code"]
+        result["process_status"] = result.get("status", "unknown")
+        if "--report" in command:
+            result["counts"] = report_counts("python", Path(command[command.index("--report") + 1]))
+        elif name.startswith("node-"):
+            result["counts"] = report_counts("node", output_dir / f"{name}.xml")
+        elif browser_record:
+            result["counts"] = report_counts("browser", browser_report)
         try:
             if not code and "--report" in command:
                 report = json.loads(Path(command[command.index("--report") + 1]).read_text(encoding="utf-8"))
@@ -269,13 +345,15 @@ def main(argv=None) -> int:
                     raise ValueError("Required Python report is empty or contains unverified outcomes")
             if not code and name.startswith("node-"):
                 xml = ET.parse(output_dir / f"{name}.xml")
-                if not xml.findall(".//testcase") or xml.findall(".//skipped"):
-                    raise ValueError("Required Node report is empty or contains skipped cases")
+                if not xml.findall(".//testcase") or any(xml.findall(f".//{tag}") for tag in ("skipped", "failure", "error")):
+                    raise ValueError("Required Node report is empty or contains non-passing cases")
             if not code and browser_record:
                 report = json.loads(browser_report.read_text(encoding="utf-8"))
                 if browser_config(report) != browser_record["scope"]["config"]:
                     raise ValueError("Browser runtime configuration differs from discovery")
-                browser_record["passed_ids"] = verify_run(browser_record["planned_ids"], report)
+                browser_record.update(verify_run(browser_record["planned_ids"], report))
+                result["counts"]["selected"] = len(browser_record["planned_ids"])
+                result["counts"]["allowed_skipped"] = len(browser_record["allowed_skipped_ids"])
                 if subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip() != browser_record["scope"]["revision"]:
                     raise ValueError("Git revision changed while the browser gate was running")
                 browser_record["status"] = "passed"
@@ -286,14 +364,16 @@ def main(argv=None) -> int:
         if browser_record:
             if code:
                 browser_record["status"] = "failed"
-            (output_dir / "browser-run.json").write_text(json.dumps(browser_record, indent=2) + "\n", encoding="utf-8")
+            (output_dir / f"{name}-browser-run.json").write_text(json.dumps(browser_record, indent=2) + "\n", encoding="utf-8")
         results.append(result)
         if code:
             print("\n".join(dict.fromkeys(result["diagnostics"] + result["tail"])))
             break
-    summary = {"plan": plan, "results": results, "exit_code": next((r["exit_code"] for r in results if r["exit_code"]), 0)}
-    (output_dir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    return 1 if summary["exit_code"] else 0
+    completed = {result["gate"] for result in results}
+    not_run = [name for name, _, _ in steps if name not in completed]
+    exit_code = next((r["exit_code"] for r in results if r["exit_code"]), 0)
+    write_execution_summary(output_dir, plan, results, not_run, exit_code)
+    return 1 if exit_code else 0
 
 
 if __name__ == "__main__":

@@ -56,7 +56,7 @@ jobs:
             const updatedAt = new Date(run.updated_at || run.created_at || Date.now());
             const statusTitle = intentionallySkipped ? 'ℹ️ 本次未构建 Windows 预览包' : succeeded ? '🔧 Windows PR 打包完成' : '❌ Windows PR 打包失败';
             const statusText = intentionallySkipped
-               ? '当前变更无需构建 Windows 预览包。'
+               ? '文档或网站变更使用轻量验证，本次没有生成 Windows 测试包。'
                : succeeded ? 'Windows MAW-lite 测试包已经生成。'
                : 'Windows MAW-lite 测试包没有生成，请查看 Actions 日志。';
             const linkText = succeeded

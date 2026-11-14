@@ -1,4 +1,4 @@
-name: Complete browser coverage
+name: Required browser coverage
 
 on:
   workflow_call:
@@ -39,8 +39,18 @@ jobs:
           cache-dependency-path: pnpm-lock.yaml
       - run: uv sync --frozen --group test --group dev --no-group build
       - run: pnpm install --frozen-lockfile --ignore-scripts
-      - run: pnpm exec playwright install --with-deps chromium
+      - name: Install Playwright Chromium
         timeout-minutes: 5
+        run: |
+          attempt=1
+          max_attempts=3
+          until pnpm exec playwright install --with-deps chromium; do
+            status=$?
+            if [ "$attempt" -ge "$max_attempts" ]; then exit "$status"; fi
+            echo "Playwright install failed (exit ${status}, attempt ${attempt}/${max_attempts}); retrying in 20s."
+            attempt=$((attempt + 1))
+            sleep 20
+          done
       - run: sudo apt-get update && sudo apt-get install --no-install-recommends -y ffmpeg fonts-noto-cjk
         timeout-minutes: 5
       - name: Discover and execute the required partition
@@ -50,9 +60,9 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: browser-shard-${{ matrix.shard }}
-          path: .artifacts/test-workflow/**/browser-run.json
+          path: .artifacts/test-workflow/**/browser-regressions-browser-run.json
           include-hidden-files: true
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 7
       - name: Preserve discovery, logs and failure evidence
         if: always()
@@ -70,7 +80,7 @@ jobs:
           retention-days: 7
 
   browser-coverage:
-    name: Require every browser case exactly once
+    name: Verify every browser case exactly once
     if: always()
     needs: browser-tests
     runs-on: ubuntu-latest
@@ -86,6 +96,10 @@ jobs:
           path: .artifacts/browser-shards
       - name: Validate revision, scope, partition and actual passing results
         run: python scripts/browser_results.py --reports .artifacts/browser-shards --total 4
+      - name: Summarize browser coverage
+        if: always()
+        run: |
+          python -c 'import json,os,pathlib; p=pathlib.Path(".artifacts/browser-coverage.json"); d=json.loads(p.read_text()) if p.exists() else {"status":"not-run", "error":"coverage report missing"}; f=open(os.environ["GITHUB_STEP_SUMMARY"],"a"); f.write("## Browser coverage\n\n```json\n"+json.dumps({k:v for k,v in d.items() if k != "scope"},indent=2)+"\n```\n")'
       - name: Require every matrix job to finish successfully
         env:
           BROWSER_JOBS_RESULT: ${{ needs.browser-tests.result }}

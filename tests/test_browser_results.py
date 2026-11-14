@@ -12,8 +12,8 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from scripts.browser_results import SCHEMA, browser_config, combine_shards, discovery, verify_run
-from scripts.check_test_gate import FLAGS, check_gate
+from scripts.browser_results import SCHEMA, browser_config, combine_shards, discovery, verify_run  # noqa: E402
+from scripts.check_test_gate import FLAGS, check_gate  # noqa: E402
 
 
 def sample_report(ids=("one", "two")):
@@ -28,11 +28,21 @@ def sample_shards():
     scope = {"revision": "head", "selection": "editor-e2e", "specs": [], "worktree_clean": True,
              "config": browser_config(sample_report()), "case_ids": ["one@chromium", "two@chromium"]}
     return [{"schema": SCHEMA, "scope": copy.deepcopy(scope), "shard": {"current": index, "total": 4},
-             "planned_ids": ids, "passed_ids": ids[:], "status": "passed" if ids else "empty-shard"}
+             "planned_ids": ids, "passed_ids": ids[:], "allowed_skipped_ids": [], "status": "passed" if ids else "empty-shard"}
             for index, ids in enumerate((["one@chromium"], [], ["two@chromium"], []), 1)]
 
 
 class BrowserResultsTests(unittest.TestCase):
+    def test_each_explicit_spec_contributes_a_discovered_case(self):
+        report = sample_report()
+        report["suites"][0]["specs"][0]["file"] = "one.spec.mjs"
+        report["suites"][0]["specs"][1]["file"] = "two.spec.mjs"
+        self.assertEqual(discovery(report, ["tests/e2e/one.spec.mjs", "tests/e2e/two.spec.mjs"]),
+                         discovery(report))
+        report["suites"][0]["specs"].pop()
+        with self.assertRaisesRegex(ValueError, "spec.*no discovered cases"):
+            discovery(report, ["tests/e2e/one.spec.mjs", "tests/e2e/two.spec.mjs"])
+
     def test_unexecuted_discovery_cannot_be_a_runtime_pass(self):
         report = sample_report()
         for spec in report["suites"][0]["specs"]:
@@ -43,7 +53,7 @@ class BrowserResultsTests(unittest.TestCase):
 
     def test_missing_failed_skipped_flaky_and_retried_cases_fail(self):
         expected = discovery(sample_report())
-        self.assertEqual(verify_run(expected, sample_report()), expected)
+        self.assertEqual(verify_run(expected, sample_report()), {"passed_ids": expected, "allowed_skipped_ids": []})
         for fault in ("missing", "failed", "skipped", "flaky", "retry", "global-error"):
             report = sample_report()
             case = report["suites"][0]["specs"][0]["tests"][0]
@@ -85,10 +95,23 @@ class BrowserResultsTests(unittest.TestCase):
             with self.subTest(fault=fault), self.assertRaises(ValueError):
                 combine_shards(reports, 4, "head")
 
+    def test_shard_receipts_count_approved_skips_once(self):
+        reports = sample_shards()
+        reports[0]["passed_ids"] = []
+        reports[0]["allowed_skipped_ids"] = ["one@chromium"]
+        self.assertEqual(combine_shards(reports, 4, "head")["cases"], 2)
+        reports[0]["passed_ids"] = ["one@chromium"]
+        with self.assertRaises(ValueError):
+            combine_shards(reports, 4, "head")
+        reports[0]["passed_ids"] = []
+        reports[0]["allowed_skipped_ids"] = []
+        with self.assertRaises(ValueError):
+            combine_shards(reports, 4, "head")
+
     def test_missing_selector_flags_and_failed_required_jobs_cannot_pass(self):
         outputs = {flag: "false" for flag in FLAGS}
         outputs.update(tools_scope="all", e2e_specs="[]")
-        jobs = {"selection": {"result": "success", "outputs": outputs}, "documentation": {"result": "success"}, "debug-tools": {"result": "success"}}
+        jobs = {"selection": {"result": "success", "outputs": outputs}, "documentation": {"result": "success"}, "debug-tools": {"result": "success"}, "upstream-editor": {"result": "success"}}
         self.assertEqual(check_gate(jobs), [])
         for malformed in ({}, {**outputs, "media": ""}, {**outputs, "app": "false", "editor_e2e": "true"}):
             with self.subTest(outputs=malformed), self.assertRaises(ValueError):
@@ -101,6 +124,36 @@ class BrowserResultsTests(unittest.TestCase):
         for state in ("failure", "cancelled", "skipped"):
             jobs["browser-gates"]["result"] = state
             self.assertIn("browser-gates", check_gate(jobs))
+
+    def test_only_exact_upstream_retired_portable_skip_is_accepted(self):
+        report = sample_report()
+        spec = report["suites"][0]["specs"][0]
+        spec.update(file="editor-bundle.spec.mjs", title="file executes every source and preserves project/export/undo behavior")
+        case = spec["tests"][0]
+        reason = "便携模式已弃维护，2.0 移除 HTML，见 #336 后回归分析"
+        case.update(expectedStatus="skipped", status="skipped", annotations=[{"type": "skip", "description": reason}],
+                    results=[{"status": "skipped", "retry": 0}])
+        report["stats"].update(expected=1, skipped=1)
+        result = verify_run(["one@chromium", "two@chromium"], report)
+        self.assertEqual(result, {"passed_ids": ["two@chromium"], "allowed_skipped_ids": ["one@chromium"]})
+        for fault in ("file", "title", "project", "reason", "retry", "missing-result", "stats"):
+            bad = json.loads(json.dumps(report))
+            broken = bad["suites"][0]["specs"][0]
+            test = broken["tests"][0]
+            if fault in ("file", "title"):
+                broken[fault] += "-other"
+            elif fault == "project":
+                test["projectId"] = "firefox"
+            elif fault == "reason":
+                test["annotations"][0]["description"] = "other reason"
+            elif fault == "retry":
+                test["results"][0]["retry"] = 1
+            elif fault == "stats":
+                bad["stats"]["skipped"] = 0
+            else:
+                test["results"] = []
+            with self.subTest(fault=fault), self.assertRaises(ValueError):
+                verify_run(["one@" + ("firefox" if fault == "project" else "chromium"), "two@chromium"], bad)
 
 
 class RealPlaywrightDiscoveryTests(unittest.TestCase):
@@ -120,6 +173,10 @@ class RealPlaywrightDiscoveryTests(unittest.TestCase):
                     "import {test,expect} from '@playwright/test';\n"
                     f"test('case{index}a',()=>expect(1).toBe(1));\n"
                     f"test('case{index}b',()=>expect(2).toBe(2));\n", encoding="utf-8")
+            (fixture / "editor-bundle.spec.mjs").write_text(
+                "import {test} from '@playwright/test';\n"
+                "test('file executes every source and preserves project/export/undo behavior', () => {"
+                "test.skip(true, '便携模式已弃维护，2.0 移除 HTML，见 #336 后回归分析'); });\n", encoding="utf-8")
             command = [node, str(cli), "test", "--config", str(config), "--project=chromium", "--forbid-only", "--retries=0", "--reporter=json"]
 
             def invoke(extra=()):
@@ -137,9 +194,25 @@ class RealPlaywrightDiscoveryTests(unittest.TestCase):
                 observed.extend(discovery(json.loads(part.stdout)))
             self.assertEqual(sorted(observed), expected)
             self.assertEqual(len(observed), len(set(observed)))
+            scope = {"revision": "head", "selection": "editor-e2e", "specs": [], "worktree_clean": True,
+                     "config": browser_config(json.loads(full.stdout)), "case_ids": expected}
+            records = []
+            for index in range(1, 5):
+                listing = invoke(["--list", f"--shard={index}/4", "--pass-with-no-tests"])
+                planned = discovery(json.loads(listing.stdout))
+                result = invoke([f"--shard={index}/4", "--pass-with-no-tests"])
+                self.assertEqual(result.returncode, 0, result.stderr[:1000])
+                verified = verify_run(planned, json.loads(result.stdout)) if planned else {"passed_ids": [], "allowed_skipped_ids": []}
+                records.append({"schema": SCHEMA, "scope": scope, "shard": {"current": index, "total": 4},
+                                "planned_ids": planned, **verified, "status": "passed" if planned else "empty-shard"})
+            self.assertEqual(combine_shards(records, 4, "head")["cases"], len(expected))
+            self.assertEqual(sum(len(r["allowed_skipped_ids"]) for r in records), 1)
             runtime = invoke()
             self.assertEqual(runtime.returncode, 0, runtime.stderr[:1000])
-            self.assertEqual(verify_run(expected, json.loads(runtime.stdout)), expected)
+            verified = verify_run(expected, json.loads(runtime.stdout))
+            self.assertEqual(len(verified["passed_ids"]), 4)
+            self.assertEqual(len(verified["allowed_skipped_ids"]), 1)
+            self.assertEqual(sorted(verified["passed_ids"] + verified["allowed_skipped_ids"]), expected)
             (fixture / "part1.spec.mjs").write_text("import {test} from '@playwright/test'; test.only('focus',()=>{});\n", encoding="utf-8")
             focused = invoke()
             self.assertNotEqual(focused.returncode, 0)
