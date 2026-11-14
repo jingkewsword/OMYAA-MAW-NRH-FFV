@@ -1,7 +1,7 @@
 name: Editor build and contracts
 
 on:
-  pull_request:
+  # Trial only: pull_request trigger temporarily disabled.
   workflow_dispatch:
   push:
     branches: [main]
