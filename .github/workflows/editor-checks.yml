@@ -551,6 +551,8 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Build bundles required by discovery
+        run: pnpm run build
       - name: Discover original seven fixed specs
         env:
           PLAYWRIGHT_JSON_OUTPUT_NAME: .artifacts/independent-fixed/fixed.json
