@@ -284,11 +284,12 @@ test('saves an empty secondary track and supports manual creation, edits, undo a
   await page.mouse.click(box.x + box.width * 0.8, box.y + box.height - 2, { button: 'right' });
   await page.locator('#ctxmenu .item').filter({ hasText: '创建副字幕' }).click();
   expect(await page.evaluate(() => MaweCuePanel.getCurrentCuePanelTarget()?.kind)).toBe('extension');
-  const editor = page.locator('#cue-panel-text');
+  const editor = page.locator('.waveform-cue-quick-edit textarea');
   await expect(editor).toBeVisible();
   await expect(editor).toBeFocused();
+  await expect(editor).toHaveValue('');
   await editor.fill('手动副字幕');
-  await editor.press('ControlOrMeta+Enter');
+  await editor.press('Escape');
   await expect(page.locator('.waveform-cue-block[data-track="extension"]')).toHaveCount(1);
   await expect(page.locator('#multi-subtitle-empty-hint')).toBeHidden();
   await page.locator('#undo-btn').click();
@@ -460,7 +461,12 @@ test('waveform extension cue double-click focuses the extension editor', async (
   await cue.scrollIntoViewIfNeeded();
   await cue.dblclick();
   await expect(page.locator('#cue-panel-target')).toHaveText('副字幕');
-  await expect(page.locator('#cue-panel-text')).toBeFocused();
+  const editor = page.locator('.waveform-cue-quick-edit textarea');
+  await expect(editor).toBeFocused();
+  await expect(editor).toHaveValue('extension cue');
+  await editor.fill('edited extension cue');
+  await editor.press('Escape');
+  await expect.poll(() => page.evaluate(() => MaweMultiSubtitleCore.getActiveExtensionTrack().segments[0].text)).toBe('edited extension cue');
 });
 
 test('light theme keeps the main waveform subtitle white and secondary subtitle lightly gray', async ({ page }) => {

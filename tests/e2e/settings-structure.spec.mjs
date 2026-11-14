@@ -115,22 +115,22 @@ async function settings(page, tab = 'regions') {
 
 test('word timing help stays concise and translates when switching language', async ({ page }, testInfo) => {
   await page.locator('#help-toggle').click();
-  await page.locator('#help-tab-waveform').click();
-  const paragraphs = page.locator('#help-tab-panel-waveform .help-subgroup').first().locator('.help-category > span');
-  await expect(paragraphs).toHaveCount(3);
-  await expect(paragraphs.first()).toContainText('Q 快速切换开关');
-  await expect(paragraphs.nth(1)).toContainText('F 试听选中的字幕或字词');
-  await expect(paragraphs.last()).toContainText('右键菜单的「高级操作」');
+  await page.locator('#help-tab-word-timing').click();
+  const paragraphs = page.locator('#help-tab-panel-word-timing');
+  await expect(paragraphs).toBeVisible();
+  await expect(paragraphs).toContainText('Q 切换主字幕字词时间码');
+  await expect(paragraphs).toContainText('F 试听选中的字幕或字词');
+  await expect(paragraphs).toContainText('右键菜单的「高级操作」');
   await page.locator('#help-panel').screenshot({ path: testInfo.outputPath('word-timing-help-zh.png') });
   await page.locator('#help-close').click();
   await settings(page, 'interface');
   await page.locator('#language-toggle').click();
   await page.locator('#help-toggle').click();
-  await page.locator('#help-tab-waveform').click();
-  await expect(paragraphs.first()).toContainText('Q toggles this mode');
-  await expect(paragraphs.nth(1)).toContainText('F auditions the selected subtitles or words');
-  await expect(paragraphs.last()).toContainText('Advanced actions in the context menu');
-  expect((await paragraphs.allTextContents()).join('')).not.toMatch(/[\u4e00-\u9fff]/);
+  await page.locator('#help-tab-word-timing').click();
+  await expect(paragraphs).toContainText('Q toggles main subtitle word timings');
+  await expect(paragraphs).toContainText('F previews the selected subtitle or word');
+  await expect(paragraphs).toContainText('Advanced actions');
+  expect(await paragraphs.textContent()).not.toMatch(/[\u4e00-\u9fff]/);
   await page.locator('#help-panel').screenshot({ path: testInfo.outputPath('word-timing-help-en.png') });
 });
 

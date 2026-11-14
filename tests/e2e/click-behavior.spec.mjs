@@ -345,7 +345,12 @@ test('waveform cue double-click activates its subtitle editor while blank double
   await cue.scrollIntoViewIfNeeded();
   await cue.dblclick();
   await expect(page.locator('#cue-panel-target')).toHaveText('主字幕');
-  await expect(page.locator('#cue-panel-text')).toBeFocused();
+  const quickEdit = page.locator('.waveform-cue-quick-edit textarea');
+  await expect(quickEdit).toBeFocused();
+  await expect(quickEdit).toHaveValue(await page.evaluate(() => MaweBoot.DATA.segments[0].text));
+  await quickEdit.fill('波形编辑');
+  await quickEdit.press('Escape');
+  await expect.poll(() => page.evaluate(() => MaweBoot.DATA.segments[0].text)).toBe('波形编辑');
   expect(await page.locator('#player').evaluate((element) => element.paused)).toBe(true);
 
   const blankRow = page.locator('.waveform-row:not(:has(.waveform-cue-block))').first();
@@ -575,14 +580,17 @@ test('list context menu leads with text-position split', async ({ page }) => {
 test('Enter focuses the current subtitle editor after list or waveform clicks', async ({ page }) => {
   await page.goto(server.url);
   const cue = page.locator('.cue[data-idx="0"]');
-  const panelText = page.locator('#cue-panel-text');
+  const quickEdit = page.locator('.waveform-cue-quick-edit textarea');
   await cue.click();
   // 最后点击在列表：即使鼠标已移出列表，Enter 仍聚焦当前字幕编辑区
   await page.locator('#media-controls').hover();
   await page.keyboard.press('Enter');
   await expect(cue).not.toHaveClass(/editing/);
-  await expect(panelText).toBeFocused();
+  await expect(quickEdit).toBeFocused();
+  await expect(quickEdit).toHaveValue(await page.evaluate(() => MaweBoot.DATA.segments[0].text));
+  await quickEdit.fill('列表 Enter 编辑');
   await page.keyboard.press('Escape');
+  await expect.poll(() => page.evaluate(() => MaweBoot.DATA.segments[0].text)).toBe('列表 Enter 编辑');
 
   // 最后点击在波形背景：仍聚焦当前字幕编辑区
   const rowBox = await page.locator('.waveform-row').nth(1).boundingBox();
@@ -591,7 +599,21 @@ test('Enter focuses the current subtitle editor after list or waveform clicks', 
   await page.evaluate(() => MaweSelection.selectOnly(0));
   await page.keyboard.press('Enter');
   await expect(cue).not.toHaveClass(/editing/);
+  await expect(quickEdit).toBeFocused();
+  await expect(quickEdit).toHaveValue('列表 Enter 编辑');
+  await quickEdit.fill('波形 Enter 编辑');
+  await quickEdit.press('Escape');
+  await expect.poll(() => page.evaluate(() => MaweBoot.DATA.segments[0].text)).toBe('波形 Enter 编辑');
+
+  // 无法使用快速编辑时，仍可回退到字幕面板编辑。
+  await page.evaluate(() => { MaweCoreState.waveformEditor.openCueQuickEditAtIndex = undefined; });
+  await page.keyboard.press('Enter');
+  const panelText = page.locator('#cue-panel-text');
   await expect(panelText).toBeFocused();
+  await expect(panelText).toHaveValue('波形 Enter 编辑');
+  await panelText.fill('面板回退编辑');
+  await panelText.press('Tab');
+  await expect.poll(() => page.evaluate(() => MaweBoot.DATA.segments[0].text)).toBe('面板回退编辑');
 });
 
 test('B splits at the pointer inside the cue list and at the playhead outside it', async ({ page }) => {
