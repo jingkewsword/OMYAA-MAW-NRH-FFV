@@ -219,13 +219,14 @@ test('JKL direction mode drives the timeline backward and forward', async ({ pag
     await expect(page.locator('#media-playback-rate')).toHaveValue(rate);
   }
 
-  const stoppedAt = await page.evaluate(() => document.getElementById('player').currentTime);
   await page.keyboard.press('k');
+  const stoppedAt = await page.evaluate(() => document.getElementById('player').currentTime);
   await expect(page.locator('#media-playback-rate')).toHaveValue('1');
   await expect.poll(() => page.evaluate(() => document.getElementById('player').paused)).toBe(true);
-  await expect.poll(() => page.evaluate((expected) => {
-    return Math.abs(document.getElementById('player').currentTime - expected);
-  }, stoppedAt)).toBeLessThan(0.01);
+  const afterFrames = await page.evaluate(() => new Promise(resolve => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve(document.getElementById('player').currentTime)));
+  }));
+  expect(Math.abs(afterFrames - stoppedAt)).toBeLessThan(0.01);
 
   await page.keyboard.press('k');
   await expect(page.locator('#media-playback-rate')).toHaveValue('1');

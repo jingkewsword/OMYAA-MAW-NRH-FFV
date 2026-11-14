@@ -29,7 +29,7 @@ DOC_TOOL_PATHS = {"scripts/check_docs.py", "scripts/prepare_release_notes.py",
 SITE_TOOL_PATHS = {"scripts/build_release_site.py", "scripts/prepare_release_notes.py"}
 TOOL_MODULES = {"test_docs_check", "test_release_notes", "test_release_site", "test_release_publication", "test_run_check", "test_run_tests_runner",
                 "test_verification_checklist", "test_verification_checklist_build", "test_verify_sha256_script", "test_macos_icon",
-                "test_packaging_contract", "test_test_workflow", "test_browser_results"}
+                "test_packaging_contract", "test_test_workflow", "test_browser_results", "test_ci_selected_gate"}
 MEDIA_METHODS = {
     "test_streaming_extraction_and_cache_match", "test_low_rate_multichannel_keeps_opposite_and_one_sided_audio",
     "test_mono_stays_identical_and_third_channel_is_included", "test_mopeaks_generation_does_not_need_native_quapeaks",
@@ -113,6 +113,18 @@ def source_test_ids(path: Path) -> list[str]:
             and method.name.startswith("test")]
 
 
+POSIX_REQUIRED_CASES = {
+    "test_process_tree_posix.RealPosixGroupTests.test_exited_root_live_child_is_reclaimed": "POSIX process groups require a POSIX host",
+    "test_process_tree_posix.RealPosixGroupTests.test_exited_root_sigterm_ignoring_child_is_reclaimed": "POSIX process groups require a POSIX host",
+    "test_runtime_pathwin.NonWindowsPassthroughTests.test_ascii_path_failure_hint_is_empty_on_unix": "非 Windows 直通断言仅适用 POSIX 平台",
+    "test_runtime_pathwin.NonWindowsPassthroughTests.test_ensure_ascii_root_returns_path_unchanged_without_fs_access": "非 Windows 直通断言仅适用 POSIX 平台",
+    "test_runtime_pathwin.NonWindowsPassthroughTests.test_prepare_install_root_is_noop_on_unix": "非 Windows 直通断言仅适用 POSIX 平台",
+    "test_runtime_pathwin.NonWindowsPassthroughTests.test_win32_get_short_path_never_touches_ctypes_on_unix": "非 Windows 直通断言仅适用 POSIX 平台",
+    "test_runtime_pathwin.ProbeWritableTests.test_permission_error_becomes_actionable_failure": "Windows 的 chmod 不阻止目录内建文件，无法这样模拟不可写",
+    "test_runtimes.RuntimeAsciiPathTests.test_resolve_root_is_passthrough_on_unix": "unix 直通断言：Windows 上 resolve_root 会做 ASCII 化",
+}
+
+
 def allowed_platform_skip(test_id: str, reason: str) -> bool:
     """Only exact platform guards are exempt; missing capabilities still fail."""
     identity = test_id.removeprefix("tests.")
@@ -121,7 +133,8 @@ def allowed_platform_skip(test_id: str, reason: str) -> bool:
         return True
     if os.name == "nt":
         return (identity == "test_gui_web.GuiWebBridgeTests.test_open_existing_path_uses_external_opener_for_file_and_folder"
-                and reason == "Non-Windows paths use the external opener")
+                and reason == "Non-Windows paths use the external opener"
+                or POSIX_REQUIRED_CASES.get(identity) == reason and identity in POSIX_REQUIRED_CASES)
     return (identity in {name.removeprefix("tests.") for name in WINDOWS_FFMPEG_TESTS} and reason == "Windows PATHEXT resolution"
             or identity == "test_gui_web.GuiWebBridgeTests.test_open_output_folder_uses_startfile_on_windows"
             and reason == "os.startfile 仅 Windows 可用；os.name 补丁会让 pathlib 选择 WindowsPath"

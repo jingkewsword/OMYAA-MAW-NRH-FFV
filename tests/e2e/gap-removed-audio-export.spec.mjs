@@ -197,9 +197,15 @@ for (const field of ['gapRemovedMediaKind', 'gapRemovedMediaSourceName', 'gapRem
 
 test('detach clears all capabilities and label follows media and language changes', async ({ page }) => {
   await fixture(page, 'save', async () => {
-    await page.addScriptTag({ content: projectLoad });
+    await page.evaluate(() => {
+      MaweBoot.SERVER_CONFIG.thumbnailBinding = 'old-binding';
+      window.thumbnailBindings = [];
+      window.MaweCoreState = { waveformEditor: { setThumbnailBinding: value => window.thumbnailBindings.push(value) } };
+    });
+    await page.addScriptTag({ type: 'module', content: `${projectLoad}\ninitMaweProjectLoad();` });
     await page.addScriptTag({ content: i18n });
     await page.evaluate(() => MaweProjectLoad.detachServerProjectSaving());
+    expect(await page.evaluate(() => [MaweBoot.SERVER_CONFIG.thumbnailBinding, window.thumbnailBindings])).toEqual(['', ['']]);
     expect(await page.evaluate(() => [MaweBoot.SERVER_CONFIG.canGapRemovedMediaExport, MaweBoot.SERVER_CONFIG.canGapRemovedVideoExport])).toEqual([false, false]);
     expect(await page.evaluate(() => [MaweBoot.SERVER_CONFIG.gapRemovedMediaKind, MaweBoot.SERVER_CONFIG.gapRemovedMediaSourceName,
       MaweBoot.SERVER_CONFIG.gapRemovedMediaOutputExtension, MaweBoot.SERVER_CONFIG.gapRemovedMediaOutputMime,

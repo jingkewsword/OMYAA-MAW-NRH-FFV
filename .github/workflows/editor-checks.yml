@@ -2,6 +2,7 @@ name: Editor build and contracts
 
 on:
   pull_request:
+  workflow_dispatch:
   push:
     branches: [main]
 
@@ -17,6 +18,21 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       light: ${{ steps.scope.outputs.light }}
+      app: ${{ steps.plan.outputs.app }}
+      application: ${{ steps.plan.outputs.application }}
+      real_media: ${{ steps.plan.outputs.real_media }}
+      tools_scope: ${{ steps.plan.outputs.tools_scope }}
+      common: ${{ steps.plan.outputs.common }}
+      browser: ${{ steps.plan.outputs.browser }}
+      smoke: ${{ steps.plan.outputs.smoke }}
+      media: ${{ steps.plan.outputs.media }}
+      long_media: ${{ steps.plan.outputs.long_media }}
+      lifecycle: ${{ steps.plan.outputs.lifecycle }}
+      tools: ${{ steps.plan.outputs.tools }}
+      editor_e2e: ${{ steps.plan.outputs.editor_e2e }}
+      e2e: ${{ steps.plan.outputs.e2e }}
+      e2e_specs: ${{ steps.plan.outputs.e2e_specs }}
+      website: ${{ steps.plan.outputs.website }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -24,11 +40,26 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
-      - name: Select change scope
+      - name: Select upstream light scope
         id: scope
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: python scripts/ci_impact.py
+      - id: plan
+        env:
+          TEST_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [[ -z "$TEST_BASE_REF" || "$TEST_BASE_REF" =~ ^0+$ ]]; then
+            python scripts/test_workflow.py --stage release --plan-only --github-output "$GITHUB_OUTPUT"
+          else
+            python scripts/test_workflow.py --stage merge --base-ref "$TEST_BASE_REF" --plan-only --github-output "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/upload-artifact@v6
+        with:
+          name: test-selection
+          path: .artifacts/test-workflow/
+          include-hidden-files: true
+          if-no-files-found: error
 
   debug-tools:
     name: Debug tooling (${{ matrix.os }})
@@ -76,7 +107,7 @@ jobs:
           path: .artifacts/checks/
           include-hidden-files: true
           retention-days: 7
-  editor:
+  upstream-editor:
     needs: selection
     if: ${{ always() }}
     runs-on: ubuntu-latest
@@ -178,7 +209,9 @@ jobs:
           retention-days: 7
 
       - name: Real file and HTTP editor
-        if: ${{ needs.selection.outputs.light != 'true' }}
+        # The final gate requires the full four-shard result when selected.
+        # Do not substitute it when selection is uncertain.
+        if: ${{ needs.selection.outputs.light != 'true' && (needs.selection.result != 'success' || needs.selection.outputs.light != 'false' || needs.selection.outputs.editor_e2e != 'true') }}
         env:
           MAW_E2E_PYTHON: ${{ github.workspace }}/.venv/bin/python
         run: pnpm exec playwright test --config=tests/config/playwright.config.mjs --project=chromium tests/e2e/editor-bundle.spec.mjs tests/e2e/editor-transactions.spec.mjs tests/e2e/editor-text-tools.spec.mjs tests/e2e/ass-cue-position.spec.mjs tests/e2e/sticker-preview-lifecycle.spec.mjs tests/e2e/warma-presets.spec.mjs tests/e2e/warma-i18n.spec.mjs
@@ -189,32 +222,310 @@ jobs:
           MAW_E2E_PYTHON: ${{ github.workspace }}/.venv/bin/python
         run: uv run --no-sync python scripts/run_check.py --timeout 300 -- node node_modules/@playwright/test/cli.js test --config=tests/config/playwright.config.mjs --project=chromium tests/e2e/tool-pages.spec.mjs tests/e2e/tool-compact.spec.mjs tests/e2e/tool-markdown.spec.mjs tests/e2e/timestamp-compare.spec.mjs tests/e2e/verification-checklist.spec.mjs tests/e2e/term-report.spec.mjs tests/e2e/changelog-write-lock.spec.mjs
 
-      # README and user guides are website inputs, not just Markdown files.
-      - name: Set up website pnpm
-        if: ${{ needs.selection.outputs.light == 'true' }}
-        uses: pnpm/action-setup@v6
+  documentation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - run: python scripts/test_workflow.py --stage merge --pack docs
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: documentation-evidence
+          path: .artifacts/
+          include-hidden-files: true
+          retention-days: 7
+
+  editor:
+    name: Windows selected tests
+    needs: selection
+    if: needs.selection.outputs.app == 'true'
+    runs-on: windows-2022
+    timeout-minutes: 30
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
         with:
           version: 11.28.4
           run_install: false
-      - name: Set up website Node
-        if: ${{ needs.selection.outputs.light == 'true' }}
-        uses: actions/setup-node@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: '22.23.4'
           cache: pnpm
-          cache-dependency-path: website/pnpm-lock.yaml
-      - name: Set up website Python
-        if: ${{ needs.selection.outputs.light == 'true' }}
-        uses: actions/setup-python@v6
+          cache-dependency-path: pnpm-lock.yaml
+      # The test runner builds each bundle exactly once before its consumers.
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
-      - name: Install website dependencies
-        if: ${{ needs.selection.outputs.light == 'true' }}
-        run: pnpm --dir website install --frozen-lockfile
-      - name: Verify website document consumers
-        if: ${{ needs.selection.outputs.light == 'true' }}
+      - uses: astral-sh/setup-uv@v7
+        if: needs.selection.outputs.application == 'true' || needs.selection.outputs.tools_scope != 'checklist'
+        with:
+          version: "0.13.4"
+          enable-cache: true
+      - run: uv sync --frozen --group test --group dev --no-group build
+        if: needs.selection.outputs.application == 'true' || needs.selection.outputs.tools_scope != 'checklist'
+      - name: Install Chromium
+        shell: bash
         run: |
-          node --test tests/test_readme_content_sync.mjs
-          pnpm --dir website run sync:docs
-          python scripts/build_release_site.py --preview
-          pnpm --dir website run build
+          attempt=1
+          until pnpm exec playwright install chromium; do
+            status=$?
+            if [ "$attempt" -ge 3 ]; then exit "$status"; fi
+            echo "Playwright install failed (exit ${status}, attempt ${attempt}/3); retrying in 20s."
+            attempt=$((attempt + 1))
+            sleep 20
+          done
+        if: needs.selection.outputs.browser == 'true' || needs.selection.outputs.smoke == 'true' || needs.selection.outputs.e2e == 'true' || needs.selection.outputs.editor_e2e == 'true'
+      - name: Verify Windows symlink capability
+        if: needs.selection.outputs.common == 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $probe = Join-Path $env:RUNNER_TEMP ("maw-symlink-" + [guid]::NewGuid())
+          New-Item -ItemType Directory -Path $probe | Out-Null
+          try {
+            Set-Content -LiteralPath (Join-Path $probe 'target') -Value 'symlink-capable'
+            New-Item -ItemType SymbolicLink -Path (Join-Path $probe 'alias') -Target (Join-Path $probe 'target') | Out-Null
+            if ((Get-Content -LiteralPath (Join-Path $probe 'alias')) -ne 'symlink-capable') { throw 'Symlink target is unreadable.' }
+          } finally {
+            Remove-Item -LiteralPath (Join-Path $probe 'alias') -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath (Join-Path $probe 'target') -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $probe -Force
+          }
+      - name: Select real Git Bash checksum tools
+        if: needs.selection.outputs.tools == 'true' && needs.selection.outputs.tools_scope != 'checklist'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $gitBash = Join-Path $env:ProgramFiles 'Git\bin\bash.exe'
+          if (-not (Test-Path -LiteralPath $gitBash -PathType Leaf)) { throw 'Git Bash is unavailable.' }
+          & $gitBash -c 'command -v sha256sum && command -v awk && command -v grep'
+          if ($LASTEXITCODE -ne 0) { throw 'Git Bash checksum tools are unavailable.' }
+          (Split-Path $gitBash) | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Install real media dependencies
+        if: needs.selection.outputs.real_media == 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          choco install ffmpeg --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'FFmpeg installation failed.' }
+          $binary = Get-ChildItem -LiteralPath "$env:ChocolateyInstall\lib\ffmpeg\tools" -Filter ffmpeg.exe -Recurse -File | Select-Object -First 1
+          if (-not $binary) { throw 'The FFmpeg package contains no executable.' }
+          $ffprobe = Join-Path $binary.Directory.FullName 'ffprobe.exe'
+          if (-not (Test-Path -LiteralPath $ffprobe -PathType Leaf)) { throw 'FFprobe is unavailable.' }
+          $binary.Directory.FullName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          & $binary.FullName -version
+          if ($LASTEXITCODE -ne 0) { throw 'FFmpeg is unavailable.' }
+          & $ffprobe -version
+          if ($LASTEXITCODE -ne 0) { throw 'FFprobe is unavailable.' }
+      - name: Required common and impacted gates
+        id: execute-packs
+        env:
+          COMMON: ${{ needs.selection.outputs.common }}
+          MAW_CI_SHORT_TEMP: ${{ needs.selection.outputs.common == 'true' && '1' || '0' }}
+          BROWSER: ${{ needs.selection.outputs.browser }}
+          SMOKE: ${{ needs.selection.outputs.smoke }}
+          MEDIA: ${{ needs.selection.outputs.media }}
+          LONG_MEDIA: ${{ needs.selection.outputs.long_media }}
+          LIFECYCLE: ${{ needs.selection.outputs.lifecycle }}
+          TOOLS: ${{ needs.selection.outputs.tools }}
+          E2E: ${{ needs.selection.outputs.e2e }}
+          E2E_SPECS: ${{ needs.selection.outputs.e2e_specs }}
+          TOOLS_SCOPE: ${{ needs.selection.outputs.tools_scope }}
+          APPLICATION: ${{ needs.selection.outputs.application }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $packs = @()
+          foreach ($name in @('common', 'browser', 'smoke', 'media', 'long-media', 'lifecycle', 'tools', 'e2e')) {
+            $flag = [Environment]::GetEnvironmentVariable($name.Replace('-', '_').ToUpperInvariant())
+            if ($flag -eq 'true') { $packs += @('--pack', $name) }
+          }
+          if ($packs.Count -eq 0) {
+            New-Item -ItemType Directory -Force .artifacts/test-workflow | Out-Null
+            '{"status":"not-run","reason":"no Windows-local packs selected; browser coverage runs separately"}' | Set-Content .artifacts/test-workflow/windows-no-packs.json -Encoding utf8
+            Write-Host 'No Windows-local packs selected; full browser coverage runs separately.'
+            exit 0
+          }
+          $arguments = @('scripts/test_workflow.py', '--stage', 'merge', '--tools-scope', $env:TOOLS_SCOPE, '--e2e-specs', $env:E2E_SPECS) + $packs
+          if ($env:APPLICATION -eq 'false' -and $env:TOOLS_SCOPE -eq 'checklist') {
+            python @arguments
+          } else {
+            uv run --no-sync python @arguments
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Record Windows preparation failure
+        if: ${{ always() && steps.execute-packs.outcome == 'skipped' }}
+        shell: pwsh
+        run: |
+          "## Windows selected gates`n`nPreparation failed or was cancelled; selected Windows gates were not executed. See selection and job results in the required gate summary." | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: editor-test-evidence
+          path: |
+            .artifacts/
+            test-results/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+  posix-contracts:
+    needs: selection
+    if: needs.selection.outputs.common == 'true' || needs.selection.outputs.lifecycle == 'true' || (needs.selection.outputs.tools == 'true' && needs.selection.outputs.tools_scope != 'checklist') || needs.selection.outputs.media == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.13.4"
+          enable-cache: true
+      - run: uv sync --frozen --group test --no-group build --no-dev
+      - uses: pnpm/action-setup@v6
+        if: needs.selection.outputs.lifecycle == 'true'
+        with:
+          version: 11.28.4
+          run_install: false
+      - uses: actions/setup-node@v5
+        if: needs.selection.outputs.lifecycle == 'true'
+        with:
+          node-version: '22.23.4'
+          package-manager-cache: false
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+        if: needs.selection.outputs.lifecycle == 'true'
+      - name: POSIX path and symlink contracts
+        if: needs.selection.outputs.common == 'true'
+        run: >-
+          uv run --no-sync python scripts/run_check.py --timeout 120 --
+          uv run --no-sync python scripts/run_tests.py --required --report .artifacts/posix-paths.json
+          tests.test_editor_manifest.EditorManifestTests.test_rejects_symlink_escape
+          tests.test_editor_manifest.EditorManifestTests.test_accepts_symlink_within_web_directory
+          tests.test_asr_presets.RecognitionPresetTests.test_symbolic_links_are_unavailable_and_cannot_be_loaded
+          tests.test_thumbnail_cache.ThumbnailCacheTests.test_symlink_registration_matches_resolved_source_namespace
+          tests.test_gui_web.GuiWebBridgeTests.test_open_existing_path_uses_external_opener_for_file_and_folder
+      - name: Required POSIX-only Python cases
+        if: needs.selection.outputs.common == 'true'
+        run: >-
+          uv run --no-sync python scripts/run_check.py --timeout 120 --
+          uv run --no-sync python scripts/run_tests.py --required --report .artifacts/posix-only.json
+          tests.test_process_tree_posix.RealPosixGroupTests.test_exited_root_live_child_is_reclaimed
+          tests.test_process_tree_posix.RealPosixGroupTests.test_exited_root_sigterm_ignoring_child_is_reclaimed
+          tests.test_runtime_pathwin.NonWindowsPassthroughTests.test_ascii_path_failure_hint_is_empty_on_unix
+          tests.test_runtime_pathwin.NonWindowsPassthroughTests.test_ensure_ascii_root_returns_path_unchanged_without_fs_access
+          tests.test_runtime_pathwin.NonWindowsPassthroughTests.test_prepare_install_root_is_noop_on_unix
+          tests.test_runtime_pathwin.NonWindowsPassthroughTests.test_win32_get_short_path_never_touches_ctypes_on_unix
+          tests.test_runtime_pathwin.ProbeWritableTests.test_permission_error_becomes_actionable_failure
+          tests.test_runtimes.RuntimeAsciiPathTests.test_resolve_root_is_passthrough_on_unix
+      - name: Unix checksum contracts
+        if: needs.selection.outputs.tools == 'true' && needs.selection.outputs.tools_scope != 'checklist'
+        run: >-
+          uv run --no-sync python scripts/run_check.py --timeout 120 --
+          uv run --no-sync python scripts/run_tests.py --required --report .artifacts/posix-checksum.json
+          tests.test_verify_sha256_script
+      - name: POSIX process lifecycle
+        if: needs.selection.outputs.lifecycle == 'true'
+        run: uv run --no-sync python scripts/test_workflow.py --stage merge --pack lifecycle
+      - name: Linux real media dependencies
+        if: needs.selection.outputs.media == 'true'
+        timeout-minutes: 5
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y ffmpeg
+      - name: Linux real bad-file probe contracts
+        if: needs.selection.outputs.media == 'true'
+        run: >-
+          uv run --no-sync python scripts/run_check.py --timeout 180 --
+          uv run --no-sync python scripts/run_tests.py --required --report .artifacts/posix-ffprobe.json
+          tests.test_ffprobe_failure_integration
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: posix-contract-evidence
+          path: .artifacts/
+          include-hidden-files: true
+          retention-days: 7
+
+  website:
+    needs: selection
+    if: needs.selection.outputs.website == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.28.4
+          run_install: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22.23.4'
+          package-manager-cache: false
+      - run: pnpm --dir website install --frozen-lockfile
+      - name: Verify README synchronization
+        run: node --test tests/test_readme_content_sync.mjs
+      - name: Run selected website checks
+        id: execute-website
+        run: python scripts/test_workflow.py --stage merge --pack website
+      - name: Record website preparation failure
+        if: ${{ always() && steps.execute-website.outcome == 'skipped' }}
+        run: |
+          echo '## Website selected checks' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Preparation failed or was cancelled; selected website checks were not executed.' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: website-test-evidence
+          path: .artifacts/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+  browser-gates:
+    needs: selection
+    if: needs.selection.outputs.editor_e2e == 'true'
+    uses: ./.github/workflows/browser-gates.yml
+
+  test-gate:
+    name: Required test gate
+    if: always()
+    needs: [selection, debug-tools, upstream-editor, documentation, editor, posix-contracts, browser-gates, website]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Reject failure, cancellation and unexpected skipped jobs
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python scripts/check_test_gate.py
+
+  editor-compat:
+    name: editor
+    if: ${{ always() }}
+    needs: test-gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Require the complete test gate
+        env:
+          TEST_GATE_RESULT: ${{ needs.test-gate.result }}
+        run: python -c 'import os,sys; sys.exit(0 if os.environ.get("TEST_GATE_RESULT") == "success" else 1)'

@@ -506,7 +506,11 @@ test('N creates a subtitle at the waveform pointer and focuses the new cue', asy
   await expect(page.locator('.cue[data-idx="1"]')).toHaveClass(/selected/);
   await expect.poll(() => page.evaluate(() => window.MAWE_EDITOR_BRIDGE.currentCuePanelIdx)).toBe(1);
   await expect(page.locator('#cue-panel-text')).toHaveValue('');
-  await expect(page.locator('#cue-panel-text')).toBeFocused();
+  const quickEdit = page.locator('.waveform-cue-quick-edit textarea');
+  await expect(quickEdit).toBeFocused();
+  await quickEdit.fill('新字幕');
+  await quickEdit.press('Enter');
+  await expect.poll(() => page.evaluate(() => MaweBoot.DATA.segments[1].text)).toBe('新字幕');
   await expect(page.locator('.cue[data-idx="1"] .text')).not.toHaveAttribute('contenteditable', 'plaintext-only');
   const created = await page.evaluate(() => MaweBoot.DATA.segments[1]);
   expect(created.start).toBeGreaterThanOrEqual(8000);
@@ -549,7 +553,11 @@ test('Ctrl+dragging blank waveform creates the dragged duration and focuses the 
   await expect.poll(() => page.evaluate(() => MaweBoot.DATA.segments.length)).toBe(7);
   await expect(page.locator('.cue[data-idx="1"]')).toHaveClass(/selected/);
   await expect.poll(() => page.evaluate(() => window.MAWE_EDITOR_BRIDGE.currentCuePanelIdx)).toBe(1);
-  await expect(page.locator('#cue-panel-text')).toBeFocused();
+  const quickEdit = page.locator('.waveform-cue-quick-edit textarea');
+  await expect(quickEdit).toBeFocused();
+  await quickEdit.fill('拖拽字幕');
+  await quickEdit.press('Enter');
+  await expect.poll(() => page.evaluate(() => MaweBoot.DATA.segments[1].text)).toBe('拖拽字幕');
   await expect(page.locator('.cue[data-idx="1"] .text')).not.toHaveAttribute('contenteditable', 'plaintext-only');
   const created = await page.evaluate(() => MaweBoot.DATA.segments[1]);
   const expectedDuration = Math.round((((endX - startX) / box.width) * 10000) / 10) * 10;
@@ -1697,9 +1705,9 @@ test('help reflects the selected subtitle-edit split key', async ({ page }) => {
   await expect(page.locator('#help-waveform-split-key')).toHaveText('B');
   await expect(page.locator('#help-tab-panel-waveform')).toContainText('按当前时间基准拆分字幕');
   await expect(page.locator('#help-tab-panel-waveform')).not.toContainText('红色播放指针');
-  await expect(helpPanel).toContainText('绑定到主副字幕（自动匹配）');
+  await expect(helpPanel).toContainText('自动匹配并绑定主副字幕');
   await expect(helpPanel).toContainText('解绑当前副字幕');
-  await expect(helpPanel).toContainText('将选中的副字幕的时长对齐到绑定主字幕');
+  await expect(helpPanel).toContainText('将选中的副字幕时长对齐到绑定的主字幕');
   await expect(helpPanel).not.toContainText('波形轨道徽标');
   await expect(helpPanel).not.toContainText('语言类型：单词型适合英语等空格语言，字符型适合中文/日文等');
   await expect(helpPanel).not.toContainText('主字幕自动使用时间码拆分：单轨可直接拆分');
@@ -1707,9 +1715,13 @@ test('help reflects the selected subtitle-edit split key', async ({ page }) => {
   await expect(helpPanel).not.toContainText('副字幕调整时受主字幕轨道边界限制');
   await expect(helpPanel).not.toContainText('普通点击以最后点击的轨道为准；未绑定副字幕不会保留旧主字幕选区');
 
-  const multiSubtitleHelp = helpPanel.locator('.help-subgroup').filter({ hasText: '绑定到主副字幕（自动匹配）' });
+  await page.locator('#help-tab-multi').click();
+  const multiSubtitleHelp = helpPanel.locator('#help-tab-panel-multi .help-subgroup').filter({ hasText: '自动匹配并绑定主副字幕' });
   await expect(multiSubtitleHelp).toHaveCount(1);
-  await expect(helpPanel.locator('#help-tab-panel-waveform .help-title').filter({ hasText: '双语字幕' })).toHaveCount(1);
+  await expect(page.locator('#help-tab-panel-multi')).toBeVisible();
+  await expect(multiSubtitleHelp).toContainText('G 自动匹配并绑定主副字幕');
+  await expect(multiSubtitleHelp).toContainText('Shift+G 解绑当前副字幕');
+  await expect(multiSubtitleHelp).toContainText('H 将选中的副字幕时长对齐到绑定的主字幕');
 
   await splitKey.selectOption('enter');
   await expect(helpSplitKey).toHaveText('Enter');
@@ -1734,8 +1746,9 @@ test('contextual help links open their matching Help tabs', async ({ page }) => 
   await page.locator('#gap-remove-help').click();
   await expect(helpPanel).toHaveClass(/show/);
   await expect(page.locator('#help-tab-gap')).toHaveAttribute('aria-selected', 'true');
-  await expect(page.locator('#gap-remove-panel')).not.toHaveClass(/show/);
+  await expect(page.locator('#gap-remove-panel')).toHaveClass(/show/);
   await page.locator('#help-close').click();
+  await page.locator('#gap-remove-manage').click();
 
   for (const { button, tab } of [
     { button: '#waveform-settings-help', tab: '#help-tab-waveform' },
@@ -1745,8 +1758,9 @@ test('contextual help links open their matching Help tabs', async ({ page }) => 
     await page.locator(button).click();
     await expect(helpPanel).toHaveClass(/show/);
     await expect(page.locator(tab)).toHaveAttribute('aria-selected', 'true');
-    await expect(page.locator('#waveform-settings-panel')).toBeHidden();
+    await expect(page.locator('#waveform-settings-panel')).toBeVisible();
     await page.locator('#help-close').click();
+    await closeSettingsPanels(page);
   }
   // 波形操作/按键微调/空隙操作方式设置已移入全局设置「通用操作」，其帮助入口随之迁移
   for (const { button, tab } of [
@@ -1758,8 +1772,9 @@ test('contextual help links open their matching Help tabs', async ({ page }) => 
     await page.locator(button).click();
     await expect(helpPanel).toHaveClass(/show/);
     await expect(page.locator(tab)).toHaveAttribute('aria-selected', 'true');
-    await expect(page.locator('#editor-settings-panel')).toBeHidden();
+    await expect(page.locator('#editor-settings-panel')).toBeVisible();
     await page.locator('#help-close').click();
+    await closeSettingsPanels(page);
   }
 });
 
@@ -1841,8 +1856,8 @@ test('waveform toolbar exposes grouped icon controls and selected cues use a yel
   await expect(selectTool.locator('svg')).toHaveCount(1);
   await expect(splitTool).toContainText('分割');
   await expect(splitTool.locator('svg')).toHaveCount(1);
-  await expect(selectTool).toHaveAttribute('title', /V/);
-  await expect(splitTool).toHaveAttribute('title', /R/);
+  await expect(selectTool).toHaveAttribute('data-title', /V/);
+  await expect(splitTool).toHaveAttribute('data-title', /R/);
   await expect(page.locator('#help-toggle')).toContainText('帮助');
 
   await page.keyboard.press('r');
@@ -2096,6 +2111,8 @@ test('nested export menus preserve pointer reachability and keyboard focus', asy
 
   await exportButton.focus();
   await page.keyboard.press('ArrowDown');
+  await expect(page.locator('#download-green-screen-video')).toBeFocused();
+  await page.keyboard.press('ArrowDown');
   await expect(page.locator('#download-fcp7-export')).toBeFocused();
   await page.keyboard.press('ArrowDown');
   await expect(otioToggle).toBeFocused();
@@ -2109,6 +2126,7 @@ test('nested export menus preserve pointer reachability and keyboard focus', asy
 });
 
 test('nested export menus keep the current submenu while the pointer crosses its aim corridor', async ({ page }) => {
+  await page.clock.install();
   await page.goto(server.url);
   const exportButton = page.locator('#extra-export-btn');
   const otioWrapper = page.locator('#extra-export-menu > .dropdown-submenu').first();
@@ -2125,6 +2143,8 @@ test('nested export menus keep the current submenu while the pointer crosses its
   expect(otioToggleBox).not.toBeNull();
   expect(dynamicToggleBox).not.toBeNull();
 
+  // Freeze only after layout and hover; real pointer events still follow the corridor.
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
   await page.mouse.move(
     otioToggleBox.x + otioToggleBox.width * 0.7,
     otioToggleBox.y + otioToggleBox.height / 2,
@@ -2134,10 +2154,10 @@ test('nested export menus keep the current submenu while the pointer crosses its
     dynamicToggleBox.y + dynamicToggleBox.height / 2,
     { steps: 12 },
   );
-  await page.waitForTimeout(40);
+  await page.clock.fastForward(40);
   await expect(page.locator('#extra-otio-menu')).toBeVisible({ timeout: 100 });
   await expect(page.locator('#extra-dynamic-menu')).toBeHidden();
-  await page.waitForTimeout(180);
+  await page.clock.fastForward(180);
   await expect(page.locator('#extra-dynamic-menu')).toBeVisible();
 });
 
@@ -2286,10 +2306,11 @@ test('server media loads from the resolved project path and OTIO keeps its absol
   await page.goto(server.url);
   const state = await page.evaluate(() => ({
     media: MaweBoot.DATA.media,
+    boundPath: MaweBoot.SERVER_CONFIG.autoLoadedMediaPath,
     currentSrc: document.getElementById('player').currentSrc,
   }));
-  expect(state.media).toMatch(/synthetic\.wav$/);
-  expect(state.media).toMatch(/^(?:[A-Za-z]:[\\/]|\/)/);
+  expect(state.media).toBe('synthetic.wav');
+  expect(state.boundPath).toMatch(/^(?:[A-Za-z]:[\\/]|\/).*synthetic\.wav$/);
   expect(state.currentSrc).toBe(`${server.url}media`);
 
   await page.evaluate(() => {

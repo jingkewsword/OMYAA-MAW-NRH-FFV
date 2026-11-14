@@ -23,10 +23,12 @@ from scripts.test_policy import ALL_MERGE, PYTHON_PACKS, select_packs
 
 
 class TestWorkflowTests(unittest.TestCase):
-    def test_plan_does_not_predict_windows_preview(self):
-        for paths in (("CHANGELOG.md",), ("README.md",), ("README.md", "CHANGELOG.md")):
+    def test_plan_and_github_output_do_not_predict_windows_preview(self):
+        for paths in (("CHANGELOG.md",), ("README.md",), ("README.md", "maw/project.py"),
+                      ("README.md", "CHANGELOG.md")):
             with self.subTest(paths=paths), tempfile.TemporaryDirectory() as directory:
-                arguments = ["--stage", "merge", "--plan-only"]
+                output_file = Path(directory) / "github-output"
+                arguments = ["--stage", "merge", "--plan-only", "--github-output", str(output_file)]
                 for path in paths:
                     arguments.extend(("--changed", path))
                 with patch.object(test_workflow, "ROOT", Path(directory)), \
@@ -34,6 +36,7 @@ class TestWorkflowTests(unittest.TestCase):
                     self.assertEqual(test_workflow.main(arguments), 0)
                 plan, _ = json.JSONDecoder().raw_decode(out.getvalue())
                 self.assertNotIn("preview", plan)
+                self.assertNotIn("preview=", output_file.read_text(encoding="utf-8"))
                 saved = next((Path(directory) / ".artifacts/test-workflow").glob("*/plan.json"))
                 self.assertNotIn("preview", json.loads(saved.read_text(encoding="utf-8")))
 
