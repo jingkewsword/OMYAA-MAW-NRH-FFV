@@ -1,0 +1,47 @@
+name: Temporary checklist storage probe
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'code/checklist-storage-probe'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
+      PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ github.workspace }}/.artifacts/checklist-storage-probe/report.json
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.28.4
+          run_install: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22.23.4'
+      - name: Install JavaScript dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Run the original checklist test once with storage observation
+        run: |
+          mkdir -p .artifacts/checklist-storage-probe
+          node node_modules/@playwright/test/cli.js test --config=tests/config/playwright.config.mjs --project=chromium --workers=1 --retries=0 --trace=on --reporter=line,json --output=.artifacts/checklist-storage-probe/results tests/e2e/tool-compact.spec.mjs -g 'checklist compact keeps only title and checkbox, retains notes and exports, and prints full content'
+      - name: Preserve storage events and trace even on failure
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: checklist-storage-probe
+          path: .artifacts/checklist-storage-probe/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7

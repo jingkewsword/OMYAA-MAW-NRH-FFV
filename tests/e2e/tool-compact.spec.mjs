@@ -264,11 +264,48 @@ async function downloadResult(page) {
 }
 
 test('checklist compact keeps only title and checkbox, retains notes and exports, and prints full content', async ({page}, testInfo) => {
-  const output = generateChecklist(testInfo); await page.goto(fileUrl(output));
+  const audit = [];
+  await page.addInitScript(() => {
+    const originalGet = Storage.prototype.getItem;
+    window.__auditEvents = [];
+    window.__auditRead = key => originalGet.call(localStorage, key);
+    for (const name of ['getItem', 'setItem', 'removeItem', 'clear']) {
+      const original = Storage.prototype[name];
+      Storage.prototype[name] = function (...args) {
+        try {
+          const result = Reflect.apply(original, this, args);
+          window.__auditEvents.push({name, args, result, time:performance.now()});
+          return result;
+        } catch (error) {
+          window.__auditEvents.push({name, args, error:String(error), time:performance.now()});
+          throw error;
+        }
+      };
+    }
+    addEventListener('storage', e => window.__auditEvents.push({name:'storage-event', key:e.key, oldValue:e.oldValue, newValue:e.newValue, url:e.url, time:performance.now()}));
+    addEventListener('error', e => window.__auditEvents.push({name:'window-error', message:e.message, time:performance.now()}));
+    addEventListener('unhandledrejection', e => window.__auditEvents.push({name:'unhandledrejection', message:String(e.reason), time:performance.now()}));
+  });
+  async function checkpoint(stage) {
+    audit.push(await page.evaluate(stage => {
+      const key = 'maw-checklist:' + document.title;
+      const values = {};
+      for (const suffix of ['', ':notes', ':ignored', ':view']) {
+        try { values[key + suffix] = window.__auditRead(key + suffix); }
+        catch (error) { values[key + suffix] = {error:String(error)}; }
+      }
+      return {stage, url:location.href, title:document.title, values,
+        checked:document.querySelector('#manual-persistence')?.checked,
+        status:document.querySelector('#save-status')?.textContent,
+        events:window.__auditEvents.splice(0)};
+    }, stage));
+  }
+  try {
+  const output = generateChecklist(testInfo); await page.goto(fileUrl(output)); await checkpoint('loaded');
   const input = page.locator('[data-tool-compact]'), item = page.locator('#manual .item').first();
   const box = item.locator('input[type=checkbox]');
   await item.locator('.note-toggle').click(); await item.locator('textarea').fill('第一行备注\n第二行备注');
-  const before = await downloadResult(page);
+  const before = await downloadResult(page); await checkpoint('initial-export');
   // Use the existing legacy control in the negative run so old content CSS is exercised too.
   await page.locator('.tool-density').click();
   await expect(item.locator('.item-purpose')).toBeVisible(); await expect(box).toBeVisible();
@@ -277,14 +314,14 @@ test('checklist compact keeps only title and checkbox, retains notes and exports
   expect(sizes.font).toBe('15px'); expect(sizes.height).toBeLessThanOrEqual(44); expect(parseFloat(sizes.gap)).toBeGreaterThanOrEqual(8);
   await expect(item.locator('textarea')).toHaveValue('第一行备注\n第二行备注');
   expect(await downloadResult(page)).toEqual(before);
-  await item.locator('label').click(); await expect(box).toBeChecked();
-  const afterCheck = await downloadResult(page); expect(afterCheck.sections[0].items[0].confirmed).toBe(true);
+  await item.locator('label').click(); await expect(box).toBeChecked(); await checkpoint('checked');
+  const afterCheck = await downloadResult(page); await checkpoint('checked-export'); expect(afterCheck.sections[0].items[0].confirmed).toBe(true);
   await page.emulateMedia({media:'print'});
   await page.evaluate(() => window.dispatchEvent(new Event('beforeprint')));
   for (const selector of ['.item-purpose','.item-op','.item-exp','.item-hint','.print-note']) await expect(item.locator(selector)).toBeVisible();
   await expect(item.locator('.print-note')).toContainText('第一行备注');
   expect(await page.locator('.section').first().evaluate(item => getComputedStyle(item).contentVisibility)).toBe('visible');
-  await page.emulateMedia({media:'screen'}); await page.evaluate(() => window.dispatchEvent(new Event('afterprint')));
+  await page.emulateMedia({media:'screen'}); await page.evaluate(() => window.dispatchEvent(new Event('afterprint'))); await checkpoint('after-print');
   for (const theme of ['dark','light']) {
     await setTheme(page,theme);
     for (const width of [1440,375]) {
@@ -292,12 +329,13 @@ test('checklist compact keeps only title and checkbox, retains notes and exports
       await page.screenshot({path:testInfo.outputPath(`checklist-compact-${width}-${theme}.png`)});
     }
   }
-  await page.setViewportSize({width:1440,height:900});
+  await checkpoint('after-themes'); await page.setViewportSize({width:1440,height:900});
   await page.locator('.tool-density').click(); await expect(input).not.toBeChecked();
   await expect(item.locator('.item-note')).toBeVisible(); await expect(item.locator('.note-toggle')).toHaveAttribute('aria-expanded','true');
   expect(await downloadResult(page)).toEqual(afterCheck);
-  await page.reload(); await expect(box).toBeChecked(); await expect(item.locator('textarea')).toHaveValue('第一行备注\n第二行备注');
+  await checkpoint('before-reload'); await page.reload(); await checkpoint('after-reload'); await expect(box).toBeChecked(); await expect(item.locator('textarea')).toHaveValue('第一行备注\n第二行备注');
   writeFileSync(testInfo.outputPath('compact-item-measurements.json'),JSON.stringify(sizes,null,2));
+  } finally { writeFileSync(testInfo.outputPath('storage-diagnostic.json'), JSON.stringify(audit,null,2)); }
 });
 
 test('dashboard compact shows only title and two actions while status and ignore still save', async ({page}, testInfo) => {
