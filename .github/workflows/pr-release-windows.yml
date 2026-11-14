@@ -222,7 +222,7 @@ jobs:
 
       - name: Run Python tests
         if: ${{ needs.selection.outputs.light != 'true' }}
-        run: uv run --no-sync python scripts/run_check.py --timeout 600 -- uv run --no-sync python scripts/run_tests.py --report .artifacts/windows-python.json --github-summary
+        run: uv run --no-sync python scripts/run_check.py --timeout 600 -- uv run --no-sync python scripts/run_tests.py --report .artifacts/windows-python.json --timings .artifacts/windows-python-timings.jsonl --github-summary
 
       - name: Require cache coverage from the same Python run
         if: ${{ needs.selection.outputs.light != 'true' }}
@@ -253,6 +253,7 @@ jobs:
           name: windows-preview-python-report
           path: |
             .artifacts/windows-python.json
+            .artifacts/windows-python-timings.jsonl
             .artifacts/windows-python.log
             .artifacts/checks/
           include-hidden-files: true
