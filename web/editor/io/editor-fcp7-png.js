@@ -1,3 +1,4 @@
+// Temporary CI leaf-selection probe.
 // PNG/WebP rendering uses the local task API. The export plan/ASS are captured before
 // the first await; polling and publication never reread mutable project data.
 export async function runFcp7PngExport({ plan, ass, layers, imageFormat = 'png', includeMedia, size, config, onProgress, signal }) {
