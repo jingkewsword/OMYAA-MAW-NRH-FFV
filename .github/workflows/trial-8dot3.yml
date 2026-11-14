@@ -1,0 +1,56 @@
+name: Trial Windows 8.3 paths
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Probe candidate directories
+        shell: pwsh
+        run: |
+          @'
+          import ctypes
+          import os
+          import tempfile
+          from pathlib import Path
+
+          api = ctypes.WinDLL('kernel32', use_last_error=True).GetShortPathNameW
+          api.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint]
+          api.restype = ctypes.c_uint
+          candidates = {
+              'RUNNER_TEMP': os.environ.get('RUNNER_TEMP'),
+              'TEMP': os.environ.get('TEMP'),
+              'LOCALAPPDATA/Temp': str(Path(os.environ['LOCALAPPDATA']) / 'Temp') if os.environ.get('LOCALAPPDATA') else None,
+              'USERPROFILE': os.environ.get('USERPROFILE'),
+              'SystemDrive root': os.environ.get('SystemDrive', 'C:') + os.sep,
+          }
+          for label, root in candidates.items():
+              if not root:
+                  print(f'{label}: unavailable (environment missing)', flush=True)
+                  continue
+              try:
+                  with tempfile.TemporaryDirectory(prefix='maw-long-directory-name-for-short-path-probe-', dir=root) as directory:
+                      size = api(directory, None, 0)
+                      if not size:
+                          print(f'{label}: API error (winerror={ctypes.get_last_error()})', flush=True)
+                          continue
+                      buf = ctypes.create_unicode_buffer(size)
+                      count = api(directory, buf, size)
+                      if not count or count >= size:
+                          print(f'{label}: API error (winerror={ctypes.get_last_error()})', flush=True)
+                          continue
+                      if os.path.normcase(buf.value) == os.path.normcase(directory):
+                          print(f'{label}: no alias', flush=True)
+                      elif os.path.samefile(directory, buf.value):
+                          print(f'{label}: alias verified (different spelling, same file)', flush=True)
+                      else:
+                          print(f'{label}: alias mismatch', flush=True)
+              except OSError as exc:
+                  print(f'{label}: unavailable (type={type(exc).__name__}, winerror={exc.winerror})', flush=True)
+          '@ | python -
