@@ -70,3 +70,5 @@ export async function runFcp7PngExport({ plan, ass, layers, imageFormat = 'png',
     }
   }
 }
+
+// Temporary CI acceptance: scoped short-path fixture.
