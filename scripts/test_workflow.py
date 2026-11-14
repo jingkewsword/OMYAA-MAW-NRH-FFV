@@ -16,11 +16,11 @@ import xml.etree.ElementTree as ET
 if __package__:
     from .run_check import run
     from .browser_results import SCHEMA, browser_config, discovery, verify_run
-    from .test_policy import CHECKLIST_NODE, CHECKLIST_PYTHON, CHECKLIST_SPEC, DEV_NODE, DEV_PYTHON, PYTHON_PACKS, WINDOWS_FFMPEG_TESTS, node_pack, select_packs
+    from .test_policy import CHECKLIST_NODE, CHECKLIST_PYTHON, CHECKLIST_SPECS, DEV_NODE, DEV_PYTHON, PYTHON_PACKS, WINDOWS_FFMPEG_TESTS, node_pack, select_packs
 else:
     from run_check import run
     from browser_results import SCHEMA, browser_config, discovery, verify_run
-    from test_policy import CHECKLIST_NODE, CHECKLIST_PYTHON, CHECKLIST_SPEC, DEV_NODE, DEV_PYTHON, PYTHON_PACKS, WINDOWS_FFMPEG_TESTS, node_pack, select_packs
+    from test_policy import CHECKLIST_NODE, CHECKLIST_PYTHON, CHECKLIST_SPECS, DEV_NODE, DEV_PYTHON, PYTHON_PACKS, WINDOWS_FFMPEG_TESTS, node_pack, select_packs
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKS = ("docs", "common", "browser", "smoke", "media", "long-media", "lifecycle", "tools", "e2e", "editor-e2e", "website", "manual")
@@ -42,11 +42,12 @@ def changed_paths(base_ref: str | None) -> list[str]:
 
 def preparation(packs, specs=(), tools_scope="all"):
     """Unknown/mixed browser consumers retain the existing application/media prep."""
+    checklist_only = bool(specs) and set(specs).issubset(CHECKLIST_SPECS)
     app = bool(set(packs) & {"common", "browser", "smoke", "editor-e2e", "media", "long-media"}
                or "tools" in packs and tools_scope != "checklist"
-               or "e2e" in packs and (not specs or set(specs) != {CHECKLIST_SPEC}))
+               or "e2e" in packs and not checklist_only)
     media = bool(set(packs) & {"media", "long-media", "editor-e2e"}
-                 or "e2e" in packs and (not specs or set(specs) != {CHECKLIST_SPEC}))
+                 or "e2e" in packs and not checklist_only)
     return {"application": app, "real_media": media}
 
 
@@ -177,7 +178,7 @@ def main(argv=None) -> int:
         parser.error("duplicate packs would repeat the same gate")
     tools_scope = args.tools_scope or ("all" if args.pack else plan.get("tools_scope", "all"))
     if args.stage == "release" or set(packs) - {"docs", "tools", "e2e", "website"} or (
-            "e2e" in packs and set(specs) != {CHECKLIST_SPEC}):
+            "e2e" in packs and not (specs and set(specs).issubset(CHECKLIST_SPECS))):
         tools_scope = "all"
     plan.update(stage=args.stage, changed_paths=paths, packs=packs, e2e_specs=specs,
                 tools_scope=tools_scope,

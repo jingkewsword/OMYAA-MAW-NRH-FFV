@@ -45,6 +45,8 @@ uv run --no-sync python scripts/test_workflow.py --stage merge --base-ref origin
 
 常规 Python 用例沿用本页归组。Node 顶层用例分 common、browser、lifecycle、tools；新文件默认 common。真实 E2E 选择现有消费者，不改其断言与 ESM helper。共享状态、host、history、boot 和未知叶子扩大完整浏览器，不能被随后追加的文档或局部 spec 缩小。
 
+清单源码改动会运行 `verification-checklist.spec.mjs`、`tool-compact.spec.mjs` 和 `tool-pages.spec.mjs`，覆盖清单本身、紧凑视图及生成页面。后两份 spec 也检查其他工具页面；混入其他浏览器消费者时，准备范围按混合改动扩大。
+
 `--stage dev` 只运行固定开发核心（`--component python/editor/launcher/all`），不代替改动影响回归。`--stage release` 本地运行完整 required 集合。`pnpm run test:dev/test:merge/test:release` 是同一入口的快捷命令。原无参数 Python runner 和 `pnpm run test:unit` 行为不变。
 
 显式复现可用 `--stage merge --pack media`；定向浏览器使用 `--pack e2e --e2e-specs '["tests/e2e/shared-tooltip.spec.mjs"]'`。完整浏览器用 `--pack editor-e2e`，不能与定向 e2e 同时指定。局部复现结果不代表整条分支准入。

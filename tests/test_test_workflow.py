@@ -22,6 +22,70 @@ from scripts.test_policy import ALL_MERGE, PYTHON_PACKS, select_packs
 
 
 class TestWorkflowTests(unittest.TestCase):
+    def test_cli_checklist_scope_and_mixed_browser_consumer(self):
+        source = 'tools/verification-checklist/build.py'
+        for extra, scope, prepared in (([], 'checklist', False),
+                                       (['--changed', 'tests/e2e/shared-tooltip.spec.mjs'], 'all', True)):
+            with self.subTest(scope=scope), contextlib.redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(test_workflow.main(['--stage', 'merge', '--changed', source, *extra, '--plan-only']), 0)
+            plan, _ = json.JSONDecoder().raw_decode(output.getvalue())
+            self.assertEqual(plan['tools_scope'], scope)
+            self.assertEqual(plan['preparation'], {'application': prepared, 'real_media': prepared})
+            self.assertTrue(set(test_policy.CHECKLIST_SPECS).issubset(plan['e2e_specs']))
+
+    def test_new_browser_consumers_follow_their_sources(self):
+        for path in ('web/editor/io/editor-fcp7-png.js', 'web/editor/io/editor-dynamic-exports.js', 'maw/fcp7_png.py'):
+            with self.subTest(path=path):
+                self.assertIn('tests/e2e/fcp7-png.spec.mjs', select_packs([path])['e2e_specs'])
+        specs = {'tests/e2e/verification-checklist.spec.mjs', 'tests/e2e/tool-compact.spec.mjs', 'tests/e2e/tool-pages.spec.mjs'}
+        for path in ('tools/verification-checklist/build.py', 'tools/verification-checklist/templates/verification-checklist.html'):
+            with self.subTest(path=path):
+                plan = select_packs([path, 'docs/INDEX.md'])
+                self.assertTrue(specs.issubset(plan['e2e_specs']))
+                self.assertEqual(plan['tools_scope'], 'checklist')
+                self.assertEqual(test_workflow.preparation(plan['packs'], plan['e2e_specs'], plan['tools_scope']),
+                                 {'application': False, 'real_media': False})
+
+    def test_marker_restore_and_ass_style_consumers_are_selected(self):
+        for path, spec in (
+            ('web/editor/markers/editor-marker-editing.js', 'tests/e2e/ai-cleanup-marker-restore.spec.mjs'),
+            ('web/editor/styles/editor-wiring-ass-storage.js', 'tests/e2e/warma-i18n.spec.mjs'),
+            ('web/shared/utils/ass-style.js', 'tests/e2e/warma-i18n.spec.mjs'),
+        ):
+            with self.subTest(path=path):
+                self.assertIn(spec, select_packs([path])['e2e_specs'])
+
+    def test_ass_presets_and_fcp7_specific_export_consumers(self):
+        for path in ('web/editor/styles/editor-wiring-ass-storage.js', 'web/shared/utils/ass-style.js'):
+            with self.subTest(path=path):
+                self.assertIn('tests/e2e/warma-presets.spec.mjs', select_packs([path])['e2e_specs'])
+        for path in ('web/shared/utils/export-plan.js', 'web/editor/io/editor-export-srt.js'):
+            with self.subTest(path=path):
+                self.assertTrue((ROOT / path).is_file())
+                self.assertIn('tests/e2e/fcp7-png.spec.mjs', select_packs([path])['e2e_specs'])
+        for path in ('web/editor/io/editor-export-timeline.js', 'web/editor/io/editor-sticker-otio-export.js'):
+            with self.subTest(path=path):
+                self.assertTrue((ROOT / path).is_file())
+                plan = select_packs([path])
+                self.assertIn('e2e', plan['packs'])
+                self.assertNotIn('tests/e2e/fcp7-png.spec.mjs', plan['e2e_specs'])
+
+    def test_new_real_media_cases_and_mock_peers_are_classified(self):
+        for module, cls, method in (
+            ('test_fcp7_png', 'RenderTests', None),
+            ('test_fcp7_png_api', 'PngJobHttpTests', 'test_render_publish_and_repeated_export_preserve_prior_package'),
+            ('test_waveform', 'WaveformExtractionTests', 'test_extraction_sends_stderr_to_a_file_not_a_pipe'),
+        ):
+            ids = test_policy.source_test_ids(ROOT / f'tests/{module}.py')
+            real = [name for name in ids if cls in name.split('.') and (method is None or name.endswith('.' + method))]
+            self.assertTrue(real)
+            self.assertEqual({test_policy.python_pack(name) for name in real}, {'media'})
+            pure = [name for name in ids if name not in real]
+            self.assertIn('common', {test_policy.python_pack(name) for name in pure})
+            plan = select_packs([f'tests/{module}.py'])
+            self.assertIn('media', plan['packs'])
+            self.assertTrue(test_workflow.preparation(plan['packs'])['real_media'])
+
     def test_launcher_and_alignment_select_their_cross_named_consumers(self):
         launcher = select_packs(["web/launcher/postprocess.js"])["e2e_specs"]
         for name in ("layout-feedback", "shared-tooltip", "script-timestamp-alignment", "recording-review"):
@@ -286,17 +350,16 @@ class TestWorkflowTests(unittest.TestCase):
         self.assertEqual(renamed["e2e_specs"], [])
 
     def test_checklist_source_keeps_its_real_browser_consumer(self):
-        spec = "tests/e2e/verification-checklist.spec.mjs"
         for path in ("tools/verification-checklist/build.py",
                      "tools/verification-checklist/templates/verification-checklist.html",
                      "tools/verification-checklist/examples/checklist.json"):
             with self.subTest(path=path):
                 plan = select_packs([path])
                 self.assertEqual(plan["packs"], ["docs", "e2e", "tools"])
-                self.assertEqual(plan["e2e_specs"], [spec])
+                self.assertEqual(plan["e2e_specs"], sorted(test_policy.CHECKLIST_SPECS))
                 self.assertFalse(plan["preview"])
         mixed = select_packs(["tools/verification-checklist/build.py", "tests/e2e/shared-tooltip.spec.mjs"])
-        self.assertEqual(mixed["e2e_specs"], sorted([spec, "tests/e2e/shared-tooltip.spec.mjs"]))
+        self.assertEqual(mixed["e2e_specs"], sorted([*test_policy.CHECKLIST_SPECS, "tests/e2e/shared-tooltip.spec.mjs"]))
         shared = select_packs(["tools/verification-checklist/build.py", "uv.lock"])
         self.assertTrue(ALL_MERGE.issubset(shared["packs"]))
         self.assertEqual(shared["e2e_specs"], [])
@@ -334,8 +397,8 @@ class TestWorkflowTests(unittest.TestCase):
                     self.assertIn("docs-regressions", names)
                 if "e2e" in plan["packs"]:
                     self.assertIn("browser-regressions", names)
-                    self.assertEqual(next(cmd for name, cmd, _ in steps if name == "browser-regressions")[-1],
-                                     test_policy.CHECKLIST_SPEC)
+                    self.assertEqual(set(next(cmd for name, cmd, _ in steps if name == "browser-regressions")[-len(plan['e2e_specs']):]),
+                                     set(plan['e2e_specs']))
 
     def test_checklist_mixed_unknown_and_release_scopes_broaden(self):
         source = "tools/verification-checklist/build.py"
