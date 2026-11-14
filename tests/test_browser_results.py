@@ -110,7 +110,7 @@ class BrowserResultsTests(unittest.TestCase):
 
     def test_missing_selector_flags_and_failed_required_jobs_cannot_pass(self):
         outputs = {flag: "false" for flag in FLAGS}
-        outputs.update(tools_scope="all", e2e_specs="[]")
+        outputs.update(tools_scope="all", e2e_specs="[]", light="false")
         jobs = {"selection": {"result": "success", "outputs": outputs}, "documentation": {"result": "success"}, "debug-tools": {"result": "success"}, "upstream-editor": {"result": "success"}}
         self.assertEqual(check_gate(jobs), [])
         for malformed in ({}, {**outputs, "media": ""}, {**outputs, "app": "false", "editor_e2e": "true"}):

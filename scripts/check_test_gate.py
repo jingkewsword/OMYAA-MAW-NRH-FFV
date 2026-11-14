@@ -17,6 +17,10 @@ def check_gate(jobs: dict) -> list[str]:
     outputs = jobs["selection"]["outputs"]
     if any(outputs.get(flag) not in ("true", "false") for flag in FLAGS):
         raise ValueError("Missing or invalid required selector flags")
+    if outputs.get("light") not in ("true", "false"):
+        raise ValueError("Missing or invalid upstream light selection")
+    if outputs["light"] == "true" and outputs["website"] != "true":
+        raise ValueError("Upstream light selection requires website verification")
     if outputs.get("tools_scope") not in {"all", "checklist"}:
         raise ValueError("Missing or invalid tool consumer scope")
     specs = json.loads(outputs["e2e_specs"])

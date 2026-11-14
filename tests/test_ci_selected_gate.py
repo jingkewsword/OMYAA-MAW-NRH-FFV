@@ -2,6 +2,10 @@
 from __future__ import annotations
 
 import json
+import os
+import shlex
+import subprocess
+import sys
 import contextlib
 import copy
 import io
@@ -24,7 +28,7 @@ def outputs(*packs, specs="[]", scope="all"):
     flags["app"] = str(bool(set(packs) - {"docs", "website"})).lower()
     flags.update({key: str(value).lower() for key, value in
                   test_workflow.preparation(packs, json.loads(specs), scope).items()})
-    flags.update(tools_scope=scope, e2e_specs=specs)
+    flags.update(tools_scope=scope, e2e_specs=specs, light="false")
     return flags
 
 
@@ -62,6 +66,82 @@ class RequiredGateTests(unittest.TestCase):
         state = jobs("docs")
         del state["upstream-editor"]
         self.assertIn("upstream-editor", check_gate(state))
+
+    def test_light_selection_requires_valid_output_and_successful_website(self):
+        state = jobs("docs", "website")
+        state["selection"]["outputs"]["light"] = "true"
+        self.assertEqual(check_gate(state), [])
+        for result in (None, "failure", "cancelled", "skipped"):
+            changed = copy.deepcopy(state)
+            if result is None:
+                del changed["website"]
+            else:
+                changed["website"]["result"] = result
+            self.assertIn("website", check_gate(changed))
+        for light in (None, "", "yes"):
+            changed = jobs("docs")
+            if light is None:
+                del changed["selection"]["outputs"]["light"]
+            else:
+                changed["selection"]["outputs"]["light"] = light
+            with self.assertRaises(ValueError):
+                check_gate(changed)
+        changed = jobs("docs")
+        changed["selection"]["outputs"]["light"] = "true"
+        with self.assertRaises(ValueError):
+            check_gate(changed)
+
+    def test_upstream_light_paths_select_website_and_full_boundaries_stay_full(self):
+        from scripts.ci_impact import light_path
+        from scripts.test_policy import select_packs
+        light_paths = ("README.md", "docs/INDEX.md", "website/README.md", "docs/user/FAQ.md",
+                       "website/src/index.astro", "website/public/logo.svg", "website/docs/PROJECT_BRIEF.md")
+        for path in light_paths:
+            with self.subTest(path=path):
+                self.assertTrue(light_path(path))
+                self.assertIn("website", select_packs([path])["packs"])
+        for path in ("website/src/pages/docs/generated.md", "website/public/docs-assets/a.png",
+                     "docs/engineering/DEVELOPMENT.md", "maw/project.py"):
+            with self.subTest(path=path):
+                self.assertFalse(light_path(path))
+        self.assertFalse(all(light_path(path) for path in ("README.md", "maw/project.py")))
+        self.assertIn("website", select_packs([])["packs"])
+
+    def test_upstream_selector_falls_back_to_full_on_bad_diff_or_mixed_paths(self):
+        from scripts import ci_impact
+        base = "a" * 40
+        scenarios = (([base + "\n", b"README.md\0docs/user/FAQ.md\0"], "true"),
+                     ([base + "\n", b"README.md\0maw/project.py\0"], "false"),
+                     (["b" * 40 + "\n"], "false"),
+                     ([base + "\n", OSError("diff failed")], "false"))
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "outputs"
+            for replies, expected in scenarios:
+                output.write_text("", encoding="utf-8")
+                with self.subTest(expected=expected, replies=str(replies)), \
+                        patch.dict("os.environ", {"PR_BASE_SHA": base, "GITHUB_EVENT_NAME": "pull_request", "GITHUB_OUTPUT": str(output)}), \
+                        patch.object(ci_impact.subprocess, "check_output", side_effect=replies), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    ci_impact.main()
+                self.assertEqual(output.read_text(encoding="utf-8").strip(), f"light={expected}")
+            output.write_text("", encoding="utf-8")
+            with patch.dict("os.environ", {"PR_BASE_SHA": base, "GITHUB_EVENT_NAME": "push", "GITHUB_OUTPUT": str(output)}), \
+                    patch.object(ci_impact.subprocess, "check_output") as git, contextlib.redirect_stdout(io.StringIO()):
+                ci_impact.main()
+            self.assertEqual(output.read_text(encoding="utf-8").strip(), "light=false")
+            git.assert_not_called()
+
+    def test_light_website_is_single_consumer_and_full_job_remains(self):
+        workflow = (ROOT / ".github/workflows/editor-checks.yml").read_text(encoding="utf-8")
+        upstream = workflow.split("\n  upstream-editor:\n", 1)[1].split("\n  documentation:\n", 1)[0]
+        website = workflow.split("\n  website:\n", 1)[1].split("\n  browser-gates:\n", 1)[0]
+        self.assertIn("if: ${{ always() }}", upstream)
+        self.assertIn("needs.selection.outputs.light != 'true'", upstream)
+        self.assertNotIn("Verify website document consumers", upstream)
+        self.assertIn("uses: actions/setup-python@v6", website)
+        self.assertIn("python-version: '3.11'", website)
+        self.assertIn("tests/test_readme_content_sync.mjs", website)
+        self.assertIn("--pack website", website)
 
     def test_selection_failure_never_succeeds_even_with_valid_outputs(self):
         for result in ("failure", "cancelled", "skipped"):
@@ -124,6 +204,32 @@ class RequiredGateTests(unittest.TestCase):
         for name in ("editor", "posix-contracts", "browser-gates", "website"):
             state[name]["result"] = "skipped"
         self.assertEqual(check_gate(state), [])
+
+
+class EditorCompatibilityCheckTests(unittest.TestCase):
+    def test_compatibility_check_always_requires_actual_gate_success(self):
+        workflow = (ROOT / ".github/workflows/editor-checks.yml").read_text(encoding="utf-8")
+        windows = workflow.split("\n  editor:\n", 1)[1].split("\n  posix-contracts:\n", 1)[0]
+        gate = workflow.split("\n  test-gate:\n", 1)[1].split("\n  editor-compat:\n", 1)[0]
+        compat = workflow.split("\n  editor-compat:\n", 1)[1]
+        self.assertIn("name: Windows selected tests", windows)
+        self.assertIn("name: Required test gate", gate)
+        self.assertIn("name: editor", compat)
+        self.assertIn("if: ${{ always() }}", compat)
+        self.assertIn("needs: test-gate", compat)
+        self.assertIn("TEST_GATE_RESULT: ${{ needs.test-gate.result }}", compat)
+        self.assertIn("needs: [selection, debug-tools, upstream-editor, documentation, editor, posix-contracts, browser-gates, website]", gate)
+        self.assertIn("RESULTS: ${{ toJSON(needs) }}", gate)
+        self.assertNotIn("editor-compat", gate)
+        self.assertEqual(workflow.count("    name: editor\n"), 1)
+        command = next(line.strip()[5:] for line in compat.splitlines() if line.strip().startswith("run: "))
+        args = shlex.split(command)
+        self.assertEqual(args[0], "python")
+        args[0] = sys.executable
+        for result in ("success", "failure", "cancelled", "skipped", "", "unknown"):
+            with self.subTest(result=result):
+                completed = subprocess.run(args, env={**os.environ, "TEST_GATE_RESULT": result}, capture_output=True)
+                self.assertEqual(completed.returncode == 0, result == "success")
 
 
 class PlatformCoverageTests(unittest.TestCase):

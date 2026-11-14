@@ -221,36 +221,6 @@ jobs:
           MAW_E2E_PYTHON: ${{ github.workspace }}/.venv/bin/python
         run: uv run --no-sync python scripts/run_check.py --timeout 300 -- node node_modules/@playwright/test/cli.js test --config=tests/config/playwright.config.mjs --project=chromium tests/e2e/tool-pages.spec.mjs tests/e2e/tool-compact.spec.mjs tests/e2e/tool-markdown.spec.mjs tests/e2e/timestamp-compare.spec.mjs tests/e2e/verification-checklist.spec.mjs tests/e2e/term-report.spec.mjs tests/e2e/changelog-write-lock.spec.mjs
 
-      # README and user guides are website inputs, not just Markdown files.
-      - name: Set up website pnpm
-        if: ${{ needs.selection.outputs.light == 'true' }}
-        uses: pnpm/action-setup@v6
-        with:
-          version: 11.28.4
-          run_install: false
-      - name: Set up website Node
-        if: ${{ needs.selection.outputs.light == 'true' }}
-        uses: actions/setup-node@v5
-        with:
-          node-version: '22.23.4'
-          cache: pnpm
-          cache-dependency-path: website/pnpm-lock.yaml
-      - name: Set up website Python
-        if: ${{ needs.selection.outputs.light == 'true' }}
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.11'
-      - name: Install website dependencies
-        if: ${{ needs.selection.outputs.light == 'true' }}
-        run: pnpm --dir website install --frozen-lockfile
-      - name: Verify website document consumers
-        if: ${{ needs.selection.outputs.light == 'true' }}
-        run: |
-          node --test tests/test_readme_content_sync.mjs
-          pnpm --dir website run sync:docs
-          python scripts/build_release_site.py --preview
-          pnpm --dir website run build
-
   documentation:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -269,6 +239,7 @@ jobs:
           retention-days: 7
 
   editor:
+    name: Windows selected tests
     needs: selection
     if: needs.selection.outputs.app == 'true'
     runs-on: windows-2022
@@ -492,6 +463,9 @@ jobs:
     timeout-minutes: 8
     steps:
       - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
       - uses: pnpm/action-setup@v6
         with:
           version: 11.28.4
@@ -540,3 +514,17 @@ jobs:
           RESULTS: ${{ toJSON(needs) }}
         run: |
           python scripts/check_test_gate.py
+
+  editor-compat:
+    name: editor
+    if: ${{ always() }}
+    needs: test-gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Require the complete test gate
+        env:
+          TEST_GATE_RESULT: ${{ needs.test-gate.result }}
+        run: python -c 'import os,sys; sys.exit(0 if os.environ.get("TEST_GATE_RESULT") == "success" else 1)'
