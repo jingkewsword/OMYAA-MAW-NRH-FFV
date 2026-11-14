@@ -35,13 +35,27 @@ def browser_config(report: dict) -> dict:
             "workers": 2, "fullyParallel": False, "forbidOnly": True, "retries": 0}
 
 
-def discovery(report: dict) -> list[str]:
+def discovery(report: dict, required_specs=()) -> list[str]:
     browser_config(report)
     if report.get("errors"):
         raise ValueError("Browser discovery contains errors")
     cases = browser_cases(report)
     if any(test["expectedStatus"] != "passed" for test in cases.values()):
         raise ValueError("Required browser discovery contains skipped or expected-failure cases")
+    if required_specs:
+        files = set()
+        def visit(suite):
+            for spec in suite.get("specs", []):
+                if spec.get("tests"):
+                    files.add(spec["file"].replace("\\", "/"))
+            for child in suite.get("suites", []):
+                visit(child)
+        for suite in report["suites"]:
+            visit(suite)
+        missing = sorted(path.removeprefix("tests/e2e/") for path in required_specs
+                         if path.removeprefix("tests/e2e/") not in files)
+        if missing:
+            raise ValueError(f"Required spec has no discovered cases: {', '.join(missing)}")
     # --list reports every case as unexecuted/skipped. This is a planned set,
     # never runtime success; runtime requires an actual passing result below.
     return sorted(cases)

@@ -22,6 +22,16 @@ def sample_report(ids=("one", "two")):
             "stats": {"expected": len(ids), "unexpected": 0, "skipped": 0, "flaky": 0}}
 
 class BrowserResultsTests(unittest.TestCase):
+    def test_each_explicit_spec_contributes_a_discovered_case(self):
+        report = sample_report()
+        report["suites"][0]["specs"][0]["file"] = "one.spec.mjs"
+        report["suites"][0]["specs"][1]["file"] = "two.spec.mjs"
+        self.assertEqual(discovery(report, ["tests/e2e/one.spec.mjs", "tests/e2e/two.spec.mjs"]),
+                         discovery(report))
+        report["suites"][0]["specs"].pop()
+        with self.assertRaisesRegex(ValueError, "spec.*no discovered cases"):
+            discovery(report, ["tests/e2e/one.spec.mjs", "tests/e2e/two.spec.mjs"])
+
     def test_unexecuted_discovery_cannot_be_a_runtime_pass(self):
         report = sample_report()
         for spec in report["suites"][0]["specs"]:

@@ -22,6 +22,41 @@ from scripts.test_policy import ALL_MERGE, PYTHON_PACKS, select_packs
 
 
 class TestWorkflowTests(unittest.TestCase):
+    def test_release_rejects_partial_pack_override(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            test_workflow.main(["--stage", "release", "--pack", "docs", "--changed", "README.md", "--plan-only"])
+
+    def test_changed_paths_includes_staged_changes_even_if_worktree_reverts_them(self):
+        def run(args, **_kwargs):
+            if "--cached" in args:
+                return SimpleNamespace(stdout=b"web/editor/changed.js\0")
+            if args[1] == "diff":
+                return SimpleNamespace(stdout=b"README.md\0")
+            return SimpleNamespace(stdout=b"")
+        with patch.object(test_workflow.subprocess, "run", side_effect=run):
+            self.assertEqual(test_workflow.changed_paths(None), ["README.md", "web/editor/changed.js"])
+
+    def test_imported_load_tests_hook_broadens_selection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "test_dynamic.py"
+            source.write_text("from helper import load_tests\nclass Existing:\n    def test_basic(self): pass\n", encoding="utf-8")
+            self.assertEqual(test_policy.source_test_ids(source), [])
+
+    def test_changed_website_sync_script_checks_its_selection_contract(self):
+        plan = select_packs(["website/scripts/sync-maw-docs.mjs"])
+        self.assertTrue({"website", "tools"}.issubset(plan["packs"]))
+
+    def test_missing_browser_spec_broadens_to_all_required_consumers(self):
+        with patch.object(test_policy, "spec_scope", return_value="missing"):
+            plan = select_packs(["tests/e2e/verification-checklist.spec.mjs"])
+        self.assertTrue(ALL_MERGE.issubset(plan["packs"]))
+        self.assertTrue(plan["preview"])
+
+    def test_selected_node_pack_cannot_succeed_when_its_files_are_missing(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(test_workflow, "ROOT", Path(directory)):
+            with self.assertRaisesRegex(ValueError, "No Node tests found"):
+                list(test_workflow.commands(["browser"], Path(directory)))
+
     def test_dev_all_includes_each_component_kernel(self):
         all_gates = [name for name, _, _ in test_workflow.commands([], ROOT, dev=True, component="all")]
         separate = [name for component in ("python", "editor", "launcher")
@@ -500,6 +535,8 @@ class TestWorkflowTests(unittest.TestCase):
             "missing": None,
             "empty": "<testsuites><testsuite/></testsuites>",
             "skipped": '<testsuites><testsuite><testcase name="boundary"><skipped/></testcase></testsuite></testsuites>',
+            "failed": '<testsuites><testsuite><testcase name="boundary"><failure/></testcase></testsuite></testsuites>',
+            "error": '<testsuites><testsuite><testcase name="boundary"><error/></testcase></testsuite></testsuites>',
             "passed": '<testsuites><testsuite><testcase name="boundary"/></testsuite></testsuites>',
         }
         for outcome, xml in reports.items():

@@ -27,9 +27,12 @@ PACKS = ("docs", "common", "browser", "smoke", "media", "long-media", "lifecycle
 
 
 def changed_paths(base_ref: str | None) -> list[str]:
-    args = ["git", "diff", "--name-only", "--no-renames", "-z", f"{base_ref}...HEAD" if base_ref else "HEAD"]
-    result = subprocess.run(args, cwd=ROOT, capture_output=True, check=True)
-    paths = [p for p in result.stdout.decode("utf-8").split("\0") if p]
+    args = ["git", "diff", "--name-only", "--no-renames", "-z"]
+    comparisons = [[*args, f"{base_ref}...HEAD"]] if base_ref else [args, [*args, "--cached"]]
+    paths = []
+    for comparison in comparisons:
+        result = subprocess.run(comparison, cwd=ROOT, capture_output=True, check=True)
+        paths.extend(p for p in result.stdout.decode("utf-8").split("\0") if p)
     if not base_ref:
         untracked = subprocess.run(["git", "ls-files", "--others", "--exclude-standard", "-z"],
                                   cwd=ROOT, capture_output=True, check=True)
@@ -86,9 +89,10 @@ def commands(packs: list[str], report_dir: Path, *, dev: bool = False, component
             targets = [str(p.relative_to(ROOT)) for p in sorted((ROOT / "tests").glob("*.mjs")) if node_pack(p.name) == pack]
             if pack == "tools" and tools_scope == "checklist":
                 targets = [CHECKLIST_NODE]
-            if targets:
-                yield f"node-{pack}", [node, "--test", "--test-reporter=spec", "--test-reporter-destination=stdout",
-                       "--test-reporter=junit", f"--test-reporter-destination={report_dir / ('node-' + pack + '.xml')}", *targets], 240
+            if not targets:
+                raise ValueError(f"No Node tests found for required pack: {pack}")
+            yield f"node-{pack}", [node, "--test", "--test-reporter=spec", "--test-reporter-destination=stdout",
+                   "--test-reporter=junit", f"--test-reporter-destination={report_dir / ('node-' + pack + '.xml')}", *targets], 240
         if pack == "smoke":
             yield "editor-http-smoke", [*playwright, "--reporter=line,json", f"--output={report_dir / 'smoke-artifacts'}", "tests/e2e/editor-bundle.spec.mjs", "tests/e2e/editor-transactions.spec.mjs"], 300
         if pack == "editor-e2e":
@@ -123,7 +127,8 @@ def prepare_browser(name, command, directory, specs, selection, results):
         if result["exit_code"]:
             raise ValueError(f"Browser discovery failed; log={result['log']}")
         report = json.loads(report_path.read_text(encoding="utf-8"))
-        return report, discovery(report)
+        required_specs = [arg for arg in command if arg.startswith("tests/e2e/") and arg.endswith(".spec.mjs")]
+        return report, discovery(report, required_specs)
 
     full_report, full_ids = capture("full", full_command)
     if not full_ids:
@@ -150,6 +155,8 @@ def main(argv=None) -> int:
     parser.add_argument("--e2e-specs", help="JSON concrete spec paths for an explicit e2e pack")
     parser.add_argument("--tools-scope", choices=("all", "checklist"), help="explicit tool consumer scope for reproduction")
     args = parser.parse_args(argv)
+    if args.stage == "release" and args.pack:
+        parser.error("release runs the full required set; use --stage merge for a partial pack")
     os.chdir(ROOT)
     paths = args.changed if args.changed is not None else changed_paths(args.base_ref)
     plan = select_packs(paths, release=args.stage == "release")
@@ -205,7 +212,14 @@ def main(argv=None) -> int:
     for key in ("TEMP", "TMP", "TMPDIR"):
         os.environ[key] = str(temp)
     results = []
-    for name, command, timeout in commands(packs, output_dir, dev=args.stage == "dev" and not args.pack, component=args.component, specs=specs, tools_scope=tools_scope):
+    try:
+        steps = list(commands(packs, output_dir, dev=args.stage == "dev" and not args.pack, component=args.component, specs=specs, tools_scope=tools_scope))
+    except ValueError as error:
+        report = {"status": "invalid-plan", "error": str(error), "exit_code": 1, "plan": plan}
+        (output_dir / "summary.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        print(str(error))
+        return 1
+    for name, command, timeout in steps:
         browser_record = None
         if name in {"editor-http-smoke", "browser-regressions"}:
             try:
@@ -223,8 +237,8 @@ def main(argv=None) -> int:
         try:
             if not code and name.startswith("node-"):
                 xml = ET.parse(output_dir / f"{name}.xml")
-                if not xml.findall(".//testcase") or xml.findall(".//skipped"):
-                    raise ValueError("Required Node report is empty or contains skipped cases")
+                if not xml.findall(".//testcase") or any(xml.findall(f".//{tag}") for tag in ("skipped", "failure", "error")):
+                    raise ValueError("Required Node report is empty or contains non-passing cases")
             if not code and browser_record:
                 report = json.loads(browser_report.read_text(encoding="utf-8"))
                 if browser_config(report) != browser_record["scope"]["config"]:
@@ -240,7 +254,7 @@ def main(argv=None) -> int:
         if browser_record:
             if code:
                 browser_record["status"] = "failed"
-            (output_dir / "browser-run.json").write_text(json.dumps(browser_record, indent=2) + "\n", encoding="utf-8")
+            (output_dir / f"{name}-browser-run.json").write_text(json.dumps(browser_record, indent=2) + "\n", encoding="utf-8")
         results.append(result)
         if code:
             print("\n".join(dict.fromkeys(result["diagnostics"] + result["tail"])))

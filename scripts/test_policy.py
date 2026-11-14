@@ -96,8 +96,10 @@ def source_test_ids(path: Path) -> list[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"))
     # unittest lets this hook replace or augment the discovered suite, so
     # statically visible methods cannot establish its complete ownership.
-    if any(isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "load_tests"
-           for node in tree.body):
+    if any((isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "load_tests")
+           or (isinstance(node, ast.Name) and node.id == "load_tests" and isinstance(node.ctx, ast.Store))
+           or (isinstance(node, ast.alias) and (node.asname or node.name.split(".")[0]) in {"load_tests", "*"})
+           for node in ast.walk(tree)):
         return []
     return [f"{path.stem}.{cls.name}.{method.name}" for cls in tree.body if isinstance(cls, ast.ClassDef)
             for method in cls.body if isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef))
@@ -117,7 +119,9 @@ def allowed_platform_skip(test_id: str, reason: str) -> bool:
             or identity == "test_gui_web.GuiWebBridgeTests.test_open_output_folder_uses_startfile_on_windows"
             and reason == "os.startfile 仅 Windows 可用；os.name 补丁会让 pathlib 选择 WindowsPath"
             or identity == "test_local_log.DefaultLogDirectoryTests.test_uses_localappdata_namespace"
-            and reason == "LOCALAPPDATA 变量仅为 Windows 语义")
+            and reason == "LOCALAPPDATA 变量仅为 Windows 语义"
+            or identity == "test_term_extract_fixture_paths.FixturePathTests.test_real_short_path_fixture_reaches_publication_failure_injections"
+            and reason == "Windows 8.3 paths only")
 
 ALL_MERGE = {"common", "browser", "smoke", "media", "long-media", "lifecycle", "tools", "editor-e2e", "website"}
 SITE_EXTRA_DOCUMENTS = {
@@ -217,6 +221,9 @@ def select_packs(paths: list[str], *, release: bool = False) -> dict:
             if path in SCHEMA_PATHS or path.startswith("docs/") and not path.endswith(".md"):
                 selected.update(ALL_MERGE)
             continue
+        if path == "website/scripts/sync-maw-docs.mjs":
+            selected.update({"website", "tools"})
+            continue
         if path.startswith("website/"):
             selected.add("website")
             continue
@@ -234,8 +241,9 @@ def select_packs(paths: list[str], *, release: bool = False) -> dict:
                 e2e_specs.add(path)
                 reasons.append(f"independent browser spec: {path}")
             elif scope == "missing":
-                selected.add("editor-e2e")
-                reasons.append(f"missing browser spec: {path}")
+                selected.update(ALL_MERGE)
+                preview = True
+                reasons.append(f"missing browser spec and its consumers: {path}")
             else:
                 selected.update(ALL_MERGE)
                 reasons.append(f"shared or unrecognized spec consumers: {path}")
