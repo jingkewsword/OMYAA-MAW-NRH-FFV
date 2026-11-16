@@ -601,7 +601,7 @@ test('search clear, native focus order and row diff layout stay usable at narrow
   await page.locator('#timed-text-edit-modal').screenshot({path: testInfo.outputPath('timed-text-narrow.png')});
 });
 
-test('timed-text view preference survives save and reopen and rows is omitted', async ({ page }) => {
+test('timed-text view preference survives save and reopen for both views', async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('moy.asr.editor.onboarding.v1', 'completed'));
   await page.goto(server.url);
   await page.evaluate(() => { MaweSettings.EDITOR_SETTINGS.autoSaveProject = false; });
@@ -616,12 +616,12 @@ test('timed-text view preference survives save and reopen and rows is omitted', 
   await expect(page.locator('#timed-text-edit-single-textarea')).toBeVisible();
   await page.locator('#timed-text-edit-view [data-view="rows"]').click();
   expect(await page.evaluate(() => MaweServerSave.hasUnsavedProjectChanges())).toBe(true);
-  expect(await page.evaluate(() => JSON.parse(MaweJsonRepair.buildJson()).timed_text_edit_view)).toBeUndefined();
+  expect(await page.evaluate(() => JSON.parse(MaweJsonRepair.buildJson()).timed_text_edit_view)).toBe('rows');
   expect(await page.evaluate(() => MaweProjectSave.saveProjectToServer())).toBe(true);
   await page.reload();
   await page.locator('#timed-text-edit-btn').click();
   await expect(page.locator('#timed-text-edit-rows')).toBeVisible();
-  expect(await page.evaluate(() => MaweBoot.DATA.timed_text_edit_view)).toBeUndefined();
+  expect(await page.evaluate(() => MaweBoot.DATA.timed_text_edit_view)).toBe('rows');
 });
 
 test('unavailable single view falls back only at runtime and loading another project clears its preference', async ({ page }) => {
