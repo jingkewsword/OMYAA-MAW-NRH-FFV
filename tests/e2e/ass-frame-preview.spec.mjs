@@ -643,11 +643,11 @@ test('overlays the sticker layer on the actual frame window following the previe
   // 尚未绑定表情包：图层保持隐藏。
   await expect(layer).toBeHidden();
 
-  // 注入覆盖整句的表情包区间（等价分配后的 head.sticker 数据并推进区间版本）。
+  // 为主字幕分配表情包组，并推进区间版本。
   await page.evaluate(() => {
-    window.MaweBoot.DATA.segments[0].sticker = {
-      name: 'demo', filename: 'demo.png', rel: 'demo.png', start: 1000, end: 2800,
-    };
+    const project = window.MaweBoot.DATA;
+    AsrEditorUtils.assignSubtitleGroup(project, AsrEditorUtils.getMainTrack(project).segments, [0], 'sticker',
+      { name: 'demo', filename: 'demo.png', rel: 'demo.png' });
     window.MaweStickerOverlay.stickerOverlayDataVersion += 1;
     window.MaweAssFrame.syncWindowStickers();
   });
