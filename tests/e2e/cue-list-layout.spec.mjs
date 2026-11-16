@@ -29,18 +29,20 @@ test.afterAll(async () => {
   cleanupTempDir(tempDir);
 });
 
-test('subtitle toolbar label returns after the pane is widened', async ({ page }, testInfo) => {
+test('subtitle toolbar label stays on one line while the pane is resized', async ({ page }, testInfo) => {
   await page.goto(server.url);
+  const cueList = page.locator('#cues-container');
   const toolbar = page.locator('.cues-container > .cue-list-toolbar');
   const label = toolbar.locator(':scope > .layout-toolbar-label');
-  await toolbar.evaluate(element => { element.style.width = '180px'; });
-  await expect(label).toBeHidden();
-  await toolbar.evaluate(element => { element.style.width = '1100px'; });
-  await expect(label).toBeVisible();
-  await toolbar.evaluate(element => { element.style.width = '180px'; });
-  await expect(label).toBeHidden();
-  await toolbar.evaluate(element => { element.style.width = '1100px'; });
-  await expect(label).toBeVisible();
+  const settings = toolbar.locator(':scope > .settings-anchor button').first();
+  for (const width of [320, 900, 320, 900]) {
+    await cueList.evaluate((element, value) => { Object.assign(element.style, {
+      position: 'fixed', inset: '0 auto auto 0', width: `${value}px`, height: '400px', zIndex: '9999',
+    }); }, width);
+    await expect(label).toBeVisible();
+    await expect(label).toHaveCSS('white-space', 'nowrap');
+    await expect(settings).toBeInViewport();
+  }
   await toolbar.screenshot({ path: testInfo.outputPath('subtitle-label-restored.png') });
 });
 
