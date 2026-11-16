@@ -73,10 +73,29 @@ class MossRuntimeConstantTests(unittest.TestCase):
 class MossRuntimePathTests(unittest.TestCase):
     def test_default_root_uses_dedicated_moss_directory(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            with mock.patch.dict(os.environ, {"MAW_APP_DATA_ROOT": str(Path(temp_dir) / "app")}):
-                root = default_runtime_root()
+            app_root = (Path(temp_dir) / "非ASCII" / "app").resolve()
+            with mock.patch.dict(os.environ, {
+                "MAW_APP_DATA_ROOT": str(app_root),
+                "MAW_LOCAL_RUNTIME_ROOT": "",
+                "MAW_MOSS_RUNTIME_ROOT": "",
+            }):
+                # Directory selection is tested here; path conversion has its own tests.
+                with mock.patch("maw.runtimes.base.pathwin.ensure_ascii_root", side_effect=lambda path, **_kwargs: path) as ensure_ascii:
+                    root = default_runtime_root()
+            ensure_ascii.assert_called_once_with(app_root / "local-runtime-moss", dir_name="local-runtime-moss")
         self.assertEqual(root.name, "local-runtime-moss")
-        self.assertEqual(root.parent, (Path(temp_dir) / "app").resolve())
+        self.assertEqual(root.parent, app_root)
+
+    def test_default_root_ignores_inherited_runtime_overrides(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            for keys in (("MAW_LOCAL_RUNTIME_ROOT",), ("MAW_MOSS_RUNTIME_ROOT",),
+                         ("MAW_LOCAL_RUNTIME_ROOT", "MAW_MOSS_RUNTIME_ROOT")):
+                with self.subTest(keys=keys), mock.patch.dict(os.environ):
+                    os.environ.pop("MAW_LOCAL_RUNTIME_ROOT", None)
+                    os.environ.pop("MAW_MOSS_RUNTIME_ROOT", None)
+                    for key in keys:
+                        os.environ[key] = str(Path(temp_dir) / key)
+                    self.test_default_root_uses_dedicated_moss_directory()
 
     def test_override_root_uses_own_env_variable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -108,15 +127,15 @@ class MossRuntimePathTests(unittest.TestCase):
                 root = default_runtime_root()
         self.assertEqual(root, base.with_name(f"{base.name}-moss").resolve())
 
-    def test_local_override_at_drive_root_falls_back_to_default_dir_name(self) -> None:
-        """LOCAL 键指向盘符根时派生不崩溃，回落默认目录名（``D:\\local-runtime-moss``）。"""
-        drive = Path(f"{os.environ.get('SystemDrive', 'C:')}\\")
+    def test_local_override_at_filesystem_root_falls_back_to_default_dir_name(self) -> None:
+        """LOCAL 键指向当前平台的文件系统根目录时，回落默认目录名。"""
+        root_dir = Path(Path.cwd().anchor)
         with mock.patch.dict(os.environ, {
-            "MAW_LOCAL_RUNTIME_ROOT": str(drive),
+            "MAW_LOCAL_RUNTIME_ROOT": str(root_dir),
             "MAW_MOSS_RUNTIME_ROOT": "",
         }):
             root = default_runtime_root()
-        self.assertEqual(root, drive / "local-runtime-moss")
+        self.assertEqual(root, root_dir / "local-runtime-moss")
 
     def test_moss_env_takes_priority_over_local_derivation(self) -> None:
         """MOSS 独立键优先于 LOCAL 键派生（保留高级覆盖与未来独立字段扩展位）。"""

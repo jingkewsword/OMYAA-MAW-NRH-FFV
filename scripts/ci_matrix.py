@@ -21,6 +21,7 @@ else:
     from test_policy import allowed_platform_skip, python_pack
 
 SYSTEMS = ("ubuntu-latest", "windows-latest")
+TONE30_ID = "test_reapeaks_fixture.LongMediaGeneratedFixtureTests.test_tone30_generated_matches_fixture"
 
 
 def validate_plan(value: dict) -> dict:
@@ -80,7 +81,8 @@ def gate(plan: dict, needs: dict, receipts: list[dict]) -> None:
             if (set(reports) != {"python.json", "media-required.json"}
                     or any(reports[name].get("validated") is not True
                            or reports[name].get("required") is not required
-                           for name, required in (("python.json", False), ("media-required.json", True)))):
+                           for name, required in (("python.json", False), ("media-required.json", True)))
+                    or reports["python.json"].get("tone30_verified") is not True):
                 raise ValueError("Python receipt lacks validated full/required report evidence")
 
 
@@ -155,6 +157,20 @@ def python_evidence(root: Path) -> dict:
         reports[name] = json.loads(raw)
         evidence[name] = {**validate_python_report(reports[name], required=required),
                           "sha256": hashlib.sha256(raw).hexdigest()}
+    # Full discovery already generated the 30-minute fixture. Verify that exact
+    # case here instead of paying for a second long-media run in each cell.
+    full = reports["python.json"]
+    selected = [identity.removeprefix("tests.") for identity in full["selected_ids"]]
+    if selected.count(TONE30_ID) != 1 or full["expected_failures"]:
+        raise ValueError("full Python report does not prove the tone30 case passed")
+    owners = ("test_reapeaks_fixture", "test_reapeaks_fixture.LongMediaGeneratedFixtureTests")
+    for skip in full["skips"]:
+        identity = skip["id"].removeprefix("tests.").replace("(tests.", "(")
+        if (identity == TONE30_ID or identity.startswith((TONE30_ID + " (", TONE30_ID + " ["))
+                or any(identity == f"{phase} ({owner})" for owner in owners
+                       for phase in ("setUpClass", "tearDownClass", "setUpModule", "tearDownModule"))):
+            raise ValueError("tone30 case or its fixture was skipped")
+    evidence["python.json"]["tone30_verified"] = True
     expected_media = {i for i in reports["python.json"]["selected_ids"] if python_pack(i) == "media"}
     if set(reports["media-required.json"]["selected_ids"]) != expected_media:
         raise ValueError("required media collection differs from full discovery ownership")

@@ -12,12 +12,17 @@
 
 完整矩阵见 `.github/workflows/test-matrix.yml`。每个 Python 单元运行全量发现，并单独用 `--pack media --required` 验证真实媒体能力。浏览器单元保存发现清单和实际结果；汇总检查提交、选中范围、所有分片和允许的精确跳过。测试未执行、报告缺失、额外跳过或失败均不能显示为通过。2.0 的统一轨道、旧工程迁移另存和数据安全浏览器用例仍由现有编辑器检查执行，也属于完整浏览器发现范围。
 
+30 分钟 tone30 真实生成属于 `long-media`；双声道和 48 kHz 短媒体生成属于 `media`，冻结缓存解析仍属于 `common`。完整矩阵的两平台 Python 全量报告必须证明 tone30 的精确用例已执行且其用例或夹具没有跳过。由于全量报告只记录预期失败的总数，出现任何预期失败时也不能据此证明 tone30 通过；矩阵会拒绝该报告。Windows 预览继续在同一次全量报告中检查三项生成用例均被选择且缓存测试无跳过。
+
+checksum 工具的 Bash 能力在执行其测试类时检查，普通测试发现不再启动 Bash。依赖或夹具缺失时，`--required` 仍会使对应组失败。
+
 这套矩阵目前是**增加覆盖**。原编辑器和 Windows 预览中的固定检查仍保留；待在相同提交、平台和运行配置下逐项证明覆盖等效后，才会移除重复执行。不能把工作流绿色当作所有测试都运行；要同时看选择计划、执行任务、分片报告和结果。Windows 安装包以预览工作流实际构建、上传和启动证据为准。
 
 本地可先运行相关组；`--required` 会拒绝依赖缺失导致的跳过：
 
 ```text
 uv run --no-sync python scripts/run_tests.py --pack media --required --report .artifacts/media.json
+uv run --no-sync python scripts/run_tests.py --pack long-media --required --report .artifacts/long-media.json
 pnpm run test:unit
 pnpm exec playwright test --config=tests/config/playwright.config.mjs --project=chromium tests/e2e/unified-tracks.spec.mjs tests/e2e/v2-migration-save.spec.mjs tests/e2e/review-data-safety.spec.mjs
 ```
