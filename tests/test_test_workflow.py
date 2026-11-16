@@ -40,6 +40,13 @@ def python_fixture(*, full=False):
 
 
 class TestMatrixTests(CompactContainerAssertions, unittest.TestCase):
+    def test_v2_website_is_prepared_only_for_its_real_browser_consumer(self):
+        def listed(file):
+            return {"suites": [{"title": file, "line": 0, "specs": [
+                {"file": file, "title": "fixture", "tests": [{"projectName": "chromium"}]}]}]}
+        self.assertTrue(ci_matrix.browser_needs_website(listed("editor-entry-retirement.spec.mjs")))
+        self.assertFalse(ci_matrix.browser_needs_website(listed("word-timing.spec.mjs")))
+
     def test_editor_browser_failure_evidence_does_not_mask_test_failure(self):
         workflow = (ROOT / ".github/workflows/editor-checks.yml").read_text(encoding="utf-8")
         browser_steps = workflow.split("      - name: Real file and HTTP editor", 1)[1].split(

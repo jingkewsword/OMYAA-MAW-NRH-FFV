@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 
@@ -161,6 +162,12 @@ def python_evidence(root: Path) -> dict:
     return evidence
 
 
+def browser_needs_website(listed: dict) -> bool:
+    """The 2.0 entry-retirement browser contract serves the built website."""
+    return any(file == "editor-entry-retirement.spec.mjs"
+               for file, _title, _project in browser_results.collection(listed))
+
+
 def run_cell(plan: dict, identity: str, root: Path) -> None:
     selected = next((c for c in cells(plan) if c["cell"] == identity), None)
     if selected is None:
@@ -197,6 +204,16 @@ def run_cell(plan: dict, identity: str, root: Path) -> None:
                    f"--shard={selected['shard']}/{selected['total']}",
                    *ci_impact.BROWSER_FILES[plan["profile"]]]
         run([*command, "--list"], report=root / "browser-list.json")
+        # This v2-only spec serves website/dist. Prepare the real site only in
+        # shards that discovered it; the original editor job builds the site
+        # later, so relying on that separate job would be order-dependent.
+        listed_path = root / "browser-list.json"
+        if listed_path.exists() and browser_needs_website(json.loads(listed_path.read_text(encoding="utf-8"))):
+            pnpm = shutil.which("pnpm") or "pnpm"
+            run([pnpm, "--dir", "website", "install", "--frozen-lockfile"], timeout=240)
+            run([pnpm, "--dir", "website", "run", "sync:docs"], timeout=120)
+            run([sys.executable, "scripts/build_release_site.py", "--preview"], timeout=120)
+            run([pnpm, "--dir", "website", "run", "build"], timeout=240)
         # Windows shard 1 completed 308/311 outcomes before the old 600s
         # aggregate limit. Keep per-test limits and zero retries unchanged;
         # the line reporter preserves progress even if JSON cannot be finalized.
