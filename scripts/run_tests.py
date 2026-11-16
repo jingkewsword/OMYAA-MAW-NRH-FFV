@@ -107,6 +107,77 @@ class CompactTextTestResult(unittest.TextTestResult):
         stream.write(compact_text(self.full_text))
 
 
+class TimedTextTestResult(CompactTextTestResult):
+    """Record individual test wall times without changing unittest outcomes."""
+
+    def __init__(self, *args, timing_stream, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.timing_stream = timing_stream
+        self.timing_origin = time.perf_counter()
+        self.timing_started = {}
+        self.timing_status = {}
+        self.timing_subtest_skips = {}
+        self.timings = []
+
+    def _event(self, event):
+        self.timing_stream.write(json.dumps(event, ensure_ascii=False) + "\n")
+        self.timing_stream.flush()
+
+    def startTest(self, test):
+        super().startTest(test)
+        self.timing_status[id(test)] = "unknown"
+        self.timing_subtest_skips[id(test)] = 0
+        self._event({"event": "start", "id": test.id(),
+                     "offset_seconds": time.perf_counter() - self.timing_origin,
+                     "unix_seconds": time.time()})
+        self.timing_started[id(test)] = time.perf_counter()
+
+    def stopTest(self, test):
+        started = self.timing_started.pop(id(test))
+        status = self.timing_status.pop(id(test))
+        subtest_skips = self.timing_subtest_skips.pop(id(test))
+        if status == "unknown" and subtest_skips:
+            status = "subtests_skipped"
+        item = {"id": test.id(), "seconds": time.perf_counter() - started,
+                "status": status, "subtests_skipped": subtest_skips}
+        self.timings.append(item)
+        self._event({"event": "finish", **item})
+        super().stopTest(test)
+
+    def addSuccess(self, test):
+        self.timing_status[id(test)] = "passed_with_skips" if self.timing_subtest_skips[id(test)] else "passed"
+        super().addSuccess(test)
+
+    def addFailure(self, test, err):
+        self.timing_status[id(test)] = "failed"
+        super().addFailure(test, err)
+
+    def addError(self, test, err):
+        if id(test) in self.timing_status:
+            self.timing_status[id(test)] = "error"
+        super().addError(test, err)
+
+    def addSkip(self, test, reason):
+        if id(test) in self.timing_status:
+            self.timing_status[id(test)] = "skipped"
+        elif (parent := getattr(test, "test_case", None)) is not None and id(parent) in self.timing_subtest_skips:
+            self.timing_subtest_skips[id(parent)] += 1
+        super().addSkip(test, reason)
+
+    def addExpectedFailure(self, test, err):
+        self.timing_status[id(test)] = "expected_failure"
+        super().addExpectedFailure(test, err)
+
+    def addUnexpectedSuccess(self, test):
+        self.timing_status[id(test)] = "unexpected_success"
+        super().addUnexpectedSuccess(test)
+
+    def addSubTest(self, test, subtest, err):
+        if err is not None:
+            self.timing_status[id(test)] = "failed" if issubclass(err[0], test.failureException) else "error"
+        super().addSubTest(test, subtest, err)
+
+
 def _to_module_name(target: str) -> str:
     """把 ``tests/test_x.py`` 之类的路径写法转成点号模块名；其余原样返回。"""
     path = Path(target)
@@ -427,12 +498,19 @@ def _run_parallel(args) -> int:
 def _run_serial(args) -> int:
     started = time.perf_counter()
     import contextlib
+    import functools
     import os
 
     buffer = _CapturedStream()
-    runner = unittest.TextTestRunner(stream=buffer, verbosity=args.verbose,
-                                    resultclass=CompactTextTestResult)
-    with tempfile.TemporaryFile() as capture:
+    with contextlib.ExitStack() as stack:
+        result_class = CompactTextTestResult
+        if args.timings:
+            args.timings.parent.mkdir(parents=True, exist_ok=True)
+            timing_stream = stack.enter_context(args.timings.open("w", encoding="utf-8"))
+            result_class = functools.partial(TimedTextTestResult, timing_stream=timing_stream)
+        runner = unittest.TextTestRunner(stream=buffer, verbosity=args.verbose,
+                                        resultclass=result_class)
+        capture = stack.enter_context(tempfile.TemporaryFile())
         saved_stdout, saved_stderr = os.dup(1), os.dup(2)
         try:
             sys.stdout.flush()
@@ -458,6 +536,17 @@ def _run_serial(args) -> int:
     code = report_code(report, args.required) or int(not selected_ids)
     report.update(exit_code=code, mode="serial", workers=1, wall_seconds=time.perf_counter() - started,
                   full_log=str(log_path.resolve()))
+    if args.timings:
+        report["timings"] = result.timings
+        slowest = sorted(result.timings, key=lambda item: item["seconds"], reverse=True)[:20]
+        if args.github_summary and (summary_path := os.environ.get("GITHUB_STEP_SUMMARY")):
+            try:
+                with Path(summary_path).open("a", encoding="utf-8") as summary:
+                    summary.write("\n### Slowest Python tests (wall time)\n\n| Test | Seconds | Result |\n| --- | ---: | --- |\n")
+                    for item in slowest:
+                        summary.write(f"| `{item['id']}` | {item['seconds']:.2f} | {item['status']} |\n")
+            except OSError:
+                pass  # Timing summaries are informational.
     write_report(args, report)
     return code
 
@@ -475,6 +564,7 @@ def main(argv=None) -> int:
     parser.add_argument("--pack", choices=PYTHON_PACKS, help="按成本/边界分组；不改变无参数的历史全量入口")
     parser.add_argument("--required", action="store_true", help="依赖、编码器和夹具缺失导致的 skip 视为失败")
     parser.add_argument("--report", type=Path, help="机器可读结果，包含每个 skip 的原因")
+    parser.add_argument("--timings", type=Path, help="串行模式逐测试计时事件 JSONL（包含中断前的结果）")
     parser.add_argument("--github-summary", action="store_true", help="在 GitHub Actions 摘要中显示跳过总数")
     parser.add_argument("-v", "--verbose", action="count", default=1, help="提高 unittest 详细度")
     parser.add_argument(
@@ -491,6 +581,9 @@ def main(argv=None) -> int:
         ),
     )
     args = parser.parse_args(argv)
+
+    if args.timings and args.parallel > 1:
+        parser.error("--timings 目前只支持串行模式")
 
     _config.update(max_chars=args.max_chars, max_line=args.max_line)
     if str(ROOT) not in sys.path:

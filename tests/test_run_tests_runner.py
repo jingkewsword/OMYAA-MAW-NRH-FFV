@@ -24,6 +24,7 @@ if str(ROOT) not in sys.path:
 
 from scripts.run_tests import (  # noqa: E402
     CompactTextTestResult,
+    TimedTextTestResult,
     _run_one_file_worker,
     _to_module_name,
     pack_suite,
@@ -86,6 +87,101 @@ class GithubSummaryTests(unittest.TestCase):
                 sample.write("    def test_failed(self): self.fail('failure')\n")
             result = subprocess.run(command, cwd=ROOT, env=env, capture_output=True, timeout=30)
             self.assertNotEqual(result.returncode, 0)
+
+
+class TimingReportTests(unittest.TestCase):
+    def test_thumbnail_phase_events_survive_process_termination(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            events = pathlib.Path(temporary) / "spans.jsonl"
+            driver = textwrap.dedent('''
+                import sys, time
+                from types import SimpleNamespace
+                from scripts import profile_thumbnail_tests as p
+                p.span_stream = open(sys.argv[1], 'w', encoding='utf-8')
+                p.local.case = 'controlled-case'
+                target = SimpleNamespace(work=lambda: None)
+                p.instrument(target, 'work', 'controlled-phase')
+                target.work()
+                time.sleep(60)
+            ''')
+            child = subprocess.Popen([sys.executable, "-c", driver, str(events)], cwd=ROOT,
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            try:
+                import time
+                deadline = time.monotonic() + 30
+                while time.monotonic() < deadline:
+                    if events.exists() and len(events.read_text(encoding="utf-8").splitlines()) == 2:
+                        break
+                    if child.poll() is not None:
+                        break
+                    time.sleep(0.02)
+                self.assertIsNone(child.poll(), "profile process exited before the controlled stop")
+                self.assertTrue(events.exists(), "profile did not flush phase events")
+            finally:
+                if child.poll() is None:
+                    child.kill()
+                _, stderr = child.communicate(timeout=10)
+            lines = [json.loads(line) for line in events.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual([line["event"] for line in lines], ["start", "finish"], stderr)
+            self.assertEqual(lines[1]["case"], "controlled-case")
+            self.assertEqual(lines[1]["phase"], "controlled-phase")
+            self.assertGreaterEqual(lines[1]["seconds"], 0)
+
+    def test_start_event_is_flushed_before_test_finishes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = pathlib.Path(temporary) / "events.jsonl"
+            case = unittest.FunctionTestCase(lambda: None)
+            with path.open("w", encoding="utf-8") as stream:
+                result = TimedTextTestResult(unittest.runner._WritelnDecorator(io.StringIO()), True, 1,
+                                             timing_stream=stream)
+                result.startTest(case)
+                started = json.loads(path.read_text(encoding="utf-8"))
+                self.assertEqual((started["event"], started["id"]), ("start", case.id()))
+                self.assertGreaterEqual(started["offset_seconds"], 0)
+                self.assertGreater(started["unix_seconds"], 0)
+                result.addSuccess(case)
+                result.stopTest(case)
+                self.assertEqual(len(path.read_text(encoding="utf-8").splitlines()), 2)
+
+    def test_timing_preserves_results_and_records_partial_subtest_skips(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            (root / "test_sample.py").write_text(textwrap.dedent('''
+                import unittest
+                class Case(unittest.TestCase):
+                    def test_pass(self): pass
+                    @unittest.skip('optional')
+                    def test_skip(self): pass
+                    def test_fail(self): self.fail('expected failure')
+                    def test_error(self): raise RuntimeError('expected error')
+                    def test_subtest_skip(self):
+                        with self.subTest(value=1): self.skipTest('subtest optional')
+            '''), encoding="utf-8")
+            common = [sys.executable, str(ROOT / "scripts/run_tests.py"), "--start-dir", str(root)]
+            baseline = root / "baseline.json"
+            timed = root / "timed.json"
+            events = root / "timings.jsonl"
+            summary = root / "summary.md"
+            plain = subprocess.run([*common, "--report", str(baseline)], cwd=ROOT, capture_output=True, timeout=30)
+            measured = subprocess.run([*common, "--report", str(timed), "--timings", str(events), "--github-summary"],
+                                      cwd=ROOT, env={**os.environ, "GITHUB_STEP_SUMMARY": str(summary)},
+                                      capture_output=True, timeout=30)
+            self.assertEqual((plain.returncode, measured.returncode), (1, 1))
+            before = json.loads(baseline.read_text(encoding="utf-8"))
+            after = json.loads(timed.read_text(encoding="utf-8"))
+            for key in ("selected_ids", "run", "failures", "errors", "skips", "expected_failures", "unexpected_successes"):
+                self.assertEqual(before[key], after[key], key)
+            records = {item["id"].rsplit(".", 1)[-1]: item for item in after["timings"]}
+            self.assertEqual({name: item["status"] for name, item in records.items()}, {
+                "test_pass": "passed", "test_skip": "skipped", "test_fail": "failed",
+                "test_error": "error", "test_subtest_skip": "subtests_skipped",
+            })
+            self.assertEqual(records["test_subtest_skip"]["subtests_skipped"], 1)
+            self.assertTrue(all(item["seconds"] >= 0 for item in records.values()))
+            logged = [json.loads(line) for line in events.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual([item["event"] for item in logged].count("start"), 5)
+            self.assertEqual([item["event"] for item in logged].count("finish"), 5)
+            self.assertIn("Slowest Python tests", summary.read_text(encoding="utf-8"))
 
 
 class ParallelWorkerTests(unittest.TestCase):

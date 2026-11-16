@@ -223,7 +223,7 @@ jobs:
 
       - name: Run Python tests
         if: ${{ needs.selection.outputs.light != 'true' }}
-        run: uv run --no-sync python scripts/run_check.py --timeout 600 -- uv run --no-sync python scripts/run_tests.py --report .artifacts/windows-python.json --github-summary
+        run: uv run --no-sync python scripts/run_check.py --timeout 600 -- uv run --no-sync python scripts/run_tests.py --report .artifacts/windows-python.json --timings .artifacts/windows-python-timings.jsonl --github-summary
 
       - name: Require cache coverage from the same Python run
         if: ${{ needs.selection.outputs.light != 'true' }}
@@ -247,6 +247,10 @@ jobs:
           '@ | uv run --no-sync python -
           if ($LASTEXITCODE -ne 0) { throw 'Windows cache coverage was not verified.' }
 
+      - name: Profile thumbnail fixture phases
+        if: ${{ needs.selection.outputs.light != 'true' }}
+        run: uv run --no-sync python scripts/run_check.py --timeout 240 -- uv run --no-sync python scripts/profile_thumbnail_tests.py
+
       - name: Preserve complete Python report
         if: ${{ always() && needs.selection.outputs.light != 'true' }}
         uses: actions/upload-artifact@v6
@@ -254,7 +258,12 @@ jobs:
           name: windows-preview-python-report
           path: |
             .artifacts/windows-python.json
+            .artifacts/windows-python-timings.jsonl
             .artifacts/windows-python.log
+            .artifacts/thumbnail-phase-results.json
+            .artifacts/thumbnail-phase-events.jsonl
+            .artifacts/thumbnail-phase-spans.jsonl
+            .artifacts/thumbnail-phases.json
             .artifacts/checks/
           include-hidden-files: true
           retention-days: 7
