@@ -105,12 +105,14 @@ class ThumbnailServerTests(unittest.TestCase):
         self.demand()
         started = time.monotonic()
         deadline = started+30
+        # Poll more often than the editor's 400ms status-poll interval while not ready,
+        # without repeatedly competing with the worker for cache and manager locks.
         while time.monotonic()<deadline:
             status = self.status()
             if status['state'] in ('ready','partial') and any(s['status']=='target' for s in status['samples']):
                 return status
             self.assertNotEqual(status['state'],'error',status.get('error'))
-            time.sleep(.05)
+            time.sleep(.2)
         manager = self.server.thumbnail_jobs
         with manager.lock:
             diagnostic = {"elapsed_s": round(time.monotonic()-started, 3),
@@ -159,7 +161,7 @@ class ThumbnailServerTests(unittest.TestCase):
                 if status['state'] in ('partial', 'ready'):
                     break
                 self.assertNotEqual(status['state'], 'error', status.get('error'))
-                time.sleep(.05)
+                time.sleep(.2)
             self.assertIn(self.status()['state'], ('partial', 'ready'))
             self.assertTrue(all(sample.get('asset') is None for sample in self.status()['samples']))
             self.demand(view=2, decode=False)
