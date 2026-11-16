@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { loadEditorModule } from './helpers/editor-module-loader.mjs';
+import { loadEditorModule, prepareEditorModule } from './helpers/editor-module-loader.mjs';
+await Promise.all(['shared/editor-utils.js', 'editor/media/waveform.js'].map(prepareEditorModule));
 import { runtimeProject } from './helpers/runtime-project.mjs';
 import { createWaveformModule as createWaveformMedia } from '../web/editor/media/waveform/media.js';
 

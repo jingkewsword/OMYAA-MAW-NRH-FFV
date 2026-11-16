@@ -2,15 +2,15 @@ import { expect, test } from '@playwright/test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { buildPortableBlankEditor, disableOnboarding, generateWav } from './helpers.mjs';
+import { buildBrowserEditorFixture, disableOnboarding, generateWav } from './helpers.mjs';
 
-// Static current-source fixture: no persistent server, no root portable rewrite.
+// Static current-source test fixture: no persistent server or retired app entry.
 let pageUrl, mediaPath;
 test.beforeAll(() => {
   const directory = join(process.cwd(), '.artifacts', 'editor-menu-focus', 'fixture');
   mkdirSync(directory, { recursive: true });
   mediaPath = generateWav(join(directory, 'test.wav'), 20);
-  pageUrl = pathToFileURL(buildPortableBlankEditor(join(directory, 'editor.html'))).href;
+  pageUrl = pathToFileURL(buildBrowserEditorFixture(join(directory, 'editor.html'))).href;
 });
 test.beforeEach(async ({ page }) => {
   await disableOnboarding(page);

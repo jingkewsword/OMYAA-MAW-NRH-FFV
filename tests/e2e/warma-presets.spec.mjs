@@ -200,7 +200,8 @@ test('deleting a complete cue keeps the project row and exports re-importable SR
   expect(output.parsed[0].start).toBe(0);
 });
 
-test.skip('portable pages reject a stale preset library save (unsupported in 2.0)', async ({ browser }) => {
+test('portable pages reject a stale preset library save (unsupported in 2.0)', async ({ browser }) => {
+  test.skip(true, '便携模式已弃维护，2.0 移除 HTML，见 #336 后回归分析');
   const portable = buildBrowserEditorFixture(join(dir, 'portable.html'));
   const context = await browser.newContext({ locale: 'zh-CN' });
   try {

@@ -4,7 +4,8 @@ import vm from 'node:vm';
 import test from 'node:test';
 import { createUtilsModule as createProjectTracks } from '../web/shared/utils/project-tracks.js';
 const tracks = createProjectTracks();
-import { loadEditorModule } from './helpers/editor-module-loader.mjs';
+import { loadEditorModule, prepareEditorModule } from './helpers/editor-module-loader.mjs';
+await prepareEditorModule('shared/editor-utils.js');
 import { invokedInitModuleSource } from './helpers/init-module-source.mjs';
 
 const plain = value => JSON.parse(JSON.stringify(value));
