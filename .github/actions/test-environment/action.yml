@@ -30,7 +30,12 @@ runs:
       run: pnpm install --frozen-lockfile
     - shell: bash
       if: inputs.install-browser == 'true'
-      run: pnpm exec playwright install --with-deps chromium
+      run: |
+        if [ "$RUNNER_OS" = Windows ]; then
+          pnpm exec playwright install chromium
+        else
+          pnpm exec playwright install --with-deps chromium
+        fi
     - name: Install Linux media capabilities
       if: runner.os == 'Linux'
       shell: bash
