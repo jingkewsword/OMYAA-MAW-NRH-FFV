@@ -209,8 +209,28 @@ export function createUtilsModule(dependencies) {
 
   function exportTrackInput(project) {
     if (project.schema !== undefined) {
-      const canonical = project.schema === dependencies.PROJECT_TRACKS_SCHEMA
+      let canonical = project.schema === dependencies.PROJECT_TRACKS_SCHEMA
         ? project : dependencies.importProject(project).project;
+      // Editing a cue without word timings can leave items:null in memory.
+      // Omit only that runtime sentinel; keep all other data for strict validation.
+      if (project.schema === dependencies.PROJECT_TRACKS_SCHEMA && Array.isArray(canonical.tracks)) {
+        let changed = false;
+        const tracks = canonical.tracks.map((track) => {
+          if (!track || typeof track !== 'object' || Array.isArray(track) || !Array.isArray(track.segments)) return track;
+          let trackChanged = false;
+          const segments = track.segments.map((cue) => {
+            if (!cue || typeof cue !== 'object' || Array.isArray(cue) || cue.items !== null) return cue;
+            const copy = { ...cue };
+            delete copy.items;
+            trackChanged = true;
+            return copy;
+          });
+          if (!trackChanged) return track;
+          changed = true;
+          return { ...track, segments };
+        });
+        if (changed) canonical = { ...canonical, tracks };
+      }
       const checked = dependencies.validateTracksProject(canonical);
       if (!checked.ok) throw new dependencies.ProjectTracksError(checked.errors);
       return { canonical, tracks: dependencies.selectSubtitleTracks(canonical, { subtitleTracks: 'all' }) };
