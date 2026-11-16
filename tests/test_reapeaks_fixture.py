@@ -55,8 +55,8 @@ class FixtureReapeaksTests(unittest.TestCase):
     """用 REAPER 真机生成的 .ReaPeaks 验证解析器与 REAPER 格式兼容。
 
     fixture 流程：gen_fixtures.py 生成 wav → 用户在 REAPER 打开生成
-    .ReaPeaks → 放回 tests/test_data/。文件缺失时报告 skip，
-    内容设计见 FIXTURES.md。
+    .ReaPeaks → 放回 tests/test_data/。缺失时旧全量入口报告 skip，
+    新的 required 分组入口阻断门禁。内容设计见 FIXTURES.md。
 
     解析与形状检查只读取已提交 cache，不生成源 WAV，因此不依赖
     NumPy、FFmpeg 或长媒体生成。
@@ -147,7 +147,7 @@ class FixtureReapeaksTests(unittest.TestCase):
         self.assertGreater(max(amps), 40)
 
 
-class GeneratedFixtureTests(unittest.TestCase):
+class _GeneratedFixtureComparison(unittest.TestCase):
     """验证 MAW 生成的 .quapeaks 与 REAPER 真机 fixture 保持兼容布局。
 
     测试流程：gen_fixtures.py 生成 wav → MAW 生成器生成 .quapeaks → 对比
@@ -190,11 +190,9 @@ class GeneratedFixtureTests(unittest.TestCase):
                     f"{name} mip{index} 峰数差异 {diff_ratio:.2%} > 10%",
                 )
 
-    @unittest.skipUnless(shutil.which("ffmpeg"), "ffmpeg is required")
-    @unittest.skipUnless(HAS_NUMPY, "numpy is required")
-    @unittest.skipUnless(_fixture_present("tone30.wav.ReaPeaks"), "REAPER fixture missing: tone30")
-    def test_tone30_generated_matches_fixture(self) -> None:
-        self._compare_reapeaks("tone30")
+
+class GeneratedFixtureTests(_GeneratedFixtureComparison):
+    """短真实媒体回归：双声道与 48kHz 走 FFmpeg/MAW 内核生成。"""
 
     @unittest.skipUnless(shutil.which("ffmpeg"), "ffmpeg is required")
     @unittest.skipUnless(HAS_NUMPY, "numpy is required")
@@ -207,6 +205,20 @@ class GeneratedFixtureTests(unittest.TestCase):
     @unittest.skipUnless(_fixture_present("tone_48k.wav.ReaPeaks"), "REAPER fixture missing: tone_48k")
     def test_tone_48k_generated_matches_fixture(self) -> None:
         self._compare_reapeaks("tone_48k")
+
+
+class LongMediaGeneratedFixtureTests(_GeneratedFixtureComparison):
+    """显式 long-media 门禁：30 分钟真实生成及全部共有粗 mip 兼容性。
+
+    media 分组不含此类；long-media 显式执行，无参数全量仍包含它。
+    依赖缺失仍用 skip 原因报告，由 required 门禁决定是否完成验证。
+    """
+
+    @unittest.skipUnless(shutil.which("ffmpeg"), "ffmpeg is required")
+    @unittest.skipUnless(HAS_NUMPY, "numpy is required")
+    @unittest.skipUnless(_fixture_present("tone30.wav.ReaPeaks"), "REAPER fixture missing: tone30")
+    def test_tone30_generated_matches_fixture(self) -> None:
+        self._compare_reapeaks("tone30")
 
 
 if __name__ == "__main__":

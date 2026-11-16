@@ -22,7 +22,8 @@ def gate_fixture(profile):
              "full-tests": {"result": "success" if profile == "full" else "skipped"},
              "browser": {"result": "skipped" if profile == "light" else "success"}}
     receipts = [{"cell": cell["cell"], "fingerprint": ci_matrix.fingerprint(plan), "status": "success",
-                 "reports": {name: {"validated": True, "required": required}
+                 "reports": {name: {"validated": True, "required": required,
+                                    **({"tone30_verified": True} if name == "python.json" else {})}
                              for name, required in (("python.json", False), ("media-required.json", True))}
                  if cell["layer"] == "python" else {}}
                 for cell in ci_matrix.cells(plan)]
@@ -37,6 +38,13 @@ def python_fixture(*, full=False):
     return {"selected_ids": [MEDIA_ID, COMMON_ID] if full else [MEDIA_ID], "run": 2 if full else 1,
             "failures": 0, "errors": 0, "expected_failures": 0, "unexpected_successes": 0,
             "exit_code": 0, "skips": []}
+
+
+def full_python_fixture():
+    report = python_fixture(full=True)
+    report["selected_ids"].append("tests." + ci_matrix.TONE30_ID)
+    report["run"] += 1
+    return report
 
 
 class TestMatrixTests(CompactContainerAssertions, unittest.TestCase):
@@ -287,7 +295,7 @@ class TestMatrixTests(CompactContainerAssertions, unittest.TestCase):
         plan, _, _ = gate_fixture("full")
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            ci_matrix.write_json(root / "python.json", python_fixture(full=True))
+            ci_matrix.write_json(root / "python.json", full_python_fixture())
             ci_matrix.write_json(root / "media-required.json", python_fixture(full=True))
             with self.assertRaises(ValueError):
                 ci_matrix.python_evidence(root)
@@ -296,6 +304,40 @@ class TestMatrixTests(CompactContainerAssertions, unittest.TestCase):
                     ci_matrix.run_cell(plan, "windows-latest-python", root)
             run.assert_not_called()
             self.assertFalse((root / "receipt.json").exists())
+
+    def test_python_full_report_must_prove_tone30_ran_without_skip(self):
+        full = full_python_fixture()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            ci_matrix.write_json(root / "media-required.json", python_fixture())
+            ci_matrix.write_json(root / "python.json", full)
+            self.assertTrue(ci_matrix.python_evidence(root)["python.json"]["tone30_verified"])
+            bad_reports = []
+            missing = copy.deepcopy(full)
+            missing["selected_ids"].pop()
+            missing["run"] -= 1
+            bad_reports.append(missing)
+            for skip_id in ("tests." + ci_matrix.TONE30_ID,
+                            "tests." + ci_matrix.TONE30_ID + " (sample=1)",
+                            "setUpClass (tests.test_reapeaks_fixture.LongMediaGeneratedFixtureTests)",
+                            "setUpModule (tests.test_reapeaks_fixture)"):
+                report = copy.deepcopy(full)
+                report["skips"] = [{"id": skip_id, "reason": "fixture unavailable"}]
+                if skip_id.startswith("setUp"):
+                    report["run"] -= 1
+                bad_reports.append(report)
+            xfail = copy.deepcopy(full)
+            xfail["expected_failures"] = 1
+            bad_reports.append(xfail)
+            for report in bad_reports:
+                ci_matrix.write_json(root / "python.json", report)
+                with self.subTest(report=report), self.assertRaises(ValueError):
+                    ci_matrix.python_evidence(root)
+
+        plan, needs, receipts = gate_fixture("full")
+        receipts[0]["reports"]["python.json"].pop("tone30_verified")
+        with self.assertRaises(ValueError):
+            ci_matrix.gate(plan, needs, receipts)
 
     def test_real_repeated_subtest_skips_are_full_compatible_but_not_required(self):
         from scripts.run_tests import CompactTextTestResult, _CapturedStream, report_code, result_report
@@ -371,10 +413,10 @@ finally:
     (output.parent / "attempted.json").write_text(json.dumps({"attempted": attempted,
         "receipt": (output / "receipt.json").exists()}), encoding="utf-8")
 '''
-        good = {"python.json": python_fixture(full=True), "media-required.json": python_fixture()}
+        good = {"python.json": full_python_fixture(), "media-required.json": python_fixture()}
         scenarios = [("positive", copy.deepcopy(good), True), ("missing-both", {}, False),
                      ("missing-full", {"media-required.json": python_fixture()}, False),
-                     ("missing-required", {"python.json": python_fixture(full=True)}, False),
+                     ("missing-required", {"python.json": full_python_fixture()}, False),
                      ("corrupt-full", {**copy.deepcopy(good), "python.json": "{broken"}, False),
                      ("empty-required", {**copy.deepcopy(good), "media-required.json": {}}, False)]
         for name, field, value in (("reported-exit", "exit_code", 1), ("failure", "failures", 1),
@@ -414,6 +456,7 @@ finally:
                     if accepted:
                         receipt = json.loads((scenario / "output/receipt.json").read_text(encoding="utf-8"))
                         self.assertTrue(receipt["reports"]["python.json"]["validated"])
+                        self.assertTrue(receipt["reports"]["python.json"]["tone30_verified"])
                         self.assertTrue(receipt["reports"]["media-required.json"]["required"])
                         self.assertEqual(len(receipt["reports"]["media-required.json"]["sha256"]), 64)
 
