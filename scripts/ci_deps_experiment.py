@@ -30,9 +30,10 @@ try:
         git = shutil.which('git.exe')
         if not git:
             raise FileNotFoundError('git.exe is required to locate Git Bash')
-        bash = Path(git).resolve().parent.parent / 'bin' / 'bash.exe'
-        if not bash.is_file():
-            raise FileNotFoundError(f'Git Bash not found at {bash}')
+        bash = next((candidate for parent in Path(git).resolve().parents
+                     if (candidate := parent / 'bin' / 'bash.exe').is_file()), None)
+        if bash is None:
+            raise FileNotFoundError(f'Git Bash not found above {git}')
         command[0] = str(bash)
     code = subprocess.call(command)
 finally:
