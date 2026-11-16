@@ -51,6 +51,7 @@ async function fixture(page, mode, run) {
       window.applyMediaSizeToResolutionModal = () => {};
       window.dynamicExportCanvasSize = () => {};
       window.MaweInlineEdit = {};
+      window.MaweCoreState = {};
       window.MaweProjectLoad = { projectBindingEpoch: 1 };
       window.MaweBoot = { FILENAME_BASE: 'music', DATA: { media: 'source.mp3' }, SERVER_CONFIG: {
         canGapRemovedVideoExport: false, gapRemovedVideoSourceName: null,
@@ -197,7 +198,7 @@ for (const field of ['gapRemovedMediaKind', 'gapRemovedMediaSourceName', 'gapRem
 
 test('detach clears all capabilities and label follows media and language changes', async ({ page }) => {
   await fixture(page, 'save', async () => {
-    await page.addScriptTag({ content: projectLoad });
+    await page.addScriptTag({ type: 'module', content: `${projectLoad}\ninitMaweProjectLoad();` });
     await page.addScriptTag({ content: i18n });
     await page.evaluate(() => MaweProjectLoad.detachServerProjectSaving());
     expect(await page.evaluate(() => [MaweBoot.SERVER_CONFIG.canGapRemovedMediaExport, MaweBoot.SERVER_CONFIG.canGapRemovedVideoExport])).toEqual([false, false]);
