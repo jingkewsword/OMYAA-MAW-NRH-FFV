@@ -247,7 +247,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Windows cache coverage was not verified.' }
 
       - name: Profile thumbnail fixture phases
-        if: ${{ needs.selection.outputs.light != 'true' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && needs.selection.outputs.light != 'true' }}
         run: uv run --no-sync python scripts/run_check.py --timeout 240 -- uv run --no-sync python scripts/profile_thumbnail_tests.py
 
       - name: Preserve complete Python report
