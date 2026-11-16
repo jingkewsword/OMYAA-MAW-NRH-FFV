@@ -147,3 +147,136 @@ jobs:
         env:
           CI_NEEDS: ${{ toJSON(needs) }}
         run: python scripts/ci_matrix.py gate --root .artifacts/matrix-evidence
+
+  compare:
+    if: github.event_name == 'pull_request' && github.head_ref == 'code/v2-ci-timing-20261117'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+        variant: [with, without]
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
+      MAW_E2E_PYTHON: ${{ github.workspace }}/.venv/${{ matrix.os == 'windows-latest' && 'Scripts/python.exe' || 'bin/python' }}
+      PLAYWRIGHT_JSON_OUTPUT_FILE: .artifacts/deps-experiment/results.json
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Start experiment clock
+        shell: bash
+        run: python scripts/ci_deps_experiment.py experiment-start
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v7
+        id: uv
+        with:
+          version: '0.13.4'
+          enable-cache: true
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.28.4
+          run_install: false
+      - uses: actions/setup-node@v5
+        id: node
+        with:
+          node-version: '22.23.4'
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Record revision, runner and cache policy
+        shell: bash
+        run: |
+          mkdir -p .artifacts/deps-experiment
+          {
+            echo "checkout=$(git rev-parse HEAD)"
+            echo "github_sha=$GITHUB_SHA"
+            echo "head_sha=${{ github.event.pull_request.head.sha }}"
+            echo "base_sha=${{ github.event.pull_request.base.sha }}"
+            echo "image_os=$ImageOS image_version=$ImageVersion runner_os=$RUNNER_OS runner_arch=$RUNNER_ARCH"
+            echo "uv_cache_hit=${{ steps.uv.outputs.cache-hit }} node_cache_hit=${{ steps.node.outputs.cache-hit }}"
+            echo 'Cache restore durations are GitHub action step timings; retrieve them from this run job metadata.'
+            python --version
+            node --version
+            pnpm --version
+            uv --version
+          } | tee .artifacts/deps-experiment/environment.txt
+      - name: Install Python dependencies
+        shell: bash
+        run: python scripts/ci_deps_experiment.py python-deps bash -c 'uv sync --frozen --group dev --group test'
+      - name: Install Node dependencies and build
+        shell: bash
+        run: python scripts/ci_deps_experiment.py node-deps bash -c 'pnpm install --frozen-lockfile'
+      - name: Windows media features before Chromium install
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & powershell.exe -NoProfile -Command '$q=0; try { Import-Module ServerManager -ErrorAction Stop; Get-WindowsFeature Server-Media-Foundation -ErrorAction Stop | Format-List Name,InstallState } catch { Write-Output "feature query unknown: $_"; $q=1 }; Get-Item "$env:SystemRoot\System32\mf.dll", "$env:SystemRoot\System32\mfplat.dll" -ErrorAction Continue | Select-Object FullName,VersionInfo; exit $q' *>&1 | Out-File .artifacts/deps-experiment/windows-media-before.txt
+          "query_exit=$LASTEXITCODE" | Add-Content .artifacts/deps-experiment/windows-media-before.txt
+          $global:LASTEXITCODE = 0
+      - name: Install Chromium (only experimental variable)
+        shell: bash
+        env:
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          if [ "$VARIANT" = with ]; then
+            python scripts/ci_deps_experiment.py chromium-install bash -c 'pnpm exec playwright install --with-deps chromium'
+          else
+            python scripts/ci_deps_experiment.py chromium-install bash -c 'pnpm exec playwright install chromium'
+          fi
+      - name: Windows media features after Chromium install
+        if: ${{ always() && runner.os == 'Windows' }}
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .artifacts/deps-experiment | Out-Null
+          & powershell.exe -NoProfile -Command '$q=0; try { Import-Module ServerManager -ErrorAction Stop; Get-WindowsFeature Server-Media-Foundation -ErrorAction Stop | Format-List Name,InstallState } catch { Write-Output "feature query unknown: $_"; $q=1 }; Get-Item "$env:SystemRoot\System32\mf.dll", "$env:SystemRoot\System32\mfplat.dll" -ErrorAction Continue | Select-Object FullName,VersionInfo; exit $q' *>&1 | Out-File .artifacts/deps-experiment/windows-media-after.txt
+          "query_exit=$LASTEXITCODE" | Add-Content .artifacts/deps-experiment/windows-media-after.txt
+          $global:LASTEXITCODE = 0
+      - name: Install Linux media capabilities
+        if: ${{ always() && runner.os == 'Linux' }}
+        shell: bash
+        run: python scripts/ci_deps_experiment.py media-install bash -c 'sudo apt-get update && sudo apt-get install --yes ffmpeg fonts-noto-cjk'
+      - name: Install Windows media capabilities
+        if: ${{ always() && runner.os == 'Windows' }}
+        shell: pwsh
+        run: |
+          python scripts/ci_deps_experiment.py media-install pwsh -NoProfile -Command 'choco install ffmpeg --yes --no-progress; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; $binary = Get-ChildItem -LiteralPath "$env:ChocolateyInstall\lib\ffmpeg\tools" -Filter ffmpeg.exe -Recurse -File | Select-Object -First 1; if (-not $binary -or -not (Test-Path (Join-Path $binary.Directory.FullName "ffprobe.exe"))) { exit 1 }; $binary.Directory.FullName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Record FFmpeg capabilities
+        if: always()
+        shell: bash
+        run: |
+          python scripts/ci_deps_experiment.py ffmpeg-probe bash -o pipefail -c 'ffmpeg -version && ffprobe -version && ffmpeg -hide_banner -filters 2>&1 | grep -E " ass +V->V" && ffmpeg -hide_banner -encoders 2>&1 | grep -F libx264 && ffmpeg -hide_banner -encoders 2>&1 | grep -F libwebp' 2>&1 | tee .artifacts/deps-experiment/ffmpeg.txt
+      - name: Probe real Chromium playback
+        if: success() || failure()
+        shell: bash
+        run: python scripts/ci_deps_experiment.py browser-media node scripts/ci_deps_media_probe.mjs
+      - name: Discover fixed media specs
+        if: success() || failure()
+        shell: bash
+        run: python scripts/ci_deps_experiment.py discovery bash -c 'pnpm exec playwright test --config=tests/config/playwright.config.mjs --project=chromium --workers=2 --retries=0 --forbid-only --reporter=json --list tests/e2e/filmstrip-real.spec.mjs tests/e2e/audio-processing.spec.mjs tests/e2e/burn-video-binding.spec.mjs tests/e2e/gap-removed-video-binding.spec.mjs'
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: .artifacts/deps-experiment/discovery.json
+      - name: Run the same fixed media specs
+        if: success() || failure()
+        shell: bash
+        run: python scripts/ci_deps_experiment.py tests bash -c 'pnpm exec playwright test --config=tests/config/playwright.config.mjs --project=chromium --workers=2 --retries=0 --forbid-only --reporter=line,json,./scripts/ci_deps_reporter.mjs tests/e2e/filmstrip-real.spec.mjs tests/e2e/audio-processing.spec.mjs tests/e2e/burn-video-binding.spec.mjs tests/e2e/gap-removed-video-binding.spec.mjs'
+      - name: Finish experiment clock
+        if: always()
+        shell: bash
+        run: python scripts/ci_deps_experiment.py experiment-end
+      - name: Preserve evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: deps-experiment-${{ matrix.os }}-${{ matrix.variant }}
+          path: |
+            .artifacts/deps-experiment/
+            .artifacts/checks/
+            test-results/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
