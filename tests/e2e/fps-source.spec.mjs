@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { runtimeProject } from '../helpers/runtime-project.mjs';
 import { disableOnboarding, findFreePort, generateWaveformPayload, openSettingsPage, startServer } from './helpers.mjs';
 
 // Real Chromium + Server + ffprobe, with synthetic media retained as local evidence.
@@ -21,15 +22,16 @@ test.afterEach(async () => { await server?.stop(); server = null; });
 
 async function open(page, name, timebase) {
   project = join(root, `${name}.mosp`);
-  writeFileSync(project, JSON.stringify({ media: media25, timebase,
-    waveform: generateWaveformPayload(2000), segments: [{ id: 's', start: 200, end: 1200,
-      text: 'hello', items: [{ start: 200, end: 1200, text: 'hello' }] }] }));
+  writeFileSync(project, JSON.stringify(runtimeProject([{ id: 's', start: 200, end: 1200,
+    text: 'hello', items: [{ start: 200, end: 1200, text: 'hello' }] }],
+  { media: media25, speakers: [], timebase, waveform: generateWaveformPayload(2000) })));
   server = await startServer(project, media25, await findFreePort());
   await disableOnboarding(page);
   await page.addInitScript(() => localStorage.setItem('moy.asr.editor.settings.v1', JSON.stringify({ autoSaveProject: false })));
   page.on('dialog', dialog => dialog.accept());
   await page.goto(server.url);
   await expect(page.locator('.cue').first()).toBeVisible();
+  expect(await page.evaluate(() => MaweServerSave.requiresMigrationSaveAs)).toBe(false);
   await openSettingsPage(page, 'timebase');
 }
 async function saveReload(page) {
@@ -45,11 +47,11 @@ async function saveReload(page) {
 for (const fps of [30, 23.976]) {
   test(`explicit ${fps} survives actual save reload and local media replacement`, async ({ page }, testInfo) => {
     await open(page, `user-${fps}`, { unit: 'milliseconds', fps: 30 });
-    const before = await page.evaluate(() => JSON.stringify(MaweBoot.DATA.segments));
+    const before = await page.evaluate(() => JSON.stringify(AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments));
     await page.locator('#timeline-fps').fill(String(fps));
     await page.locator('#timeline-fps').press('Enter');
     expect(await page.evaluate(() => MaweBoot.DATA.timebase)).toEqual({ unit: 'milliseconds', fps, fps_source: 'user' });
-    if (fps === 30) expect(await page.evaluate(() => JSON.stringify(MaweBoot.DATA.segments))).toBe(before);
+    if (fps === 30) expect(await page.evaluate(() => JSON.stringify(AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments))).toBe(before);
     const saved = await saveReload(page);
     expect(saved.timebase.fps_source).toBe('user');
     await page.setInputFiles('#load-media-file', media24);
