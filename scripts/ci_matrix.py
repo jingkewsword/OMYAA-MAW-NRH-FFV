@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import os
+import platform
 from pathlib import Path
 import re
 import shutil
@@ -76,6 +77,47 @@ def gate(plan: dict, needs: dict, receipts: list[dict]) -> None:
         raise ValueError("missing, duplicate, or unexpected matrix receipt")
     if any(r["fingerprint"] != fingerprint(plan) or r["status"] != "success" for r in receipts):
         raise ValueError("failed or mismatched matrix receipt")
+    by_cell = {receipt["cell"]: receipt for receipt in receipts}
+    if plan["mode"] != "light":
+        total = 4 if plan["mode"] == "full" else 1
+        expected_version = json.loads((Path(__file__).resolve().parents[1] / "package.json").read_text(encoding="utf-8"))["devDependencies"]["@playwright/test"]
+        for system in SYSTEMS:
+            full_ids = None
+            config = None
+            union = set()
+            for shard in range(1, total + 1):
+                cell = f"{system}-browser-{shard}-{total}"
+                evidence = by_cell[cell].get("_browser_evidence")
+                if not isinstance(evidence, dict):
+                    raise ValueError("missing browser evidence")
+                listed, actual = evidence["listed"], evidence["actual"]
+                meta = evidence["metadata"]
+                if meta != {"revision": plan["head"], "os": system, "profile": plan["profile"],
+                            "cell": cell, "playwright_version": expected_version}:
+                    raise ValueError("browser provenance mismatch")
+                identity = browser_results.config_identity(listed)
+                if identity.get("version") != expected_version:
+                    raise ValueError("unexpected Playwright version")
+                if config is None:
+                    config = identity
+                elif identity != config:
+                    raise ValueError("browser shard config mismatch")
+                summary = browser_results.validate(listed, actual, shard, total)
+                if summary != evidence["validated"]:
+                    raise ValueError("browser validated report mismatch")
+                ids = set(browser_results.collection(listed))
+                if union & ids:
+                    raise ValueError("overlapping browser shard discoveries")
+                union.update(ids)
+                if shard == 1:
+                    full = evidence.get("full")
+                    full_ids = browser_results.full_collection(full)
+                    if browser_results.config_identity(full) != config:
+                        raise ValueError("full discovery config mismatch")
+                elif "full" in evidence:
+                    raise ValueError("unexpected duplicate full discovery")
+            if full_ids != union:
+                raise ValueError("browser shard union differs from unsharded discovery")
     for receipt in receipts:
         if receipt["cell"].endswith("-python"):
             reports = receipt.get("reports", {})
@@ -191,7 +233,8 @@ def run_cell(plan: dict, identity: str, root: Path) -> None:
     root.mkdir(parents=True, exist_ok=True)
     # CI uses a fresh per-cell output directory. Refuse stale evidence instead
     # of allowing an exit-zero/no-report command to reuse an earlier success.
-    outputs = ("receipt.json", "python.json", "media-required.json", "browser-list.json", "browser-results.json")
+    outputs = ("receipt.json", "python.json", "media-required.json", "browser-list.json", "browser-results.json",
+               "browser-full.json", "browser-validated.json", "browser-metadata.json")
     if any((root / name).exists() for name in outputs):
         raise ValueError("matrix cell requires fresh report/receipt paths")
     env = {**os.environ, "MAW_TEST_PYTHON": sys.executable, "MAW_E2E_PYTHON": sys.executable}
@@ -219,6 +262,10 @@ def run_cell(plan: dict, identity: str, root: Path) -> None:
                    "--workers=2", "--retries=0", "--forbid-only", "--reporter=line,json",
                    f"--shard={selected['shard']}/{selected['total']}",
                    *ci_impact.BROWSER_FILES[plan["profile"]]]
+        if selected["shard"] == 1:
+            full_command = [arg for arg in command if not arg.startswith("--shard=")]
+            run([*full_command, "--list"], report=root / "browser-full.json")
+            browser_results.full_collection(json.loads((root / "browser-full.json").read_text(encoding="utf-8")))
         run([*command, "--list"], report=root / "browser-list.json")
         # This v2-only spec serves website/dist. Prepare the real site only in
         # shards that discovered it; the original editor job builds the site
@@ -238,6 +285,13 @@ def run_cell(plan: dict, identity: str, root: Path) -> None:
                                            json.loads((root / "browser-results.json").read_text(encoding="utf-8")),
                                            selected["shard"], selected["total"])
         write_json(root / "browser-validated.json", summary)
+        revision = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+        system = {"Windows": "windows-latest", "Linux": "ubuntu-latest"}.get(platform.system())
+        if revision != plan["head"] or system != selected["os"]:
+            raise ValueError("browser cell revision or OS mismatch")
+        version = json.loads((root / "browser-list.json").read_text(encoding="utf-8"))["config"]["version"]
+        write_json(root / "browser-metadata.json", {"revision": revision, "os": system,
+                   "profile": plan["profile"], "cell": identity, "playwright_version": version})
     write_json(root / "receipt.json", {"cell": identity, "fingerprint": fingerprint(plan), "status": "success",
                                       "reports": evidence})
 
@@ -264,7 +318,22 @@ def main():
     elif args.action == "run":
         run_cell(plan, args.cell, args.root)
     else:
-        receipts = [json.loads(p.read_text(encoding="utf-8")) for p in args.root.rglob("receipt.json")]
+        receipts = []
+        for path in args.root.rglob("receipt.json"):
+            receipt = json.loads(path.read_text(encoding="utf-8"))
+            if "_browser_evidence" in receipt:
+                raise ValueError("browser evidence must come from artifact reports")
+            selected = next((c for c in cells(plan) if c["cell"] == receipt.get("cell")), None)
+            if selected and selected["layer"] == "browser":
+                names = {"listed": "browser-list.json", "actual": "browser-results.json",
+                         "validated": "browser-validated.json", "metadata": "browser-metadata.json"}
+                if selected["shard"] == 1:
+                    names["full"] = "browser-full.json"
+                elif (path.parent / "browser-full.json").exists():
+                    raise ValueError("unexpected duplicate full discovery")
+                receipt["_browser_evidence"] = {key: json.loads((path.parent / name).read_text(encoding="utf-8"))
+                                                for key, name in names.items()}
+            receipts.append(receipt)
         gate(plan, json.loads(os.environ["CI_NEEDS"]), receipts)
         print(f"Matrix gate passed: {plan['mode']}/{plan['profile']}, {len(receipts)} verified cells; "
               "non-selected layers intentionally skipped")

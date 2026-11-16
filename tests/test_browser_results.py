@@ -16,7 +16,7 @@ def fixture(file="example.spec.mjs", title="passes", *, skip=False):
     if skip:
         reason = browser_results.PORTABLE_SKIPS.get((file, (title,)), browser_results.PORTABLE_REASON)
         test["annotations"] = [{"type": "skip", "description": reason}]
-    actual = {"config": {"shard": {"current": 1, "total": 4}}, "errors": [],
+    actual = {"config": {"version": "1.62.0", "shard": {"current": 1, "total": 4}}, "errors": [],
               "suites": [{"title": file, "line": 0, "specs": [{"file": file, "title": title, "tests": [test]}]}],
               "stats": {"expected": int(not skip), "skipped": int(skip), "unexpected": 0, "flaky": 0}}
     listed = copy.deepcopy(actual)
@@ -40,6 +40,8 @@ class BrowserResultsTests(unittest.TestCase):
             "wrong-case": lambda r, t: r["suites"][0]["specs"][0].update(title="other"),
             "global-error": lambda r, t: r["errors"].append({"message": "worker crash"}),
             "wrong-shard": lambda r, t: r["config"].update(shard={"current": 2, "total": 4}),
+            "wrong-config": lambda r, t: r["config"].update(workers=3),
+            "wrong-version": lambda r, t: r["config"].update(version="0.0.0"),
             "flaky": lambda r, t: t.update(status="flaky"),
             "retry": lambda r, t: t["results"][0].update(retry=1),
             "repeat": lambda r, t: t["results"].append(copy.deepcopy(t["results"][0])),
@@ -66,6 +68,16 @@ class BrowserResultsTests(unittest.TestCase):
                 browser_results.validate(*fixture(f, t, skip=True), 1, 4)
         listed, actual = fixture(file, title[0], skip=True)
         actual["suites"][0]["specs"][0]["tests"][0]["annotations"][0]["description"] += " extra"
+        with self.assertRaises(ValueError):
+            browser_results.validate(listed, actual, 1, 4)
+
+    def test_runtime_worker_metadata_does_not_change_resolved_config(self):
+        listed, actual = fixture()
+        listed["config"].update(metadata={}, projects=[{"id": "chromium", "metadata": {}}])
+        actual["config"].update(metadata={"actualWorkers": 2},
+                                projects=[{"id": "chromium", "metadata": {"actualWorkers": 2}}])
+        self.assertEqual(browser_results.validate(listed, actual, 1, 4)["passed"], 1)
+        actual["config"]["projects"][0]["id"] = "different"
         with self.assertRaises(ValueError):
             browser_results.validate(listed, actual, 1, 4)
 

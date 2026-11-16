@@ -8,7 +8,8 @@ import tempfile
 import unittest
 from unittest import mock
 
-from scripts import ci_impact, ci_matrix
+from scripts import browser_results, ci_impact, ci_matrix
+from tests.test_browser_results import fixture as browser_fixture
 from scripts.test_policy import python_pack
 from scripts.run_tests import build_suite, cases, filter_pack
 from tests.compact_assertions import CompactContainerAssertions
@@ -27,7 +28,38 @@ def gate_fixture(profile):
                              for name, required in (("python.json", False), ("media-required.json", True))}
                  if cell["layer"] == "python" else {}}
                 for cell in ci_matrix.cells(plan)]
+    total = 4 if profile == "full" else 1
+    for system in ci_matrix.SYSTEMS:
+        browsers = [r for r in receipts if r["cell"].startswith(system + "-browser-")]
+        reports = []
+        for shard, receipt in enumerate(browsers, 1):
+            listed, actual = browser_fixture(f"case-{shard}.spec.mjs", f"case {shard}")
+            for report in (listed, actual):
+                report["config"]["shard"] = {"current": shard, "total": total}
+            data = {"listed": listed, "actual": actual,
+                    "validated": browser_results.validate(listed, actual, shard, total),
+                    "metadata": {"revision": plan["head"], "os": system, "profile": profile,
+                                 "cell": receipt["cell"], "playwright_version": "1.62.0"}}
+            receipt["_browser_evidence"] = data
+            reports.append(listed)
+        if browsers:
+            full = copy.deepcopy(reports[0])
+            full["config"]["shard"] = None
+            full["suites"] = [suite for report in reports for suite in report["suites"]]
+            browsers[0]["_browser_evidence"]["full"] = full
     return plan, needs, receipts
+
+
+def write_receipts(root, receipts):
+    filenames = {"listed": "browser-list.json", "actual": "browser-results.json",
+                 "validated": "browser-validated.json", "metadata": "browser-metadata.json",
+                 "full": "browser-full.json"}
+    for n, original in enumerate(receipts):
+        receipt = copy.deepcopy(original)
+        data = receipt.pop("_browser_evidence", {})
+        for key, value in data.items():
+            ci_matrix.write_json(root / str(n) / filenames[key], value)
+        ci_matrix.write_json(root / str(n) / "receipt.json", receipt)
 
 
 MEDIA_ID = "tests.test_fcp7_png.RenderTests.test_fixture"
@@ -99,6 +131,79 @@ class TestMatrixTests(CompactContainerAssertions, unittest.TestCase):
             with self.assertRaises(ValueError):
                 ci_matrix.gate(plan, needs, receipts)
 
+    def test_browser_gate_proves_full_discovery_and_each_outcome(self):
+        def data(receipts, shard):
+            return next(r["_browser_evidence"] for r in receipts
+                        if r["cell"] == f"ubuntu-latest-browser-{shard}-4")
+        def missing_id(r):
+            data(r, 1)["full"]["suites"].pop()
+        def duplicate_id(r):
+            one, two = data(r, 1), data(r, 2)
+            for field in ("listed", "actual"):
+                two[field]["suites"] = copy.deepcopy(one[field]["suites"])
+            two["validated"] = browser_results.validate(two["listed"], two["actual"], 2, 4)
+        def wrong_config(r):
+            for field in ("listed", "actual"):
+                data(r, 2)[field]["config"]["workers"] = 1
+        def fake_skip(r):
+            test = data(r, 2)["actual"]["suites"][0]["specs"][0]["tests"][0]
+            test.update(expectedStatus="skipped", status="skipped",
+                        annotations=[{"type": "skip", "description": browser_results.PORTABLE_REASON}],
+                        results=[{"status": "skipped", "retry": 0}])
+        def wrong_version(r):
+            data(r, 1)["metadata"]["playwright_version"] = "0.0.0"
+        def wrong_sha(r):
+            data(r, 1)["metadata"]["revision"] = "c" * 40
+        def wrong_os(r):
+            data(r, 1)["metadata"]["os"] = "windows-latest"
+        def wrong_profile(r):
+            data(r, 1)["metadata"]["profile"] = "editor"
+        def forged_summary(r):
+            data(r, 1)["validated"]["passed"] = 0
+        def missing_full(r):
+            del data(r, 1)["full"]
+        for mutate in (missing_id, duplicate_id, wrong_config, fake_skip, wrong_version, wrong_sha,
+                       wrong_os, wrong_profile, forged_summary, missing_full):
+            plan, needs, receipts = gate_fixture("full")
+            mutate(receipts)
+            with self.subTest(mutation=mutate.__name__), self.assertRaises((ValueError, TypeError, KeyError)):
+                ci_matrix.gate(plan, needs, receipts)
+
+    def test_browser_gate_accepts_only_exact_retired_portable_skip(self):
+        plan, needs, receipts = gate_fixture("full")
+        selected = next(r for r in receipts if r["cell"] == "ubuntu-latest-browser-2-4")
+        file, title = next(iter(browser_results.PORTABLE_SKIPS))
+        listed, actual = browser_fixture(file, title[0], skip=True)
+        for report in (listed, actual):
+            report["config"]["shard"] = {"current": 2, "total": 4}
+        data = selected["_browser_evidence"]
+        data.update(listed=listed, actual=actual, validated=browser_results.validate(listed, actual, 2, 4))
+        first = next(r for r in receipts if r["cell"] == "ubuntu-latest-browser-1-4")
+        first["_browser_evidence"]["full"]["suites"][1] = copy.deepcopy(listed["suites"][0])
+        ci_matrix.gate(plan, needs, receipts)
+        actual["suites"][0]["specs"][0]["tests"][0]["annotations"][0]["description"] += " forged"
+        with self.assertRaises(ValueError):
+            ci_matrix.gate(plan, needs, receipts)
+
+    def test_public_gate_reads_artifact_reports_and_rejects_missing_full(self):
+        plan, needs, receipts = gate_fixture("full")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            ci_matrix.write_json(root / "plan.json", plan)
+            write_receipts(root, receipts)
+            command = [sys.executable, str(Path(ci_matrix.__file__).resolve()), "gate",
+                       "--plan", str(root / "plan.json"), "--root", str(root)]
+            env = {**os.environ, "CI_NEEDS": json.dumps(needs), "GITHUB_SHA": plan["head"]}
+            self.assertEqual(subprocess.run(command, env=env, capture_output=True).returncode, 0)
+            for name in ("browser-full.json", "browser-list.json", "browser-results.json",
+                         "browser-validated.json", "browser-metadata.json"):
+                path = next(root.rglob(name))
+                saved = path.read_bytes()
+                path.unlink()
+                with self.subTest(missing=name):
+                    self.assertNotEqual(subprocess.run(command, env=env, capture_output=True).returncode, 0)
+                path.write_bytes(saved)
+
     def test_bad_selector_cannot_green(self):
         for key, value in (("mode", "domain"), ("profile", "unknown"), ("version", 2),
                            ("head", "bad"), ("light", "false"), ("trusted_diff", False)):
@@ -122,8 +227,7 @@ class TestMatrixTests(CompactContainerAssertions, unittest.TestCase):
             command = [sys.executable, str(script), "gate", "--plan", str(root / "plan.json"), "--root", str(root)]
             env = {**os.environ, "CI_NEEDS": json.dumps(needs), "GITHUB_SHA": plan["head"]}
             self.assertNotEqual(subprocess.run(command, env=env, capture_output=True, timeout=10).returncode, 0)
-            for n, receipt in enumerate(receipts):
-                ci_matrix.write_json(root / str(n) / "receipt.json", receipt)
+            write_receipts(root, receipts)
             self.assertEqual(subprocess.run(command, env=env, capture_output=True, timeout=10).returncode, 0)
             env["GITHUB_SHA"] = "c" * 40
             self.assertNotEqual(subprocess.run(command, env=env, capture_output=True, timeout=10).returncode, 0)
@@ -152,8 +256,7 @@ class TestMatrixTests(CompactContainerAssertions, unittest.TestCase):
                 root = Path(temporary) / profile
                 plan, needs, receipts = gate_fixture(profile)
                 ci_matrix.write_json(root / "plan.json", plan)
-                for n, receipt in enumerate(receipts):
-                    ci_matrix.write_json(root / str(n) / "receipt.json", receipt)
+                write_receipts(root, receipts)
                 for event in ("pull_request", "push", "schedule", "workflow_dispatch", "release", ""):
                     env = {**os.environ, "GITHUB_EVENT_NAME": event, "GITHUB_SHA": plan["head"],
                            "CI_NEEDS": json.dumps(needs), "GITHUB_OUTPUT": str(root / "outputs")}
@@ -191,25 +294,29 @@ class TestMatrixTests(CompactContainerAssertions, unittest.TestCase):
             plan, _, _ = gate_fixture(profile)
             with self.subTest(profile=profile), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
-                with mock.patch.object(ci_matrix.subprocess, "run", side_effect=[
-                        None, subprocess.CalledProcessError(124, "browser")]) as run:
+                listed, _ = browser_fixture()
+                listed["config"]["shard"] = None
+                def command(args, **kwargs):
+                    if kwargs["env"].get("PLAYWRIGHT_JSON_OUTPUT_FILE", "").endswith("browser-full.json"):
+                        ci_matrix.write_json(root / "browser-full.json", listed)
+                    elif kwargs["env"].get("PLAYWRIGHT_JSON_OUTPUT_FILE", "").endswith("browser-results.json"):
+                        raise subprocess.CalledProcessError(124, "browser")
+                with mock.patch.object(ci_matrix.subprocess, "run", side_effect=command) as run:
                     with self.assertRaises(subprocess.CalledProcessError):
                         ci_matrix.run_cell(plan, f"windows-latest-browser-1-{total}", root)
-                listing, execution = run.call_args_list
+                full, listing, execution = run.call_args_list
+                self.assertEqual(full.args[0][2:4], ["--timeout", "600"])
                 self.assertEqual(listing.args[0][2:4], ["--timeout", "600"])
                 self.assertEqual(execution.args[0][2:4], ["--timeout", "900"])
+                self.assertFalse(any(arg.startswith("--shard=") for arg in full.args[0]))
                 for call in (listing, execution):
                     command = call.args[0]
-                    self.assertIn("--reporter=line,json", command)
-                    self.assertIn("--retries=0", command)
-                    self.assertIn("--workers=2", command)
-                    self.assertIn("--forbid-only", command)
-                    self.assertIn(f"--shard=1/{total}", command)
+                    for arg in ("--reporter=line,json", "--retries=0", "--workers=2", "--forbid-only", f"--shard=1/{total}"):
+                        self.assertIn(arg, command)
                     self.assertTrue(call.kwargs["check"])
+                self.assertIn("--list", full.args[0])
                 self.assertIn("--list", listing.args[0])
                 self.assertNotIn("--list", execution.args[0])
-                self.assertEqual(execution.kwargs["env"]["PLAYWRIGHT_JSON_OUTPUT_FILE"],
-                                 str((root / "browser-results.json").resolve()))
                 self.assertFalse((root / "receipt.json").exists())
 
     def test_non_browser_budgets_are_not_increased(self):
