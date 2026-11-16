@@ -16,6 +16,12 @@
 
 这套矩阵目前是**增加覆盖**。原编辑器和 Windows 预览中的固定检查仍保留；待在相同提交、平台和运行配置下逐项证明覆盖等效后，才会移除重复执行。不能把工作流绿色当作所有测试都运行；要同时看选择计划、执行任务、分片报告和结果。Windows 安装包以预览工作流实际构建、上传和启动证据为准。
 
+## CI 环境准备与耗时
+
+Windows 矩阵的 Node 和浏览器单元安装 Chromium 时只运行 `playwright install chromium`；Ubuntu 仍运行 `playwright install --with-deps chromium`。Windows 继续安装并校验 FFmpeg、ffprobe、libass、libx264 和 libwebp，媒体测试、分片和 required 回执不减少。Playwright 1.62.0 在已测 Windows Server 2025 runner 上使用 `--with-deps` 会执行 Media Foundation 安装；[专项计时与逐平台报告](../logs/release1.11.2/261117_2.0CI准备耗时/CI_TIMING.json)记录了三轮同提交对照、真实 H.264/AAC 与 WAV 播放、完整矩阵及其未解决失败。安装步骤的节省不等于整轮 CI 的稳定节省。升级 runner 镜像或 Playwright 后，重新检查媒体播放和完整矩阵。
+
+Node 单元中的 `tests/test_asr_presets_browser.mjs` 和 `tests/test_shared_tooltip_browser.mjs` 会实际启动 Chromium，不能直接省掉两平台的浏览器安装。旧 Editor 的部分 Ubuntu 浏览器用例也进入完整矩阵，但 domain/light 路径以及 typecheck、调试工具、文档和 Windows 预览的保障不同；在逐项核对触发条件与回执前保留旧检查。专项计时 job 和脚本只用于临时 fork PR，不进入正式工作流。
+
 本地可先运行相关组；`--required` 会拒绝依赖缺失导致的跳过：
 
 ```text
