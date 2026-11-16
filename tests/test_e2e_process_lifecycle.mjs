@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, copyFileSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, copyFileSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -58,6 +58,70 @@ async function portFree(port) {
   }
 }
 
+async function waitForLeafClose(closed) {
+  let timer;
+  try {
+    return await Promise.race([closed, new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('leaf did not close within 5s')), 5000);
+    })]);
+  } finally { clearTimeout(timer); }
+}
+
+test('leaf waits for evidence handshake and exits on EOF without listening', { timeout: 20_000 }, async () => {
+  const root = mkdtempSync(join(tmpdir(), 'maw-leaf-handshake-'));
+  let child, closed, primaryError;
+  try {
+    writeFileSync(join(root, 'scenario.txt'), 'ready');
+    const reservation = createServer();
+    await new Promise((resolve, reject) => {
+      reservation.once('error', reject);
+      reservation.listen(0, '127.0.0.1', resolve);
+    });
+    const port = reservation.address().port;
+    await new Promise(resolve => reservation.close(resolve));
+    child = spawn(process.env.MAW_E2E_PYTHON || 'python', [synthetic, '--port', String(port), '--leaf'], {
+      cwd: root, env: { ...process.env, MAW_APP_DATA_ROOT: join(root, 'settings'), MAW_LIFECYCLE_TEST_HANDSHAKE: '1' },
+      stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true,
+    });
+    closed = new Promise(resolve => child.once('close', (code, signal) => resolve({ code, signal })));
+    const marker = await new Promise((resolve, reject) => {
+      let output = '';
+      const cleanup = () => { clearTimeout(timer); child.stdout.off('data', onData); child.off('error', onError); child.off('exit', onExit); };
+      const onData = data => {
+        output += data.toString();
+        const newline = output.indexOf('\n');
+        if (newline >= 0) { cleanup(); resolve(output.slice(0, newline).replace(/\r$/, '')); }
+      };
+      const onError = error => { cleanup(); reject(error); };
+      const onExit = code => { cleanup(); reject(new Error(`leaf exited before handshake: ${code}`)); };
+      const timer = setTimeout(() => { cleanup(); reject(new Error('leaf handshake marker timed out')); }, 10_000);
+      child.stdout.on('data', onData);
+      child.once('error', onError);
+      child.once('exit', onExit);
+    });
+    assert.equal(marker, 'LEAF_WAITING');
+    assert.equal(child.exitCode, null);
+    await portFree(port);
+    child.stdin.end();
+    assert.equal((await waitForLeafClose(closed)).code, 1);
+    await portFree(port);
+  } catch (error) {
+    primaryError = error;
+  } finally {
+    const cleanupErrors = [];
+    if (child && child.exitCode === null && child.signalCode === null) {
+      try {
+        killOwned(child.pid);
+        await waitForLeafClose(closed);
+      } catch (error) { cleanupErrors.push(error); }
+    }
+    try { rmSync(root, { recursive: true }); } catch (error) { cleanupErrors.push(error); }
+    if (primaryError && cleanupErrors.length) throw new AggregateError([primaryError, ...cleanupErrors], 'handshake test and cleanup failed');
+    if (primaryError) throw primaryError;
+    if (cleanupErrors.length) throw new AggregateError(cleanupErrors, 'handshake cleanup failed');
+  }
+});
+
 async function runScenario(kind, scenario, action = 'stop') {
   const root = mkdtempSync(join(tmpdir(), 'maw-lifecycle-'));
   mkdirSync(join(root, 'server-editor'));
@@ -112,6 +176,12 @@ async function runScenario(kind, scenario, action = 'stop') {
       assert.equal(result.code, { SIGINT: 130, SIGTERM: 143, SIGBREAK: 149, SIGHUP: 129 }[action.slice(7)]);
     } else if (action === 'exit') assert.equal(result.code, 0, output);
     else if (action === 'exception') assert.equal(result.code, 1, output);
+    if (action === 'hold') {
+      assert.equal(message?.ready, true);
+      assert.equal(message.pids.length, 2);
+      assert.ok(message.pids.every(pid => Number.isInteger(pid) && pid > 0));
+      assert.notEqual(message.pids[0], message.pids[1]);
+    }
     assert.ok(Date.now() - started < scenarioDeadlineMs);
     const dir = join(evidence, readdirSync(evidence)[0]);
     const { port } = JSON.parse(readFileSync(join(dir, 'runtime.json')));
@@ -122,6 +192,7 @@ async function runScenario(kind, scenario, action = 'stop') {
         assert.equal(environment.parentOnlyMarker, false, 'supervisor-only environment cannot reach the application');
       }
       const pids = JSON.parse(readFileSync(join(dir, 'owned-pids.json')));
+      if (action === 'hold') assert.deepEqual(pids, message.pids);
       const deadline = Date.now() + 2000;
       while (pids.some(alive) && Date.now() < deadline) await delay(25);
       assert.deepEqual(pids.filter(alive), [], 'owned descendants must exit, not just the wrapper');
