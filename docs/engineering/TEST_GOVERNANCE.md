@@ -28,3 +28,11 @@ pnpm exec playwright test --config=tests/config/playwright.config.mjs --project=
 ```
 
 本地运行不验证 GitHub 的 PR 合并提交、跨任务报告和预览包上传；这些看目标 PR 的实际 Actions 回执。
+
+## 本地按改动运行
+
+安装锁定依赖后，可用 `uv run --no-sync python scripts/test_workflow.py --stage dev --component editor` 运行固定开发核心，或用 `--stage merge` 执行影响范围。`pnpm run test:dev`、`test:merge` 和 `test:release` 是快捷入口。
+
+`merge` 默认读取未暂存、已暂存和未跟踪文件；`--base-ref origin/2.0dev` 只比较该引用与 HEAD 的已提交差异，使用前须更新引用。也可重复传入 `--changed` 指定路径。读取 Git 差异失败时命令失败；空差异、删除、未知或混合路径扩大到完整集合。文档及网站运行其消费者，独立浏览器 spec 运行自身，清单工具运行自身测试及三个实际浏览器消费者。共享源码和 2.0 轨道、说话人、工程迁移路径扩大到完整集合；Python 测试来源可能包含动态 `load_tests`，因此也扩大。
+
+`--plan-only` 只输出计划；`--stage merge --pack media` 可复现单组，不能代表完整门禁。`--stage release` 禁止指定局部组并运行完整本地 required 集合；本地结果不代表跨平台 CI。计划及结果位于 `.artifacts/test-workflow/`。浏览器用例先发现再运行，使用现有 CI 报告校验与 2.0 退役便携 HTML 的精确例外。缺依赖、失败、超时或报告无效时停止并返回失败。
