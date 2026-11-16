@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { loadEditorModule } from './helpers/editor-module-loader.mjs';
+import { loadEditorModule, prepareEditorModule } from './helpers/editor-module-loader.mjs';
+await prepareEditorModule('shared/editor-utils.js');
 import { initMaweMultiSubtitleCore } from '../web/editor/state/editor-multi-subtitle-core.js';
 import { initMaweSegmentOps } from '../web/editor/cues/editor-segment-ops.js';
 import { initMaweTextCleanup } from '../web/editor/cues/editor-text-cleanup.js';

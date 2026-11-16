@@ -62,7 +62,8 @@ test('dangling scope cannot acquire a generated cue id', () => {
 });
 
 test('swap, save and identity upgrade preserve a secondary cleanup scope without affecting main', async () => {
-  const { loadEditorModule } = await import('./helpers/editor-module-loader.mjs');
+  const { loadEditorModule, prepareEditorModule } = await import('./helpers/editor-module-loader.mjs');
+  await prepareEditorModule('shared/editor-utils.js');
   const context = {}; context.window = context; loadEditorModule(context, 'shared/editor-utils.js');
   const utils = context.AsrEditorUtils;
   for (const stale of [false, true]) {
@@ -105,7 +106,8 @@ test('migration remaps independent scopes on both tracks and leaves unrelated sc
 });
 
 test('scope follows a cue through overlay migration and back to main', async () => {
-  const { loadEditorModule } = await import('./helpers/editor-module-loader.mjs');
+  const { loadEditorModule, prepareEditorModule } = await import('./helpers/editor-module-loader.mjs');
+  await prepareEditorModule('shared/editor-utils.js');
   const context = {}; context.window = context; loadEditorModule(context, 'shared/editor-utils.js');
   const utils = context.AsrEditorUtils, before = project();
   const main = utils.getMainTrack(before), overlay = utils.ensureOverlayTrack(before);

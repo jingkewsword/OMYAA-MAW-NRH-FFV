@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import vm from 'node:vm';
-import { loadEditorModule } from './helpers/editor-module-loader.mjs';
+import { loadEditorModule, prepareEditorModule } from './helpers/editor-module-loader.mjs';
+await prepareEditorModule('shared/editor-utils.js');
 import { invokedInitModuleSource } from './helpers/init-module-source.mjs';
 import { runtimeProject } from './helpers/runtime-project.mjs';
 import { createEditorCommands } from '../web/editor/state/editor-commands.js';

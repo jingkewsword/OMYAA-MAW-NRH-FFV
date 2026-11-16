@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
-import { loadEditorModule } from './helpers/editor-module-loader.mjs';
+import { loadEditorModule, prepareEditorModule } from './helpers/editor-module-loader.mjs';
+await prepareEditorModule('shared/editor-utils.js');
 
 const cases = JSON.parse(fs.readFileSync(new URL('./fixtures/project-boundary.json', import.meta.url), 'utf8'));
 const context = { window: {} };

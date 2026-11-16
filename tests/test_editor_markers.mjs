@@ -1,7 +1,8 @@
 // markers：通用 Marker / Region 核心逻辑（规范化 / 过滤 / 几何换算）单测。
 // 覆盖 AGENTS 约定：整数毫秒、稳定 ID、Region 判定（end > start）、
 // 管理窗过滤、可见范围裁剪与波形跨行挑选 / 行内时间换算。
-import { loadEditorModule } from './helpers/editor-module-loader.mjs';
+import { loadEditorModule, prepareEditorModule } from './helpers/editor-module-loader.mjs';
+await Promise.all(['shared/editor-utils.js', 'editor/media/waveform.js'].map(prepareEditorModule));
 import { initModuleSource } from './helpers/init-module-source.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
