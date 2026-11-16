@@ -42,7 +42,7 @@ test('legal zero-width punctuation survives browser serialization and reimport',
     const first = JSON.parse(MaweJsonRepair.buildJson());
     if (!await open(first)) throw new Error('reimport failed');
     const second = JSON.parse(MaweJsonRepair.buildJson());
-    const semantic = (project) => project.segments.map((s) => ({ start: s.start, end: s.end, text: s.text,
+    const semantic = (project) => AsrEditorUtils.getMainTrack(project).segments.map((s) => ({ start: s.start, end: s.end, text: s.text,
       items: s.items.map(({ start, end, text }) => ({ start, end, text })) }));
     return { first: semantic(first), second: semantic(second), report: MaweJsonRepair.lastImportReport };
   }, input);
