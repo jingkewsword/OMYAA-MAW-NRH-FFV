@@ -49,6 +49,8 @@ async function loadAttachedCues(page, autoSnapAdjacentCues, adjacentBoundaryMode
       { start: 10000, end: 18000, text: 'Second', items: [{ start: 10000, end: 18000, text: 'Second' }] },
       { start: 25000, end: 30000, text: 'Third', items: [{ start: 25000, end: 30000, text: 'Third' }] },
     );
+    const main = AsrEditorUtils.getMainTrack(MaweBoot.DATA);
+    AsrEditorUtils.ensureStableSegmentIds(main.segments, main.id);
     MaweCuePanel.renderAll();
   });
 }
@@ -566,8 +568,12 @@ for (const fps of [30, 29.97]) {
         expect(after.undo).toBe(1);
         await page.evaluate(() => MaweHistory.performUndo());
         const restored = await readOffsetProject(page);
-        expect(restored.segments).toEqual(before.segments);
-        expect(restored.multi).toEqual(before.multi);
+        // Undo marks changed cues dirty for the editor session; compare the
+        // restored project data independently of this transient UI flag.
+        const withoutDirty = (value) => JSON.parse(JSON.stringify(value,
+          (key, item) => key === '_dirty' ? undefined : item));
+        expect(withoutDirty(restored.segments)).toEqual(withoutDirty(before.segments));
+        expect(withoutDirty(restored.multi)).toEqual(withoutDirty(before.multi));
       });
     }
   }
@@ -995,6 +1001,8 @@ test('selected cue group reflows fragments into the next waveform row while drag
       { start: 29000, end: 33000, text: 'D', items: [] },
       { start: 33000, end: 35000, text: 'E', items: [] },
     );
+    const main = AsrEditorUtils.getMainTrack(MaweBoot.DATA);
+    AsrEditorUtils.ensureStableSegmentIds(main.segments, main.id);
     MaweCuePanel.renderAll();
     MaweSelection.selectOnly(2);
     MaweSelection.addManyToSelection([3, 4]);

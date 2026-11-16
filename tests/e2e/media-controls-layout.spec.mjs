@@ -19,7 +19,7 @@ test('media controls stay on one line and keep fullscreen visible at narrow widt
       const seek = document.getElementById('media-seek');
       const stepBack = document.getElementById('media-step-back');
       const stepForward = document.getElementById('media-step-forward');
-      const volume = document.querySelector('.media-volume-control');
+      const volume = document.getElementById('audio-processing-toggle');
       const controlsRect = controls.getBoundingClientRect();
       const fullscreenRect = fullscreen.getBoundingClientRect();
       return {
@@ -32,7 +32,11 @@ test('media controls stay on one line and keep fullscreen visible at narrow widt
         seekWidth: seek.getBoundingClientRect().width,
         stepBackDisplay: getComputedStyle(stepBack).display,
         stepForwardDisplay: getComputedStyle(stepForward).display,
-        volumeDisplay: getComputedStyle(volume).display,
+        volumeVisible: getComputedStyle(volume).display !== 'none'
+          && volume.getBoundingClientRect().width > 0 && volume.getBoundingClientRect().height > 0,
+        volumeInLine: volume.getBoundingClientRect().top >= controlsRect.top - 1
+          && volume.getBoundingClientRect().bottom <= controlsRect.bottom + 1
+          && volume.getBoundingClientRect().right <= controlsRect.right + 1,
       };
     });
 
@@ -42,7 +46,10 @@ test('media controls stay on one line and keep fullscreen visible at narrow widt
     expect(metrics.seekWidth).toBeGreaterThan(0);
     expect(metrics.stepBackDisplay).toBe('none');
     expect(metrics.stepForwardDisplay).toBe('none');
-    if (width <= 500) expect(metrics.volumeDisplay).toBe('none');
-    if (width === 620) expect(metrics.volumeDisplay).not.toBe('none');
+    expect(metrics.volumeVisible).toBe(true);
+    expect(metrics.volumeInLine).toBe(true);
+    await page.locator('#audio-processing-toggle').click();
+    await expect(page.locator('#audio-processing-panel')).toBeVisible();
+    await expect(page.locator('#media-volume')).toBeVisible();
   }
 });

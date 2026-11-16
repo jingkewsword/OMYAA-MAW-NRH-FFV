@@ -5,6 +5,7 @@ import { createOutputTail } from './output-tail.mjs';
 import { mkdirSync, mkdtempSync, writeFileSync, createWriteStream } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { generateWav, generateWaveformPayload, findFreePort } from './helpers.mjs';
+import { createUtilsModule } from '../../web/shared/utils/project-tracks.js';
 
 
 export function syntheticScrollProject(count = 107, mode = 'main', paired = false) {
@@ -27,14 +28,15 @@ export function syntheticScrollProject(count = 107, mode = 'main', paired = fals
   };
 }
 
-export async function startScrollFixture({ count = 107, mode = 'main', paired = false, blank = false, readinessTimeoutMs = 45_000 } = {}) {
+export async function startScrollFixture({ count = 107, mode = 'main', paired = false, blank = false, canonical = false, readinessTimeoutMs = 45_000 } = {}) {
   if (!Number.isFinite(readinessTimeoutMs) || readinessTimeoutMs <= 0) throw new RangeError('readinessTimeoutMs must be finite and positive');
   const evidenceRoot = resolve(process.env.MAW_SCROLL_EVIDENCE || 'output/playwright/cue-scroll');
   mkdirSync(evidenceRoot, { recursive: true });
   const directory = mkdtempSync(join(evidenceRoot, 'fixture-'));
   const settings = join(directory, 'settings');
   mkdirSync(settings);
-  const project = syntheticScrollProject(count, mode, paired);
+  const source = syntheticScrollProject(count, mode, paired);
+  const project = canonical ? createUtilsModule().importProject(source).project : source;
   const projectPath = join(directory, 'synthetic.mosp');
   const mediaPath = join(directory, 'synthetic.wav');
   writeFileSync(projectPath, JSON.stringify(project));

@@ -1,6 +1,6 @@
 // 服务器接管回归：空白服务器里打开/拖入工程时，服务器应按工程记录的媒体
 // 绝对路径定位同目录同名工程并接管——媒体自动加载、保存按钮可用、
-// Ctrl(Cmd)+S 直接写回工程文件；内容不一致的同名文件不得掉包接管。
+// 内容不一致的同名文件不得掉包接管；旧工程接管后仍须显式另存 v2。
 import { expect, test } from '@playwright/test';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -63,10 +63,11 @@ test('a same-named project with different content is not swapped in', async ({ p
   await expect(page.locator('#save-project')).toBeDisabled();
 });
 
-test('dropping a legacy project lets the blank server take over after ID normalization', async ({ page }) => {
+test('dropping a legacy project lets the blank server take over but saves into a new v2 file', async ({ page }) => {
   await page.goto(server.url);
   const reload = page.waitForEvent('load');
-  await dropProject(page, 'project.json', readFileSync(projectPath, 'utf-8'));
+  const original = readFileSync(projectPath, 'utf-8');
+  await dropProject(page, 'project.json', original);
   await reload;
 
   // 接管成功：整页刷新为服务器渲染状态，媒体与保存同时恢复。
@@ -89,15 +90,25 @@ test('dropping a legacy project lets the blank server take over after ID normali
     dirty: AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments[0]._dirty,
     canSave: MaweBoot.SERVER_CONFIG.canSave,
   }))).toEqual({ text: 'AttachedSave', dirty: true, canSave: true });
-  const saveRequest = page.waitForRequest((request) => (
-    request.url().endsWith('/api/project') && request.method() === 'POST'
-  ));
-  const saveResponse = page.waitForResponse((response) => (
-    response.url().endsWith('/api/project') && response.request().method() === 'POST'
-  ));
+  expect(await page.evaluate(() => MaweServerSave.requiresMigrationSaveAs)).toBe(true);
+  await page.evaluate(() => {
+    window.migrationWrites = [];
+    window.migrationName = '';
+    window.showSaveFilePicker = async options => {
+      window.migrationName = options.suggestedName;
+      return { name: options.suggestedName, getFile: async () => ({ size: 0 }),
+        createWritable: async () => ({ write: async blob => window.migrationWrites.push(await blob.text()), close: async () => {} }) };
+    };
+  });
+  let serverWrites = 0;
+  page.on('request', request => { if (request.url().endsWith('/api/project') && request.method() === 'POST') serverWrites += 1; });
   await page.keyboard.press('Control+s');
-  expect(getMainTrack(JSON.parse((await saveRequest).postData()).project).segments[0].text).toBe('AttachedSave');
-  expect((await saveResponse).ok()).toBe(true);
-  await expect.poll(() => readFileSync(projectPath, 'utf-8')).toContain('AttachedSave');
-  expect(getMainTrack(JSON.parse(readFileSync(projectPath, 'utf-8'))).segments[0].id).toBe('main-cue-1');
+  await expect.poll(() => page.evaluate(() => window.migrationWrites.length)).toBe(1);
+  const saved = JSON.parse(await page.evaluate(() => window.migrationWrites[0]));
+  expect(await page.evaluate(() => window.migrationName)).toMatch(/_v2\.mosp$/);
+  expect(saved.schema).toBe('moy.asr.project.v2');
+  expect(getMainTrack(saved).segments[0]).toMatchObject({ id: 'main-cue-1', text: 'AttachedSave' });
+  expect(await page.evaluate(() => MaweServerSave.requiresMigrationSaveAs)).toBe(false);
+  expect(readFileSync(projectPath, 'utf-8')).toBe(original);
+  expect(serverWrites).toBe(0);
 });

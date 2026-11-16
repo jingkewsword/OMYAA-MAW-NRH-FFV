@@ -109,7 +109,7 @@ test('detaches a cue from a color group while keeping its color and limiting the
   const detachItem = page.locator('#ctxmenu .item > span')
     .filter({ hasText: /^移出颜色组$/u }).locator('..');
 
-  // 中间 cue 脱离：前半组保留原 head，后半组提升为新 head。
+  // 中间 cue 脱离：该句保留颜色，前后成员仍共享原稳定组。
   await setColorGroup();
   await page.locator('.cue[data-idx="1"]').click({ button: 'right' });
   await expect(detachItem).toBeVisible();
@@ -118,9 +118,9 @@ test('detaches a cue from a color group while keeping its color and limiting the
     color: color ? { name: color.name, start: color.start, end: color.end } : null,
     color_ref: color_ref ? { ...color_ref } : null,
   })))).toEqual([
-    { color: { name: 'yellow', start: 0, end: 1000 }, color_ref: null },
+    { color: { name: 'yellow', start: 0, end: 3000 }, color_ref: null },
     { color: { name: 'yellow', start: 1000, end: 2000 }, color_ref: null },
-    { color: { name: 'yellow', start: 2000, end: 3000 }, color_ref: null },
+    { color: null, color_ref: { name: 'yellow', headIdx: 0 } },
   ]);
   await page.locator('.cue[data-idx="1"]').click({ button: 'right' });
   await expect(detachItem).toHaveCount(0);
@@ -154,10 +154,8 @@ test('colored subtitle indexes remain readable against tinted rows', async ({ pa
   await waitEditorReady(page);
   await paintFirstSegmentRed(page);
 
-  await expect(page.locator('.cue[data-idx="0"] .index')).toHaveCSS(
-    'color',
-    'rgb(168, 177, 192)',
-  );
+  // 彩色行的序号使用较亮的次要文字色，而非中性行的 faint 色。
+  await expect(page.locator('.cue[data-idx="0"] .index')).toHaveCSS('color', 'rgb(201, 197, 191)');
 });
 
 test('clicking a row shows only that color; checkboxes multi-select; clear restores all', async ({ page }) => {
@@ -377,17 +375,20 @@ test('split trim chips and extra input drive shared trim behavior and persist', 
   const reset = page.locator('#split-trim-symbols-reset');
   await expect(reset).toBeHidden();
   const extra = page.locator('#split-trim-extra-symbols');
-  // 文本框默认预填半角逗号句点（延续历史行为）。
-  await expect(extra).toHaveValue(', .');
+  // 2.0 默认保留标点；需要修剪时由用户显式选择。
+  await expect(extra).toHaveValue('');
 
-  // 关闭全角逗号 chip 后，拆分修剪不再移除右缘全角逗号（半角逗号仍由文本框生效）。
+  // 勾选全角逗号后才修剪其右缘。
   const fullwidthCommaChip = grid.locator('label[data-title="全角逗号"]');
   const fullwidthComma = grid.locator('input[value="，"]');
-  await expect(fullwidthComma).toBeChecked();
-  await fullwidthCommaChip.click();
   await expect(fullwidthComma).not.toBeChecked();
-  await expect(reset).toBeVisible();
   expect(await page.evaluate(() => window.AsrEditorUtils.applySplitEdgeTrim('世界，', 'end'))).toBe('世界，');
+  await fullwidthCommaChip.click();
+  await expect(fullwidthComma).toBeChecked();
+  await expect(reset).toBeVisible();
+  expect(await page.evaluate(() => window.AsrEditorUtils.applySplitEdgeTrim('世界，', 'end'))).toBe('世界');
+  await extra.fill(', .');
+  await extra.press('Tab');
   expect(await page.evaluate(() => window.AsrEditorUtils.applySplitEdgeTrim('ok,', 'end'))).toBe('ok');
 
   // 文本框输入即时生效：改为省略号后存储与修剪行为同时体现。
@@ -396,17 +397,17 @@ test('split trim chips and extra input drive shared trim behavior and persist', 
   await expect(extra).toHaveValue('…');
   const storedSymbols = await page.evaluate(() =>
     JSON.parse(localStorage.getItem('moy.asr.editor.settings.v1')).splitTrimSymbols);
-  expect(storedSymbols).not.toContain('，');
-  expect(storedSymbols).toContain('。');
+  expect(storedSymbols).toContain('，');
   expect(storedSymbols).toContain('…');
+  expect(storedSymbols).not.toContain(',');
   expect(await page.evaluate(() => window.AsrEditorUtils.applySplitEdgeTrim('真的……', 'end'))).toBe('真的');
 
-  // 恢复默认符号：chip 全部回勾、文本框回到预填值、行为还原。
+  // 恢复默认：chip 和文本框清空，标点重新保留。
   await reset.click();
-  await expect(fullwidthComma).toBeChecked();
-  await expect(extra).toHaveValue(', .');
+  await expect(fullwidthComma).not.toBeChecked();
+  await expect(extra).toHaveValue('');
   await expect(reset).toBeHidden();
-  expect(await page.evaluate(() => window.AsrEditorUtils.applySplitEdgeTrim('世界，', 'end'))).toBe('世界');
+  expect(await page.evaluate(() => window.AsrEditorUtils.applySplitEdgeTrim('世界，', 'end'))).toBe('世界，');
 });
 
 test('merge join hint shows detected main type; clicking pins and syncs the multi-subtitle dropdown', async ({ page }) => {

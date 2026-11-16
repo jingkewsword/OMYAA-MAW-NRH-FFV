@@ -118,16 +118,26 @@ test('main merge rejects mixed identities and preserves explicit same-person mer
 });
 
 for (const linked of [false, true]) {
-test(`${linked ? 'linked' : 'extension'} merge rejects mixed identities and preserves same-person timed items through undo, save/reopen and swap`, async ({ page }) => {
+test(`${linked ? 'linked' : 'extension'} merge preserves timed items and speaker identity through undo, save/reopen and swap`, async ({ page }) => {
   const before = await configureMergeFixture(page, { extension: true, linked });
-  if (linked) expect(await page.evaluate(() => new Set(AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments.map(s => s.speaker)).size)).toBe(1);
-  await expectMixedMergeRejected(page);
-  await unifyMergeIdentity(page, { extension: true, linked });
+  if (linked) expect(await page.evaluate(() => AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments.map(s => s.speaker)))
+    .toEqual([before[0].speaker, before[0].speaker]);
+  if (!linked) {
+    await expectMixedMergeRejected(page);
+    await unifyMergeIdentity(page, { extension: true });
+  }
   await page.keyboard.press('c');
+  if (linked) await expect(page.locator('.hint-card').last()).toContainText('副字幕说话人已按主字幕统一');
   const merged = await page.evaluate(() => structuredClone(AsrEditorUtils.getExtensionTrack(MaweBoot.DATA).segments));
   expect(merged).toHaveLength(1);
   expect(merged[0].text).toBe('**甲乙**');
   expect(merged[0].speaker).toBe(before[0].speaker);
+  if (linked) {
+    expect(await page.evaluate(() => AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments.map(s => [s.text, s.speaker])))
+      .toEqual([['甲乙', before[0].speaker]]);
+    expect(await page.evaluate(() => MaweBoot.DATA.bindings.map(b => [b.source.segment_id, b.target.segment_id])))
+      .toEqual([['main-0', 'ext-0']]);
+  }
   const items = [{ ...before[0].items[0], text: '**甲' }, { ...before[1].items[0], text: '乙**' }];
   expect(merged[0].items).toEqual(items);
   expect(merged[0].color_group_id).toBe(before[0].color_group_id);
@@ -135,11 +145,13 @@ test(`${linked ? 'linked' : 'extension'} merge rejects mixed identities and pres
   expect(await page.evaluate(() => AsrEditorUtils.getExtensionTrack(MaweBoot.DATA).segments.map(s => s.items)))
     .toEqual(before.map(s => s.items));
   expect(await page.evaluate(() => AsrEditorUtils.getExtensionTrack(MaweBoot.DATA).segments.map(s => s.speaker)))
-    .toEqual([before[0].speaker, before[0].speaker]);
-  await page.locator('#undo-btn').click();
-  expect(await page.evaluate(() => AsrEditorUtils.getExtensionTrack(MaweBoot.DATA).segments.map(s => s.speaker)))
-    .toEqual(before.map(s => s.speaker));
-  await page.locator('#redo-btn').click();
+    .toEqual(linked ? before.map(s => s.speaker) : [before[0].speaker, before[0].speaker]);
+  if (!linked) {
+    await page.locator('#undo-btn').click();
+    expect(await page.evaluate(() => AsrEditorUtils.getExtensionTrack(MaweBoot.DATA).segments.map(s => s.speaker)))
+      .toEqual(before.map(s => s.speaker));
+    await page.locator('#redo-btn').click();
+  }
   await page.locator('#redo-btn').click();
   const saved = await saveAndReopen(page);
   expect(getExtensionTrack(saved).segments[0].items).toEqual(items);

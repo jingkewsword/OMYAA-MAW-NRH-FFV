@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { getMainTrack, getExtensionTrack } from './helpers.mjs';
 
 const directory = path.resolve('.artifacts/translation-review-e2e');
 const python = process.env.MAW_E2E_PYTHON || 'python';
@@ -45,19 +46,19 @@ for (const mode of ['single', 'backfill', 'bilingual']) {
     await download.saveAs(output);
     const result = JSON.parse(readFileSync(output, 'utf8'));
     const expected = JSON.parse(readFileSync(cases[mode].project, 'utf8'));
-    const target = mode === 'backfill' ? expected.segments[0] : expected.multi_subtitle.tracks[0].segments[0];
+    const target = mode === 'backfill' ? getMainTrack(expected).segments[0] : getExtensionTrack(expected, 'fixed-secondary').segments[0];
     target.text = 'Explain the API clearly.';
     delete target.items;
     target._dirty = true;
     expect(result).toEqual(expected);
     if (mode !== 'backfill') {
       const source = JSON.parse(readFileSync(cases[mode].source, 'utf8'));
-      expect(result.segments).toEqual(source.segments);
-      expect(result.multi_subtitle.tracks).toHaveLength(1);
-      expect(result.multi_subtitle.tracks[0].id).toBe('fixed-secondary');
-      expect(result.multi_subtitle.tracks[0].segments).toHaveLength(2);
-      expect(JSON.stringify(result.multi_subtitle)).not.toContain('过期译文');
-      expect(result.multi_subtitle.bindings[0].id).toBe('existing-binding');
+      expect(getMainTrack(result).segments).toEqual(source.segments);
+      expect(result.tracks.filter(track => track.role === 'secondary')).toHaveLength(1);
+      expect(getExtensionTrack(result, 'fixed-secondary').id).toBe('fixed-secondary');
+      expect(getExtensionTrack(result, 'fixed-secondary').segments).toHaveLength(2);
+      expect(JSON.stringify(getExtensionTrack(result, 'fixed-secondary'))).not.toContain('过期译文');
+      expect(result.bindings[0].id).toBe('existing-binding');
     }
     execFileSync(python, [helper, '--validate', output], { timeout: 30000, stdio: 'pipe' });
     await page.screenshot({ path: testInfo.outputPath('translation-review.png'), fullPage: true });
@@ -84,9 +85,9 @@ test('offline bilingual boundary text preserves whitespace and literal template 
   await (await downloadPromise).saveAs(output);
   const result = JSON.parse(readFileSync(output, 'utf8'));
   const expected = JSON.parse(readFileSync(cases.boundary.project, 'utf8'));
-  expected.segments[0].text = ' API \nExplain API';
-  delete expected.segments[0].items;
-  expected.segments[0]._dirty = true;
+  getMainTrack(expected).segments[0].text = ' API \nExplain API';
+  delete getMainTrack(expected).segments[0].items;
+  getMainTrack(expected).segments[0]._dirty = true;
   expect(result).toEqual(expected);
   execFileSync(python, [helper, '--validate', output], { timeout: 30000, stdio: 'pipe' });
   await page.locator('#reset-translations').click();
