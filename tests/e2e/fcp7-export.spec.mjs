@@ -99,6 +99,58 @@ test.afterAll(async () => {
   cleanupTempDir(tempDir);
 });
 
+for (const edit of ['split', 'merge', 'overlay merge']) {
+  test(`exports FCP7 after ${edit} of cues without word timings`, async ({ page }) => {
+    await disableOnboarding(page);
+    await stubSavePicker(page);
+    await page.goto(server.url);
+    await expect(page.locator('#cues-container')).toBeVisible();
+    await page.evaluate(() => {
+      MaweSettings.updateEditorSettings({ autoSaveProject: false });
+      const main = AsrEditorUtils.getMainTrack(MaweBoot.DATA);
+      main.segments = [
+        { id: 'no-words-1', start: 0, end: 900, text: 'Alpha Bravo' },
+        { id: 'no-words-2', start: 1700, end: 2500, text: 'Beta' },
+        { id: 'with-words', start: 3000, end: 3500, text: 'Word',
+          items: [{ start: 3000, end: 3500, text: 'Word' }] },
+      ];
+      const overlay = AsrEditorUtils.ensureOverlayTrack(MaweBoot.DATA);
+      overlay.enabled = true;
+      overlay.segments = [
+        { id: 'over-1', start: 100, end: 800, text: 'One' },
+        { id: 'over-2', start: 1700, end: 2400, text: 'Two' },
+      ];
+      MaweCuePanel.renderAll({ waveform: 'full' });
+    });
+    if (edit === 'split') {
+      await page.evaluate(() => MaweSplitCore.openMainWaveformSplitModal(0, 450));
+      await expect(page.locator('#multi-subtitle-split-modal')).toHaveClass(/show/);
+      await page.locator('#multi-subtitle-split-main-text .multi-subtitle-split-gap').first()
+        .evaluate(element => element.click());
+      await expect(page.locator('#multi-subtitle-split-modal')).not.toHaveClass(/show/);
+    } else if (edit === 'merge') {
+      await page.evaluate(() => MaweSegmentOps.mergeSegments([0, 1]));
+    } else {
+      expect(await page.evaluate(() => MaweOverlaySplitMerge.mergeOverlaySegments([0, 1]))).toBe(true);
+    }
+    const before = await page.evaluate(() => JSON.stringify(MaweBoot.DATA.tracks));
+    const cues = await page.evaluate(edit => (edit === 'overlay merge'
+      ? AsrEditorUtils.getOverlayTrack(MaweBoot.DATA) : AsrEditorUtils.getMainTrack(MaweBoot.DATA)).segments, edit);
+    expect(cues[0].items).toBeNull();
+    await openFcp7Modal(page);
+    await page.locator('#fcp7-export-confirm').click();
+    await expect.poll(() => page.evaluate(() => window.__exportSaves.length)).toBe(1);
+    const xml = await page.evaluate(() => window.__exportSaves[0].content);
+    expect(xml).toContain('<xmeml version="5">');
+    expect(xml).toContain(edit === 'overlay merge' ? 'text-overlay-' : 'text-main-');
+    expect(await page.evaluate(() => JSON.stringify(MaweBoot.DATA.tracks))).toBe(before);
+    expect(await page.evaluate(() => AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments
+      .find(cue => cue.id === 'with-words').items)).toEqual([
+      expect.objectContaining({ start: 3000, end: 3500, text: 'Word' }),
+    ]);
+  });
+}
+
 test('opens the export modal defaulting to native XML and all available tracks', async ({ page }) => {
   await disableOnboarding(page);
   await page.goto(server.url);

@@ -51,10 +51,42 @@ test('canonical export maps gaps without changing source tracks or including dis
 });
 
 test('explicit future and mixed-schema export documents are rejected without mutation', () => {
-  for (const input of [Object.assign(project(), { schema: 'moy.asr.project.v99' }),
-    Object.assign(project(), { segments: [] })]) {
+  for (const [input, path] of [[Object.assign(project(), { schema: 'moy.asr.project.v99' }), /\$\.schema/],
+    [Object.assign(project(), { segments: [] }), /\$\.segments/]]) {
+    input.tracks[0].segments[1].items = null;
     const before = plain(input);
-    assert.throws(() => utils.buildProjectExportPlan(input, { timelineMode: 'source' }));
+    assert.throws(() => utils.buildProjectExportPlan(input, { timelineMode: 'source' }), path);
+    assert.deepEqual(plain(input), before);
+  }
+});
+
+test('runtime null items export without changing tracks or losing waveform duration', () => {
+  const input = project();
+  delete input.duration_ms;
+  input.waveform = { duration_ms: 8000 };
+  input.tracks[0].segments[1].items = null;
+  input.tracks[2].segments[1].items = null;
+  input.tracks[1].segments[0].items = [{ start: 6000, end: 6500, text: 'translation' }];
+  const before = plain(input);
+  const plan = utils.buildProjectExportPlan(input, { timelineMode: 'source' });
+  assert.equal(plan.sourceDurationMs, 8000);
+  assert.equal(plan.cues.main[0].text, 'source');
+  assert.equal(plan.cues.overlay[0].text, 'overlap');
+  assert.equal(plan.cues.extension[0].text, 'translation');
+  assert.deepEqual(plain(input), before);
+});
+
+test('export still rejects malformed tracks and word timing at their original paths', () => {
+  const cases = [
+    [p => { p.tracks[0].segments = null; }, /\$\.tracks\[0\]\.segments/],
+    [p => { p.tracks[0].segments[0].items = {}; }, /\$\.tracks\[0\]\.segments\[0\]\.items/],
+    [p => { p.tracks[0].segments[0].items = 'bad'; }, /\$\.tracks\[0\]\.segments\[0\]\.items/],
+    [p => { p.tracks[0].segments[0].items = [{ start: -1, end: 3, text: 'bad' }]; }, /\$\.tracks\[0\]\.segments\[0\]\.items\[0\]\.start/],
+  ];
+  for (const [mutate, path] of cases) {
+    const input = project(); input.tracks[2].segments[1].items = null; mutate(input);
+    const before = plain(input);
+    assert.throws(() => utils.buildProjectExportPlan(input, { timelineMode: 'source' }), path);
     assert.deepEqual(plain(input), before);
   }
 });
