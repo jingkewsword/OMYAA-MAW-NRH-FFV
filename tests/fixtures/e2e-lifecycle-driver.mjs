@@ -1,6 +1,6 @@
 import { startScrollFixture } from '../e2e/cue-scroll-fixture.mjs';
 import { startServer, findFreePort } from '../e2e/helpers.mjs';
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 const [kind = 'scroll', action = 'stop', deadline] = process.argv.slice(2);
@@ -26,7 +26,13 @@ if (server) {
   if (action === 'exit') process.exit(0);
   else if (action === 'exception') throw new Error('synthetic unhandled exception');
   else if (action.startsWith('signal:')) process.emit(action.slice(7));
-  else if (action === 'hold') process.send?.({ ready: true });
+  else if (action === 'hold') {
+    // startServer has observed a real HTTP response. Capture the evidence at
+    // that instant, before the parent test kills this owner.
+    const directory = join(process.env.MAW_SCROLL_EVIDENCE, readdirSync(process.env.MAW_SCROLL_EVIDENCE)[0]);
+    const pids = JSON.parse(readFileSync(join(directory, 'owned-pids.json')));
+    process.send?.({ ready: true, pids });
+  }
   else {
     await Promise.all([server.stop(), server.stop()]);
     await server.stop();
