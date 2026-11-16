@@ -141,7 +141,8 @@ test('undo after browsing keeps current viewport and restores selection identity
 });
 
 test('save in flight retains newer edits and inline caret', async ({ page }, info) => {
-  await open(page);
+  await open(page, { canonical: true });
+  expect(await page.evaluate(() => MaweServerSave.requiresMigrationSaveAs)).toBe(false);
   await position(page, 75);
   const text = page.locator('.cue[data-idx="75"] .text');
   await text.dblclick();

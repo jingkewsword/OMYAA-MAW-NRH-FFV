@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { runtimeProject } from '../helpers/runtime-project.mjs';
 import { getMainTrack, cleanupTempDir, disableOnboarding, findFreePort, generateWaveformPayload, generateWav, makeTempDir, startServer } from './helpers.mjs';
 
 let directory, server, projectPath;
@@ -9,14 +10,14 @@ test.beforeAll(async () => {
   const mediaPath = join(directory, 'synthetic.wav');
   projectPath = join(directory, 'project.mosp');
   generateWav(mediaPath, 2);
-  writeFileSync(projectPath, JSON.stringify({
-    media: 'synthetic.wav', waveform: generateWaveformPayload(2000),
-    segments: [{ id: 'main-001', start: 0, end: 2000, text: '啊，我这……我这个功能呢',
-      items: [{ text: '啊，', start: 0, end: 210 }, { text: '我这……', start: 220, end: 770 }, { text: '我这个功能呢', start: 900, end: 2000 }] }],
+  writeFileSync(projectPath, JSON.stringify(runtimeProject(
+    [{ id: 'main-001', start: 0, end: 2000, text: '啊  我这……我这个功能呢',
+      items: [{ text: '啊  ', start: 0, end: 210 }, { text: '我这……', start: 220, end: 770 }, { text: '我这个功能呢', start: 900, end: 2000 }] }],
+    { media: 'synthetic.wav', speakers: [], waveform: generateWaveformPayload(2000),
     gap_remove: { detector: 'audio_gate', provenance: { sources: { ai_cleanup: [{ start: 0, end: 770,
-      cleanup_scope: { segment_id: 'main-001', item_start: 0, item_end: 2, text: '啊，我这……' } }] } } },
+      cleanup_scope: { segment_id: 'main-001', item_start: 0, item_end: 2, text: '啊  我这……' } }] } } },
     markers: { schema: 'moy.asr.markers.v1', items: [{ id: 'review-local', start: 100, end: 400, name: '复核区段', note: '[AI] 复核：合成证据', review: { status: 'pending', reason: '合成证据' } }] },
-  }), 'utf-8');
+  })), 'utf-8');
   server = await startServer(projectPath, mediaPath, await findFreePort());
 });
 test.afterAll(async () => {
@@ -29,6 +30,7 @@ test('real editor saves/reopens trustworthy local scopes and keeps gap-only revi
   await page.addInitScript(() => localStorage.setItem('moy.asr.editor.settings.v1', JSON.stringify({ autoSaveProject: false })));
   await page.goto(server.url);
   await expect(page.locator('.cue[data-idx="0"] .text')).toBeVisible();
+  expect(await page.evaluate(() => MaweServerSave.requiresMigrationSaveAs)).toBe(false);
   const preview = await page.evaluate(() => {
     MaweDom.overlayToggle.checked = true;
     MaweSettings.EDITOR_SETTINGS.assMode = false;
