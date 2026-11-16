@@ -1,6 +1,7 @@
 """Temporary CI experiment: record command timing and preserve native exit status."""
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -25,6 +26,14 @@ started = datetime.now(timezone.utc).isoformat()
 clock = time.monotonic()
 code = 1
 try:
+    if os.name == 'nt' and command and command[0] == 'bash':
+        git = shutil.which('git.exe')
+        if not git:
+            raise FileNotFoundError('git.exe is required to locate Git Bash')
+        bash = Path(git).resolve().parent.parent / 'bin' / 'bash.exe'
+        if not bash.is_file():
+            raise FileNotFoundError(f'Git Bash not found at {bash}')
+        command[0] = str(bash)
     code = subprocess.call(command)
 finally:
     record = {'stage': name, 'command': command, 'start_utc': started,
