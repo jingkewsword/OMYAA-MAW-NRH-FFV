@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
+import { writeFileSync, readFileSync, existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { cleanupTempDir, disableOnboarding, findFreePort, generateWaveformPayload,
   generateWav, makeTempDir, startServer } from './helpers.mjs';
@@ -141,7 +141,7 @@ for (const format of ['png', 'webp']) test(`real ${format} job publishes subtitl
   const response = await published;
   expect(response.status()).toBe(200);
   const result = await response.json();
-  expect(resolve(dirname(result.packagePath))).toBe(resolve(tempDir));
+  expect(realpathSync.native(dirname(result.packagePath))).toBe(realpathSync.native(tempDir));
   await expect(page.locator('#fcp7-export-status')).toContainText('已保存');
   expect(existsSync(result.xmlPath)).toBeTruthy();
   expect(existsSync(result.vegasXmlPath)).toBeTruthy();
