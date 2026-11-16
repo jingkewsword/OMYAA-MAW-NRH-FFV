@@ -107,7 +107,7 @@ jobs:
           name: ci-test-plan
           path: .artifacts/
       - uses: ./.github/actions/test-environment
-      - name: List, execute and validate selected Chromium shard
+      - name: Discover complete collection, execute and validate Chromium shard
         run: uv run --no-sync python scripts/ci_matrix.py run --cell ${{ matrix.cell }}
       - name: Preserve discovery, outcomes, skips and traces
         if: always()
@@ -143,7 +143,7 @@ jobs:
         with:
           pattern: matrix-*
           path: .artifacts/matrix-evidence/
-      - name: Require plan, job results and exact receipts
+      - name: Require plan, complete browser coverage and exact receipts
         env:
           CI_NEEDS: ${{ toJSON(needs) }}
         run: python scripts/ci_matrix.py gate --root .artifacts/matrix-evidence

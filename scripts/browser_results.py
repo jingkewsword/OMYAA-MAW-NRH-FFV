@@ -43,6 +43,37 @@ def collection(report: dict) -> dict:
     return found
 
 
+def config_identity(report: dict) -> dict:
+    """The argv and shard differ by invocation; the resolved test config must not."""
+    config = report["config"]
+    if not isinstance(config, dict) or not isinstance(config.get("version"), str) or not config["version"]:
+        raise ValueError("missing Playwright config/version")
+    identity = {key: value for key, value in config.items() if key not in {"argv", "shard"}}
+    # Playwright adds actualWorkers only after execution, not during --list.
+    def metadata(value):
+        if not isinstance(value, dict):
+            raise ValueError("invalid browser metadata")
+        return {key: item for key, item in value.items() if key != "actualWorkers"}
+    if "metadata" in identity:
+        identity["metadata"] = metadata(identity["metadata"])
+    if "projects" in identity:
+        identity["projects"] = [{**project, "metadata": metadata(project.get("metadata", {}))}
+                                for project in identity["projects"]]
+    if "argv" in config:
+        argv = config["argv"]
+        if not isinstance(argv, list) or any(not isinstance(arg, str) for arg in argv):
+            raise ValueError("invalid browser argv")
+        identity["argv"] = [arg for arg in argv if arg != "--list" and not arg.startswith("--shard=")]
+    return identity
+
+
+def full_collection(report: dict) -> set:
+    if not isinstance(report, dict) or report.get("errors") or report["config"]["shard"] is not None:
+        raise ValueError("invalid unsharded browser discovery")
+    config_identity(report)
+    return set(collection(report))
+
+
 def validate(listed: dict, actual: dict, current: int, total: int) -> dict:
     if not 1 <= current <= total:
         raise ValueError("invalid requested shard")
@@ -51,6 +82,8 @@ def validate(listed: dict, actual: dict, current: int, total: int) -> dict:
             raise ValueError("global browser errors")
         if report["config"]["shard"] != {"current": current, "total": total}:
             raise ValueError("wrong browser shard coordinates")
+    if config_identity(listed) != config_identity(actual):
+        raise ValueError("browser discovery/runtime config mismatch")
     expected, observed = collection(listed), collection(actual)
     if expected.keys() != observed.keys():
         raise ValueError("missing or unexpected browser cases relative to --list")
