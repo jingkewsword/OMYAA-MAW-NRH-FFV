@@ -397,7 +397,8 @@ class ThumbnailCacheTests(unittest.TestCase):
         self.assertTrue(all(t >= 32000 for batch in self.calls for t in batch))
 
     def test_coarse_and_partial_sprites_share_query_and_cross_session_resume(self):
-        self.video = VideoInfo(1, 400000, 0)
+        # Keep one 64-frame sealed batch and remaining targets without building 200 frames.
+        self.video = VideoInfo(1, 160000, 0)
         c.probe_video.return_value = self.video
         self.build(target_interval=10000)
         c._write_disabled.add(c.identity_key(self.media))
@@ -416,6 +417,7 @@ class ThumbnailCacheTests(unittest.TestCase):
         partial_path = c.base_path(self.media).with_name(c.base_path(self.media).name + ".partial")
         partial = c._load_candidate(partial_path, c.source_signature(self.media))
         self.assertFalse(partial["base_complete"])
+        self.assertEqual(partial["valid_count"], 64)
         self.assertTrue(any(sample["requested_ms"] == 2000 for sample in partial["samples"]))
         c._session.clear()
         c._session_assets.clear()
@@ -431,6 +433,7 @@ class ThumbnailCacheTests(unittest.TestCase):
         with mock.patch.object(c, "_crop_sprite", side_effect=cropped):
             upgraded = self.build(target_interval=2000)
         self.assertTrue(upgraded["base_complete"])
+        self.assertEqual(upgraded["valid_count"], 80)
         self.assertFalse(any(2000 in batch for batch in self.calls))
         self.assertIsNone(c.read_asset(self.media, view["samples"][0]["asset"], cache_revision=view["cache_revision"]))
         self.assertNotEqual(upgraded["cache_revision"], view["cache_revision"])
@@ -528,7 +531,8 @@ class ThumbnailCacheTests(unittest.TestCase):
         self.assertEqual(c.load_base(self.media)["cache_revision"], existing["cache_revision"])
 
     def test_retained_partial_return_uses_only_the_persisted_sprite_layout(self):
-        self.video = VideoInfo(1, 400000, 0)
+        # The 80-frame grid still has remaining work after cancellation at 64.
+        self.video = VideoInfo(1, 160000, 0)
         c.probe_video.return_value = self.video
         cancel = threading.Event()
         def progress(message):
@@ -540,6 +544,7 @@ class ThumbnailCacheTests(unittest.TestCase):
         with self.assertRaises(ThumbnailCancelled):
             self.build(cancel=cancel, progress=progress)
         retained = c.load_base(self.media)
+        self.assertEqual(retained["valid_count"], 64)
         def unavailable(path, targets, **kwargs):
             return [FrameResult(target, None, "unavailable", None) for target in targets]
         def cropped(blob, samples, **kwargs):
