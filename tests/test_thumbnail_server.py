@@ -165,8 +165,9 @@ class ThumbnailServerTests(unittest.TestCase):
             ({'path':str(self.media)},None,400),({'lease':{}},None,400),
             ({'playing':'false'},None,400),({'view':True},None,400),
             ({'interval_ms':250,'ranges':[{'start_ms':0,'end_ms':7200000}]},None,400)):
-            status,_,_ = self.request('/api/thumbnails/demand',{**body,**change},headers=headers)
-            self.assertEqual(status,expected)
+            with self.subTest(change=change, headers=headers, expected=expected):
+                status,_,_ = self.request('/api/thumbnails/demand',{**body,**change},headers=headers)
+                self.assertEqual(status,expected)
         status,_,_ = self.request('/api/thumbnails/demand',{'requestToken':self.server.request_token,'binding':'old'})
         self.assertEqual(status,409)
         status,_,_ = self.request('/api/thumbnails/demand',body,headers={'Content-Length':'65537'})
