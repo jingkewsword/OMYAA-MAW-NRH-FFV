@@ -1,9 +1,11 @@
 import { expect, test } from '@playwright/test';
 import fs from 'node:fs';
 import { join } from 'node:path';
+import { createUtilsModule } from '../../web/shared/utils/project-tracks.js';
 import { cleanupTempDir, findFreePort, generateWav, makeTempDir, startBlankServer, startServer } from './helpers.mjs';
 
 const cases = JSON.parse(fs.readFileSync(new URL('../fixtures/project-boundary.json', import.meta.url), 'utf8'));
+const projectTracks = createUtilsModule();
 let server, temp;
 test.beforeAll(async () => {
   temp = makeTempDir('project-boundary');
@@ -42,7 +44,7 @@ test('legal zero-width punctuation survives browser serialization and reimport',
     const first = JSON.parse(MaweJsonRepair.buildJson());
     if (!await open(first)) throw new Error('reimport failed');
     const second = JSON.parse(MaweJsonRepair.buildJson());
-    const semantic = (project) => project.segments.map((s) => ({ start: s.start, end: s.end, text: s.text,
+    const semantic = (project) => AsrEditorUtils.getMainTrack(project).segments.map((s) => ({ start: s.start, end: s.end, text: s.text,
       items: s.items.map(({ start, end, text }) => ({ start, end, text })) }));
     return { first: semantic(first), second: semantic(second), report: MaweJsonRepair.lastImportReport };
   }, input);
@@ -54,7 +56,10 @@ test('legal zero-width punctuation survives browser serialization and reimport',
 test('Server startup exposes real repairs and save clears the report after writing', async ({ page }) => {
   const media = join(temp, 'synthetic.wav'), project = join(temp, 'repaired.mosp');
   generateWav(media, 2);
-  const raw = JSON.stringify({ media: 'synthetic.wav', segments: [{ start: 0, end: 0, text: 'repair me' }] });
+  const repairable = projectTracks.makeProject([{ start: 0, end: 100, text: 'repair me' }],
+    { projectFields: { media: 'synthetic.wav' } });
+  projectTracks.getMainTrack(repairable).segments[0].end = 0;
+  const raw = JSON.stringify(repairable);
   fs.writeFileSync(project, raw);
   const bound = await startServer(project, media, await findFreePort());
   try {
@@ -62,10 +67,10 @@ test('Server startup exposes real repairs and save clears the report after writi
     await page.goto(bound.url);
     await page.waitForFunction(() => typeof window.MaweProjectSave?.saveProjectToServer === 'function');
     const imported = await page.evaluate(() => ({ report: MaweJsonRepair.lastImportReport,
-      dirty: MaweServerSave.hasUnsavedProjectChanges(), end: MaweBoot.DATA.segments[0].end }));
+      dirty: MaweServerSave.hasUnsavedProjectChanges(), end: AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments[0].end }));
     expect(imported.end).toBe(100);
     expect(imported.dirty).toBe(true);
-    expect(imported.report).toContainEqual({ path: '$.segments[0].end', kind: 'replace', before: 0, after: 100 });
+    expect(imported.report).toContainEqual({ path: '$.tracks[0].segments[0].end', kind: 'replace', before: 0, after: 100 });
     expect(fs.readFileSync(project, 'utf8')).toBe(raw);
     const guarded = await page.evaluate(() => {
       const schema = MaweBoot.DATA.schema;
@@ -79,7 +84,7 @@ test('Server startup exposes real repairs and save clears the report after writi
     expect(guarded).toBe(true);
     expect(fs.readFileSync(project, 'utf8')).toBe(raw);
     expect(await page.evaluate(() => MaweProjectSave.saveProjectToServer({ silent: true }))).toBe(true);
-    expect(JSON.parse(fs.readFileSync(project, 'utf8')).segments[0].end).toBe(100);
+    expect(projectTracks.getMainTrack(JSON.parse(fs.readFileSync(project, 'utf8'))).segments[0].end).toBe(100);
     await page.reload();
     await page.waitForFunction(() => typeof window.MaweJsonRepair?.lastImportReport !== 'undefined');
     expect(await page.evaluate(() => MaweJsonRepair.lastImportReport)).toEqual([]);

@@ -49,7 +49,7 @@ test('waveform ASS shortcuts mirror project settings and open the style library 
 test.beforeAll(async () => {
   // macOS 的 tmpdir 位于 /var（指向 /private/var 的符号链接）；服务器按
   // realpath 回显表情包目录，断言用的路径必须预先解析成同一形式。
-  tempDir = realpathSync(makeTempDir('settings-structure'));
+  tempDir = realpathSync.native(makeTempDir('settings-structure'));
   const media = join(tempDir, 'synthetic.wav'), project = join(tempDir, 'settings.mosp');
   generateWav(media, 4);
   for (const folder of ['default-a', 'default-b', 'override']) {
@@ -115,22 +115,22 @@ async function settings(page, tab = 'regions') {
 
 test('word timing help stays concise and translates when switching language', async ({ page }, testInfo) => {
   await page.locator('#help-toggle').click();
-  await page.locator('#help-tab-waveform').click();
-  const paragraphs = page.locator('#help-tab-panel-waveform .help-subgroup').first().locator('.help-category > span');
-  await expect(paragraphs).toHaveCount(3);
-  await expect(paragraphs.first()).toContainText('Q 快速切换开关');
-  await expect(paragraphs.nth(1)).toContainText('F 试听选中的字幕或字词');
-  await expect(paragraphs.last()).toContainText('右键菜单的「高级操作」');
+  await page.locator('#help-tab-word-timing').click();
+  const panel = page.locator('#help-tab-panel-word-timing');
+  await expect(panel.locator('.help-subgroup')).toHaveCount(2);
+  await expect(panel).toContainText('Q');
+  await expect(panel).toContainText('F 试听选中的字幕或字词');
+  await expect(panel).toContainText('右键菜单的「高级操作」');
   await page.locator('#help-panel').screenshot({ path: testInfo.outputPath('word-timing-help-zh.png') });
   await page.locator('#help-close').click();
   await settings(page, 'interface');
   await page.locator('#language-toggle').click();
   await page.locator('#help-toggle').click();
-  await page.locator('#help-tab-waveform').click();
-  await expect(paragraphs.first()).toContainText('Q toggles this mode');
-  await expect(paragraphs.nth(1)).toContainText('F auditions the selected subtitles or words');
-  await expect(paragraphs.last()).toContainText('Advanced actions in the context menu');
-  expect((await paragraphs.allTextContents()).join('')).not.toMatch(/[\u4e00-\u9fff]/);
+  await page.locator('#help-tab-word-timing').click();
+  await expect(panel).toContainText('toggles main subtitle word timings');
+  await expect(panel).toContainText('F previews the selected subtitle or word');
+  await expect(panel).toContainText('Advanced actions in the context menu');
+  expect(await panel.innerText()).not.toMatch(/[\u4e00-\u9fff]/);
   await page.locator('#help-panel').screenshot({ path: testInfo.outputPath('word-timing-help-en.png') });
 });
 
@@ -633,7 +633,7 @@ test('project ASS and speaker exports are undoable, reloadable and isolated from
   expect(personal.exportSpeakerLabels).toBeUndefined();
   expect(personal.mainSplitModeOverride).toBeUndefined();
   await page.evaluate(saved => MaweProjectLoad.applyCanonicalProject({
-    ...saved, preview: undefined, split_mode: 'continuous', multi_subtitle: undefined,
+    ...saved, preview: undefined,
   }, 'next.mosp'), saved);
   await projectSettings(page, 'subtitle-style');
   await expect(page.locator('#ass-mode-toggle')).not.toBeChecked();
@@ -783,7 +783,7 @@ test('project timing and language restore through history and save without chang
   await page.locator('#timeline-fps').dispatchEvent('change');
   const saved = await page.evaluate(() => JSON.parse(MaweJsonRepair.buildJson()));
   expect(saved.timebase).toMatchObject({ unit: 'frames', fps: 25 });
-  expect(saved.split_mode).toBe('continuous');
+  expect(getMainTrack(saved).split_mode).toBe('continuous');
   expect(getMainTrack(saved).split_mode_override).toBe('word');
   for (const segment of getMainTrack(saved).segments) expect(segment.start).toBe(Math.round(segment.start_frame * 1000 / 25));
   await page.evaluate(saved => MaweProjectLoad.applyCanonicalProject(saved, 'timing.mosp'), saved);
