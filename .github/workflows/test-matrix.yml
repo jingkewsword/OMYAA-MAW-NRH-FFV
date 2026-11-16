@@ -149,7 +149,7 @@ jobs:
         run: python scripts/ci_matrix.py gate --root .artifacts/matrix-evidence
 
   compare:
-    if: github.event_name == 'pull_request' && github.head_ref == 'code/v2-ci-timing-20261117'
+    if: github.event_name == 'pull_request' && github.head_ref == 'code/v2-ci-windows-no-deps-20261117'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
     strategy:
@@ -254,16 +254,16 @@ jobs:
         if: success() || failure()
         shell: bash
         run: python scripts/ci_deps_experiment.py browser-media node scripts/ci_deps_media_probe.mjs
-      - name: Discover fixed media specs
+      - name: Discover focused playback regressions
         if: success() || failure()
         shell: bash
-        run: python scripts/ci_deps_experiment.py discovery bash -c 'pnpm exec playwright test --config=tests/config/playwright.config.mjs --project=chromium --workers=2 --retries=0 --forbid-only --reporter=json --list tests/e2e/filmstrip-real.spec.mjs tests/e2e/audio-processing.spec.mjs tests/e2e/burn-video-binding.spec.mjs tests/e2e/gap-removed-video-binding.spec.mjs'
+        run: python scripts/ci_deps_experiment.py discovery bash -c 'pnpm exec playwright test --config=tests/config/playwright.config.mjs --project=chromium --workers=2 --retries=0 --forbid-only --reporter=json --list --grep="keeps the presented frame timestamp|color filter button appears only" tests/e2e/ass-frame-preview.spec.mjs tests/e2e/cue-color-filter.spec.mjs'
         env:
           PLAYWRIGHT_JSON_OUTPUT_FILE: .artifacts/deps-experiment/discovery.json
-      - name: Run the same fixed media specs
+      - name: Run focused playback regressions
         if: success() || failure()
         shell: bash
-        run: python scripts/ci_deps_experiment.py tests bash -c 'pnpm exec playwright test --config=tests/config/playwright.config.mjs --project=chromium --workers=2 --retries=0 --forbid-only --reporter=line,json,./scripts/ci_deps_reporter.mjs tests/e2e/filmstrip-real.spec.mjs tests/e2e/audio-processing.spec.mjs tests/e2e/burn-video-binding.spec.mjs tests/e2e/gap-removed-video-binding.spec.mjs'
+        run: python scripts/ci_deps_experiment.py tests bash -c 'pnpm exec playwright test --config=tests/config/playwright.config.mjs --project=chromium --workers=2 --retries=0 --forbid-only --reporter=line,json,./scripts/ci_deps_reporter.mjs --grep="keeps the presented frame timestamp|color filter button appears only" tests/e2e/ass-frame-preview.spec.mjs tests/e2e/cue-color-filter.spec.mjs'
       - name: Finish experiment clock
         if: always()
         shell: bash
