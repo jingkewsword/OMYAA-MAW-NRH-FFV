@@ -70,6 +70,41 @@ class ConcreteWorkflowTests(unittest.TestCase):
             workflow.main(["--stage", "release", "--shard", "1/2", "--plan-only"])
         self.assertEqual(result.exception.code, 2)
 
+    def test_saved_explicit_pack_replays_a_single_browser_shard(self):
+        previous = Path.cwd()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = selected()
+            plan.update(python_tests=[], node_tests=[], e2e_specs=[])
+            try:
+                with mock.patch.object(workflow, "ROOT", root), \
+                        mock.patch.object(workflow, "select_packs", return_value=plan), \
+                        mock.patch.object(workflow.subprocess, "check_output", return_value="a" * 40), \
+                        mock.patch.object(workflow, "run_steps", return_value={"exit_code": 0}) as run_steps, \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(workflow.main(["--stage", "merge", "--changed", "package.json",
+                        "--pack", "website", "--pack", "editor-e2e", "--plan-only", "--report-dir", "plan"]), 0)
+                    run_steps.assert_not_called()
+                    self.assertEqual(workflow.main(["--stage", "merge", "--selection-plan", "plan/plan.json",
+                        "--layer", "browser", "--shard", "2/4", "--report-dir", "shard-2"]), 0)
+                steps, output, replayed = run_steps.call_args.args
+                self.assertEqual([name for name, _, _ in steps], ["browser-regressions"])
+                self.assertIn("--shard=2/4", steps[0][1])
+                self.assertEqual(output, root / "shard-2")
+                self.assertEqual(replayed["packs"], ["website", "editor-e2e"])
+                self.assertEqual(run_steps.call_args.kwargs["metadata"]["head"], "a" * 40)
+            finally:
+                os.chdir(previous)
+
+    def test_explicit_pack_plan_requires_a_commit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "plan.json"
+            plan = selected()
+            plan["mode"] = "explicit-pack"
+            path.write_text(json.dumps(plan), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "explicit pack.*commit"):
+                workflow.read_selection(path)
+
     def test_document_checks_do_not_expand_into_release_checks(self):
         plan = selected()
         plan.update(packs=["docs"], python_tests=["tests/test_docs_check.py"], node_tests=[], e2e_specs=[])

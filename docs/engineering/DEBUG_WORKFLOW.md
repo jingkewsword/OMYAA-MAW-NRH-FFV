@@ -91,6 +91,17 @@ python scripts/test_workflow.py --base-ref origin/2.0dev
 
 一次运行会继续执行相互独立的已选组，最后按整体结果退出。先读 `summary.json` 查看失败、阻塞、未运行和子进程退出码，再读 `failures.json` 查看失败用例与完整错误。前置失败时只运行具备条件的部分。部分结果与正常整组结果分别记录。
 
+### 拆分本地浏览器巡检
+
+需要逐项巡检时，可以保存明确选包的计划，再分开运行准备层、网站层和各浏览器分片。
+
+```powershell
+uv run --no-sync python scripts/test_workflow.py --stage merge --pack website --pack editor-e2e --plan-only --report-dir .artifacts/browser-inspection
+uv run --no-sync python scripts/test_workflow.py --stage merge --selection-plan .artifacts/browser-inspection/plan.json --layer browser --shard 1/4
+```
+
+先用同一计划运行 `--layer prepare` 和 `--layer website`，准备好 Chromium 和合成媒体所需的 FFmpeg。各分片写入独立报告目录，按分片号核对是否齐全。中断后用新夹具重跑该片；修复后先重跑失败文件或用例，再按改动选测。分片和局部重跑各自只证明本次实际执行的范围，完整验收需在同一候选版本和环境核对发现清单与实际覆盖。
+
 ### CI 范围与重跑
 
 `Change checks` 保留有限准入与 `Change acceptance` 回执。它读取同一影响计划，将已准入消费者映射到对应检查组；其他选中 Python、Node 和浏览器消费者由独立辅助检查执行，并扣除本次准入已完整覆盖的文件。只准入个别方法的 Python 文件仍在辅助检查中执行整文件，避免漏掉其余消费者。
