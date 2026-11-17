@@ -30,7 +30,9 @@ def main() -> int:
     requirements = json.loads(os.environ["CI_REQUIREMENTS"])
     blocked = list(dict.fromkeys([*blocked_preparation(steps, requirements), *args.blocked_preparation]))
     venv = Path(".venv/Scripts/python.exe" if os.name == "nt" else ".venv/bin/python")
-    interpreter = str(venv.resolve()) if steps.get("py_install", {}).get("outcome") == "success" else sys.executable
+    # On POSIX the venv executable is a symlink. Resolving it selects the base
+    # interpreter and loses the venv's installed packages.
+    interpreter = str(venv.absolute()) if steps.get("py_install", {}).get("outcome") == "success" else sys.executable
     env = {**os.environ, "MAW_TEST_PYTHON": interpreter, "MAW_E2E_PYTHON": interpreter}
     command = [interpreter, "scripts/test_workflow.py", "--stage", "merge", "--selection-plan",
                args.plan, "--layer", args.layer, "--report-dir", args.report_dir]

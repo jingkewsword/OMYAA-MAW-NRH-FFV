@@ -155,6 +155,21 @@ class BrowserMatrixTests(unittest.TestCase):
                         "chromium": False, "node-dependencies": False}
         self.assertEqual(ci_run_layer.blocked_preparation(steps, requirements), ["build"])
 
+    def test_layer_preserves_the_virtual_environment_executable_path(self):
+        env = {"CI_PREPARATION": json.dumps({"py_install": {"outcome": "success"}}),
+               "CI_REQUIREMENTS": json.dumps({name: False for name in
+                    ("build", "python-dependencies", "ffmpeg", "chromium", "node-dependencies")})}
+        logical = Path(".venv/Scripts/python.exe" if os.name == "nt" else ".venv/bin/python").absolute()
+        base = Path(sys.base_prefix) / ("python.exe" if os.name == "nt" else "bin/python")
+        with mock.patch.dict(os.environ, env), \
+                mock.patch.object(sys, "argv", ["ci_run_layer.py", "--layer", "python", "--report-dir", ".artifacts/example"]), \
+                mock.patch.object(Path, "resolve", return_value=base), \
+                mock.patch.object(ci_run_layer.subprocess, "run", return_value=mock.Mock(returncode=0)) as run:
+            self.assertEqual(ci_run_layer.main(), 0)
+        command = run.call_args.args[0]
+        self.assertEqual(command[0], str(logical))
+        self.assertEqual(run.call_args.kwargs["env"]["MAW_E2E_PYTHON"], str(logical))
+
     def test_full_wrapper_forwards_failed_preparation_to_independent_fallback(self):
         source_root = test_workflow.ROOT
         before = Path.cwd()
