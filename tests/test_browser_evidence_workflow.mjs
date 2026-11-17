@@ -2,32 +2,26 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import test from 'node:test';
 
-const workflow = readFileSync(new URL('../.github/workflows/editor-checks.yml',import.meta.url),'utf8');
-const editor = workflow.slice(workflow.indexOf('\n  editor:'));
-const steps = editor.split(/\n      - /).slice(1);
-const named = name => steps.findIndex(step => step.startsWith(`name: ${name}\n`));
+const workflow = readFileSync(new URL('../.github/workflows/editor-checks.yml', import.meta.url), 'utf8');
+const job = name => workflow.split(`\n  ${name}:\n`)[1]?.split(/\n  [a-z][a-z-]*:\n/)[0];
 
-test('browser failure artifacts are uploaded after both browser groups', () => {
-  const upload = named('Preserve failed browser evidence');
-  assert.notEqual(named('Real file and HTTP editor'),-1);
-  assert.notEqual(named('Independent browser tool pages'),-1);
-  assert.ok(upload > named('Real file and HTTP editor'));
-  assert.ok(upload > named('Independent browser tool pages'));
-  assert.equal(steps.filter(step => step.startsWith('name: Preserve failed browser evidence\n')).length,1);
+test('selected browser shards preserve outcomes even when a shard fails', () => {
+  const browser = job('browser');
+  assert.ok(browser);
+  assert.match(browser, /fail-fast: false/);
+  assert.match(browser, /--layer browser --shard \$\{\{ matrix\.shard \}\}\/\$\{\{ matrix\.total \}\}/);
+  assert.match(browser, /name: Preserve browser shard evidence\n\s+if: \$\{\{ always\(\) \}\}/);
+  assert.match(browser, /name: selected-browser-\$\{\{ matrix\.shard \}\}/);
+  assert.match(browser, /\.artifacts\/ci-browser\//);
+  assert.match(browser, /test-results\//);
 });
 
-test('browser evidence upload keeps the failure/non-light gate and artifact contract', () => {
-  const upload = steps[named('Preserve failed browser evidence')];
-  assert.ok(upload);
-  assert.match(upload,/if: \$\{\{ failure\(\) && needs\.selection\.outputs\.light != 'true' \}\}/);
-  assert.match(upload,/uses: actions\/upload-artifact@v6/);
-  assert.match(upload,/name: editor-browser-failures-\$\{\{ runner\.os \}\}/);
-  assert.match(upload,/path: test-results\//);
-  assert.match(upload,/retention-days: 7/);
-});
-
-test('the real editor CI gate includes the data-safety review regressions', () => {
-  const real = steps[named('Real file and HTTP editor')];
-  assert.ok(real);
-  assert.match(real, /run: .*tests\/e2e\/review-data-safety\.spec\.mjs/);
+test('aggregate gate validates every selected browser shard', () => {
+  const gate = job('browser-gate');
+  assert.ok(gate);
+  assert.match(gate, /needs: \[selection, browser\]/);
+  assert.match(gate, /needs\.browser\.result != 'success'/);
+  assert.match(gate, /pattern: selected-browser-\*/);
+  assert.match(gate, /scripts\/ci_matrix\.py gate --total/);
+  assert.match(job('editor'), /needs: \[selection, editor-tests, browser-gate/);
 });

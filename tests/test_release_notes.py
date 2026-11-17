@@ -291,7 +291,9 @@ class ReleaseDocumentTests(CompactContainerAssertions, unittest.TestCase):
         self.assertIn('python3 scripts/prepare_release_notes.py "${Args[@]}"', release)
         regular = (ROOT / ".github/workflows/editor-checks.yml").read_text(encoding="utf-8")
         self.assertIn("scripts/prepare_release_notes.py --check-all", regular)
-        self.assertIn("scripts/run_tests.py tests/test_release_notes.py", regular)
+        selection = (ROOT / "scripts/ci_impact.py").read_text(encoding="utf-8")
+        self.assertIn("tests/test_release_notes.py", selection)
+        self.assertIn("--layer python-ubuntu-existing", regular)
 
 
 if __name__ == "__main__":

@@ -12,8 +12,6 @@ PORTABLE_SKIPS = {
     ("editor-text-tools.spec.mjs", ("portable file uses the same fade rules and SRT export settings",)): PORTABLE_REASON,
     ("editor-text-tools.spec.mjs", ("portable editor saves and reloads presets in its browser storage",)):
         "便携模式已弃维护，2.0 移除 HTML，见便携模式回归分析",
-    ("warma-presets.spec.mjs", ("portable pages reject a stale preset library save (unsupported in 2.0)",)):
-        PORTABLE_REASON,
 }
 
 
@@ -49,11 +47,13 @@ def config_identity(report: dict) -> dict:
     if not isinstance(config, dict) or not isinstance(config.get("version"), str) or not config["version"]:
         raise ValueError("missing Playwright config/version")
     identity = {key: value for key, value in config.items() if key not in {"argv", "shard"}}
-    # Playwright adds actualWorkers only after execution, not during --list.
+    # These Playwright-provided runtime fields can be absent during --list.
+    # Keep user/config metadata so a real configuration mismatch still fails.
     def metadata(value):
         if not isinstance(value, dict):
             raise ValueError("invalid browser metadata")
-        return {key: item for key, item in value.items() if key != "actualWorkers"}
+        return {key: item for key, item in value.items()
+                if key not in {"actualWorkers", "ci", "gitCommit", "gitDiff"}}
     if "metadata" in identity:
         identity["metadata"] = metadata(identity["metadata"])
     if "projects" in identity:

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Development kernels, impact-selected merge packs, and explicit release gates."""
+"""Impact-selected development and CI checks, with explicit release gates."""
 from __future__ import annotations
 
 import argparse
-import importlib.util
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -55,7 +55,7 @@ def preparation(packs, specs=(), tools_scope="all"):
     return {"application": app, "real_media": media}
 
 
-def commands(packs: list[str], report_dir: Path, *, dev: bool = False, component: str = "all", specs=(), tools_scope="all"):
+def _pack_commands(packs: list[str], report_dir: Path, *, dev: bool = False, component: str = "all", specs=(), tools_scope="all"):
     python = sys.executable
     node = shutil.which("node") or "node"
     playwright = [node, "node_modules/@playwright/test/cli.js", "test", "--config=tests/config/playwright.config.mjs", "--project=chromium",
@@ -113,6 +113,134 @@ def commands(packs: list[str], report_dir: Path, *, dev: bool = False, component
             yield "website-build", [shutil.which("pnpm") or "pnpm", "--dir", "website", "build"], 240
 
 
+def command_layer(name: str) -> str:
+    if name in {"python-lint", "build", "build-launcher", "typecheck"}:
+        return "prepare"
+    if name in {"docs-navigation", "release-docs"}:
+        return "docs"
+    if name.startswith("website-"):
+        return "website"
+    if name.startswith("node-"):
+        return "node"
+    if name in {"editor-http-smoke", "browser-regressions"}:
+        return "browser"
+    return "python"
+
+
+def website_before_browser(steps):
+    website = [step for step in steps if command_layer(step[0]) == "website"]
+    remaining = [step for step in steps if command_layer(step[0]) != "website"]
+    index = next((i for i, step in enumerate(remaining) if command_layer(step[0]) == "browser"), len(remaining))
+    return remaining[:index] + website + remaining[index:]
+
+
+def commands(packs: list[str], report_dir: Path, *, dev: bool = False, component: str = "all",
+             specs=(), tools_scope="all", selection=None, layer="all", shard=(1, 1)):
+    """Execute the same concrete selection locally and in each CI layer."""
+    existing = {"python-ubuntu-existing": ("existing_ubuntu_python", "python_tests", "python"),
+                "python-windows-existing": ("existing_windows_python", "python_tests", "python"),
+                "node-windows-existing": ("existing_windows_node", "node_tests", "node")}
+    if layer in existing:
+        key, targets, layer = existing[layer]
+        selection = {**selection, "mode": "targeted", "packs": [], "python_tests": [], "node_tests": [], "e2e_specs": [],
+                     targets: selection["ci_platforms"][key]}
+        packs, specs = [], []
+    if not selection or selection.get("mode") != "targeted":
+        steps = list(_pack_commands(packs, report_dir, dev=dev, component=component, specs=specs, tools_scope=tools_scope))
+        if "website" in packs and "editor-e2e" in packs and layer == "all":
+            steps = website_before_browser(steps)
+        for step in steps:
+            if step[0] == "editor-http-smoke" and "editor-e2e" in packs:
+                continue  # Same Chromium cases/configuration are in the full collection.
+            if layer in {"all", command_layer(step[0])}:
+                if command_layer(step[0]) == "browser":
+                    step = (step[0], [f"--shard={shard[0]}/{shard[1]}" if arg.startswith("--shard=") else arg
+                                     for arg in step[1]], step[2])
+                yield step
+        return
+
+    python = sys.executable
+    node = shutil.which("node") or "node"
+    prep = selection["preparation"]
+    steps = []
+    if prep.get("lint"):
+        paths = [path for path in selection.get("changed_paths", []) if path.endswith(".py") and (ROOT / path).is_file()]
+        steps.append(("python-lint", [python, "-m", "ruff", "check", *paths], 60))
+    if prep.get("application"):
+        steps.extend((
+            ("build", [node, "scripts/build-editor.mjs", "--write"], 60),
+            ("build-launcher", [node, "scripts/build-launcher.mjs", "--write"], 60),
+            ("typecheck", [node, "node_modules/typescript/bin/tsc", "-p", "web/tsconfig.typecheck.json"], 120),
+        ))
+    if "docs" in packs:
+        steps.extend((
+            ("docs-navigation", [python, "scripts/check_docs.py"], 60),
+            ("release-docs", [python, "scripts/prepare_release_notes.py", "--check-all"], 60),
+        ))
+    targets = selection["python_tests"]
+    if targets:
+        steps.append(("python-selected", [python, "scripts/run_tests.py", "--automated", "--required", "--report",
+                      str(report_dir / "python-selected.json"), *targets], 300))
+    targets = selection["node_tests"]
+    if targets:
+        steps.append(("node-selected", [node, "--test", "--test-reporter=spec", "--test-reporter-destination=stdout",
+                      "--test-reporter=junit", f"--test-reporter-destination={report_dir / 'node-selected.xml'}",
+                      *targets], 240))
+    if specs:
+        steps.append(("browser-regressions", [node, "node_modules/@playwright/test/cli.js", "test",
+                      "--config=tests/config/playwright.config.mjs", "--project=chromium", "--forbid-only",
+                      "--workers=2", "--retries=0", f"--shard={shard[0]}/{shard[1]}", "--reporter=line,json",
+                      f"--output={report_dir / 'browser-artifacts'}", *specs], 900))
+    if "website" in packs:
+        steps.extend((
+            ("website-docs", [node, "website/scripts/sync-maw-docs.mjs"], 60),
+            ("website-releases", [python, "scripts/build_release_site.py", "--preview"], 180),
+            ("website-build", [shutil.which("pnpm") or "pnpm", "--dir", "website", "build"], 240),
+        ))
+    # A browser contract may serve website/dist. Prepare that input before the
+    # browser consumes it, including on a clean local checkout.
+    if "tests/e2e/editor-entry-retirement.spec.mjs" in specs and layer == "all":
+        steps = website_before_browser(steps)
+    for step in steps:
+        if layer in {"all", command_layer(step[0])}:
+            yield step
+
+
+def read_selection(path: Path) -> dict:
+    plan = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(plan, dict) or plan.get("mode") not in {"targeted", "full"}:
+        raise ValueError("selection plan requires targeted/full mode")
+    if plan.get("head"):
+        current = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+        if plan["head"] != current:
+            raise ValueError("selection plan belongs to a different commit")
+    for key in ("packs", "python_tests", "node_tests", "e2e_specs", "reasons"):
+        if not isinstance(plan.get(key), list) or any(not isinstance(item, str) for item in plan[key]):
+            raise ValueError(f"invalid selection list: {key}")
+        if len(plan[key]) != len(set(plan[key])):
+            raise ValueError(f"duplicate selection entries: {key}")
+    if not isinstance(plan.get("preparation"), dict):
+        raise ValueError("selection plan requires preparation flags")
+    for key, suffix in (("python_tests", ".py"), ("node_tests", ".mjs"), ("e2e_specs", ".spec.mjs")):
+        for target in plan[key]:
+            parts = target.split("/")
+            if not target.startswith("tests/") or not target.endswith(suffix) or "\\" in target or any(
+                    part in {"", ".", ".."} for part in parts) or not (ROOT / target).is_file():
+                raise ValueError(f"invalid concrete test path: {target}")
+    for key, suffix in (("existing_ubuntu_python", ".py"), ("existing_windows_python", ".py"), ("existing_windows_node", ".mjs")):
+        targets = plan.get("ci_platforms", {}).get(key, [])
+        if not isinstance(targets, list) or any(not isinstance(item, str) for item in targets) or len(targets) != len(set(targets)):
+            raise ValueError(f"invalid existing platform selection: {key}")
+        if any(not item.startswith("tests/") or not item.endswith(suffix) or "\\" in item
+               or any(part in {"", ".", ".."} for part in item.split("/")) or not (ROOT / item).is_file() for item in targets):
+            raise ValueError(f"invalid existing platform test path: {key}")
+        if plan["mode"] == "targeted" and set(targets) - set(plan["python_tests"] if suffix == ".py" else plan["node_tests"]):
+            raise ValueError(f"platform selection is outside the shared plan: {key}")
+    if set(plan["packs"]) - set(PACKS) or len(plan["packs"]) != len(set(plan["packs"])):
+        raise ValueError("selection plan contains unknown or duplicate packs")
+    return plan
+
+
 def execute(name: str, command: list[str], timeout: int) -> dict:
     print(f"Running {name} (deadline {timeout}s)", flush=True)
     _, result = run(command, timeout, ROOT / ".artifacts/checks")
@@ -121,6 +249,17 @@ def execute(name: str, command: list[str], timeout: int) -> dict:
 
 
 def prepare_browser(name, command, directory, specs, selection, results):
+    full_path = directory / f"{name}-full.json"
+    os.environ["PLAYWRIGHT_JSON_OUTPUT_FILE"] = str(full_path.resolve())
+    full_command = [arg for arg in command if not arg.startswith("--shard=")]
+    result = execute(f"{name}-full-discover", [*full_command, "--list"], 60)
+    results.append(result)
+    if result["exit_code"]:
+        raise ValueError(f"Browser full discovery failed; log={result['log']}")
+    # The full collection is saved separately so CI can verify the shard union.
+    full = json.loads(full_path.read_text(encoding="utf-8"))
+    if full.get("errors") or full.get("config", {}).get("shard") is not None:
+        raise ValueError("invalid full browser discovery")
     report_path = directory / f"{name}-list.json"
     os.environ["PLAYWRIGHT_JSON_OUTPUT_FILE"] = str(report_path.resolve())
     result = execute(f"{name}-discover", [*command, "--list"], 60)
@@ -137,22 +276,46 @@ def main(argv=None) -> int:
             stream.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--stage", choices=("dev", "merge", "release"), default="dev")
-    parser.add_argument("--component", choices=("all", "python", "editor", "launcher"), default="all")
+    parser.add_argument("--component", choices=("all", "python", "editor", "launcher"),
+                        help="explicit fixed development kernel; default dev uses impact selection")
     parser.add_argument("--pack", action="append", choices=PACKS)
     parser.add_argument("--changed", action="append", help="explicit changed path (repeatable); no shell patterns")
     parser.add_argument("--base-ref", help="Git base for committed branch changes; diff failure stops selection")
     parser.add_argument("--plan-only", action="store_true")
     parser.add_argument("--e2e-specs", help="JSON concrete spec paths for an explicit e2e pack")
     parser.add_argument("--tools-scope", choices=("all", "checklist"), help="explicit tool consumer scope for reproduction")
+    parser.add_argument("--selection-plan", type=Path, help="execute a saved concrete selection for this commit")
+    parser.add_argument("--layer", choices=("all", "docs", "website", "python", "node", "browser", "prepare",
+                                           "python-ubuntu-existing", "python-windows-existing", "node-windows-existing"), default="all")
+    parser.add_argument("--report-dir", type=Path, help="fresh evidence directory (default: unique local run)")
+    parser.add_argument("--shard", default="1/1", help="browser shard CURRENT/TOTAL; all other layers stay unchanged")
     args = parser.parse_args(argv)
+    try:
+        current, total = (int(value) for value in args.shard.split("/"))
+        if not 1 <= current <= total:
+            raise ValueError
+    except ValueError:
+        parser.error("shard must be CURRENT/TOTAL with 1 <= CURRENT <= TOTAL")
     if args.stage == "release" and args.pack:
         parser.error("release runs the full required set; use --stage merge for a partial pack")
+    if args.selection_plan and (args.changed or args.base_ref or args.pack or args.e2e_specs or args.tools_scope):
+        parser.error("selection-plan cannot be combined with selection overrides")
+    if args.stage == "release" and (args.selection_plan or args.component or args.layer != "all"):
+        parser.error("release requires the complete collection, without layer or saved-selection overrides")
+    if args.stage == "release" and total != 1:
+        parser.error("release requires all browser cases in this run; use merge/CI for verified shards")
+    if args.component and (args.stage != "dev" or args.pack or args.selection_plan):
+        parser.error("component selects an explicit development kernel only")
     os.chdir(ROOT)
-    paths = args.changed if args.changed is not None else changed_paths(args.base_ref)
-    deleted = changed_paths(args.base_ref, deleted_only=True) if args.changed is None else []
-    plan = select_packs(paths, release=args.stage == "release" or bool(deleted))
-    if deleted:
-        plan["reasons"] = ["Git reports deleted paths: expand all required packs"]
+    try:
+        plan = read_selection(args.selection_plan) if args.selection_plan else None
+        paths = plan.get("changed_paths", []) if plan else args.changed if args.changed is not None else changed_paths(args.base_ref)
+        deleted = [] if args.selection_plan or args.changed is not None else changed_paths(args.base_ref, deleted_only=True)
+        plan = plan or select_packs(paths, release=args.stage == "release", base_ref=args.base_ref)
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        parser.error(str(error))
+    selection_fingerprint = hashlib.sha256(json.dumps(plan, sort_keys=True, ensure_ascii=True,
+                                                     separators=(",", ":")).encode("utf-8")).hexdigest()
     packs = args.pack or plan["packs"]
     specs = json.loads(args.e2e_specs) if args.e2e_specs else plan["e2e_specs"]
     if not isinstance(specs, list) or any(not isinstance(path, str) or not path.startswith("tests/e2e/") or not path.endswith(".spec.mjs")
@@ -160,9 +323,7 @@ def main(argv=None) -> int:
         parser.error("e2e-specs must contain existing repository spec paths")
     if "e2e" in packs and not specs:
         parser.error("e2e requires concrete specs; use editor-e2e for the full collection")
-    if args.stage == "dev" and not args.pack:
-        # The kernel is fixed; changed modules are run with --stage merge after
-        # inspection, rather than hidden inside every edit/save cycle.
+    if args.component:
         packs = []
     if "e2e" in packs and "editor-e2e" in packs:
         parser.error("e2e and editor-e2e are mutually exclusive")
@@ -172,31 +333,22 @@ def main(argv=None) -> int:
     if args.stage == "release" or set(packs) - {"docs", "tools", "e2e", "website"} or (
             "e2e" in packs and not (specs and set(specs).issubset(CHECKLIST_SPECS))):
         tools_scope = "all"
+    prep = plan.get("preparation") if plan.get("preparation") and not args.pack else preparation(packs, specs, tools_scope)
     plan.update(stage=args.stage, changed_paths=paths, deleted_paths=deleted, packs=packs, e2e_specs=specs,
-                tools_scope=tools_scope,
-                preparation=preparation(packs, specs, tools_scope))
-    output_dir = ROOT / ".artifacts/test-workflow" / uuid.uuid4().hex[:12]
+                tools_scope=tools_scope, requested_layer=args.layer, preparation=prep)
+    if args.pack or args.component:
+        plan["mode"] = "explicit-pack" if args.pack else "development-kernel"
+    output_dir = (args.report_dir or ROOT / ".artifacts/test-workflow" / uuid.uuid4().hex[:12]).resolve()
+    if output_dir.exists():
+        parser.error("report-dir must be fresh; existing evidence cannot be reused")
     output_dir.mkdir(parents=True)
     (output_dir / "plan.json").write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(plan, ensure_ascii=False, indent=2))
     print(f"Evidence: {output_dir.relative_to(ROOT)}")
     if args.plan_only:
         return 0
-    required_modules = {"numpy", "soundfile"} if set(packs) & {"common", "media", "long-media"} else set()
-    if "common" in packs or "tools" in packs and tools_scope != "checklist":
-        required_modules.add("ruff")
-    if set(packs) & {"media", "long-media"} or "tools" in packs and tools_scope != "checklist":
-        required_modules.add("PIL")
-    if set(packs) & {"media", "long-media"}:
-        required_modules.add("quapeaks")
-    missing = [name for name in sorted(required_modules) if importlib.util.find_spec(name) is None]
-    if set(packs) & {"media", "long-media"}:
-        missing.extend(name for name in ("ffmpeg", "ffprobe") if not shutil.which(name))
-    if missing:
-        report = {"status": "required-dependency-missing", "missing": missing, "exit_code": 1, "plan": plan}
-        (output_dir / "summary.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-        print(f"Required dependencies missing: {', '.join(missing)}; gate not verified")
-        return 1
+    # Validate dependencies with their selected commands. A missing media
+    # capability must not prevent an unrelated standard-library check.
     # Explicit interpreter settings avoid implicit environment synchronization.
     os.environ.setdefault("MAW_TEST_PYTHON", sys.executable)
     os.environ.setdefault("MAW_E2E_PYTHON", sys.executable)
@@ -206,7 +358,8 @@ def main(argv=None) -> int:
         os.environ[key] = str(temp)
     results = []
     try:
-        steps = list(commands(packs, output_dir, dev=args.stage == "dev" and not args.pack, component=args.component, specs=specs, tools_scope=tools_scope))
+        steps = list(commands(packs, output_dir, dev=bool(args.component), component=args.component or "all", specs=specs,
+                              tools_scope=tools_scope, selection=plan, layer=args.layer, shard=(current, total)))
     except ValueError as error:
         report = {"status": "invalid-plan", "error": str(error), "exit_code": 1, "plan": plan}
         (output_dir / "summary.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
@@ -234,7 +387,7 @@ def main(argv=None) -> int:
                     raise ValueError("Required Node report is empty or contains non-passing cases")
             if not code and browser_record:
                 report = json.loads(browser_report.read_text(encoding="utf-8"))
-                validated = validate_browser(browser_record, report, 1, 1)
+                validated = validate_browser(browser_record, report, current, total)
                 (output_dir / f"{name}-validated.json").write_text(
                     json.dumps(validated, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         except (OSError, ValueError, KeyError, TypeError, ET.ParseError) as error:
@@ -245,7 +398,11 @@ def main(argv=None) -> int:
         if code:
             print("\n".join(dict.fromkeys(result["diagnostics"] + result["tail"])))
             break
-    summary = {"plan": plan, "results": results, "exit_code": next((r["exit_code"] for r in results if r["exit_code"]), 0)}
+    summary = {"plan": plan, "results": results, "head": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+               "selection_fingerprint": selection_fingerprint, "shard": {"current": current, "total": total},
+               "requested_layer": args.layer, "selected_gates": [name for name, _, _ in steps],
+               "status": "not-selected" if not steps else "failed" if any(r["exit_code"] for r in results) else "passed",
+               "exit_code": next((r["exit_code"] for r in results if r["exit_code"]), 0)}
     (output_dir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return 1 if summary["exit_code"] else 0
 

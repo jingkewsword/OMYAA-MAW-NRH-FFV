@@ -9,32 +9,31 @@ from scripts import local_test_impact as impact, test_workflow as workflow
 
 
 class LocalSelectionTests(unittest.TestCase):
-    def test_closed_consumers_and_shared_v2_fallback(self):
+    def test_checklist_documents_and_independent_specs(self):
         plan = impact.select_packs(["tools/verification-checklist/build.py"])
         self.assertEqual(plan["tools_scope"], "checklist")
         self.assertEqual(set(plan["e2e_specs"]), set(impact.CHECKLIST_SPECS))
-        self.assertEqual(set(plan["packs"]), {"docs", "tools", "e2e"})
+        self.assertIn("tests/test_verification_checklist.py", plan["python_tests"])
         for path in ("tests/e2e/unified-tracks.spec.mjs", "tests/e2e/v2-migration-save.spec.mjs"):
-            self.assertEqual(impact.select_packs([path])["e2e_specs"], [path])
-        for path in ("tests/test_project_tracks.py", "tests/test_speaker_project_migration.py",
-                     "tests/fixtures/project-tracks/canonical.json", "web/shared/tooltip.js",
-                     "web/editor/cues/editor-color-filter.js", "website/scripts/sync-maw-docs.mjs",
-                     "missing.py", "../README.md"):
-            with self.subTest(path=path):
-                self.assertEqual(set(impact.select_packs([path])["packs"]), impact.ALL_MERGE | {"docs"})
-        self.assertEqual(set(impact.select_packs(["README.md", "tests/e2e/unified-tracks.spec.mjs"])["packs"]),
-                         impact.ALL_MERGE | {"docs"})
-        self.assertEqual(impact.select_packs(["README.md"])["packs"], ["docs", "website"])
-        self.assertEqual(set(impact.select_packs(["README.md"], release=True)["packs"]), impact.ALL_MERGE | {"docs"})
+            self.assertIn(path, impact.select_packs([path])["e2e_specs"])
+        plan = impact.select_packs(["README.md", "tests/e2e/unified-tracks.spec.mjs"])
+        self.assertEqual(plan["mode"], "targeted")
+        self.assertIn("website", plan["packs"])
+        self.assertIn("tests/e2e/unified-tracks.spec.mjs", plan["e2e_specs"])
+        self.assertEqual(impact.select_packs(["README.md"], release=True)["mode"], "full")
+        self.assertEqual(impact.select_packs(["../README.md"])["mode"], "full")
 
-    def test_dynamic_load_tests_does_not_shrink_selection(self):
-        # Python source classification cannot know suites returned by hooks.
+    def test_dynamic_load_tests_expands_python_domain(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             (root / "tests").mkdir()
             (root / "tests/test_dynamic.py").write_text("def load_tests(loader, tests, pattern): return tests\n")
+            (root / "tests/test_another.py").write_text("# a separate test\n")
             with mock.patch.object(impact, "__file__", str(root / "scripts/local_test_impact.py")):
-                self.assertEqual(set(impact.select_packs(["tests/test_dynamic.py"])["packs"]), impact.ALL_MERGE | {"docs"})
+                plan = impact.select_packs(["tests/test_dynamic.py"])
+                self.assertEqual(plan["mode"], "targeted")
+                self.assertIn("tests/test_another.py", plan["python_tests"])
+                self.assertEqual(plan["e2e_specs"], [])
 
     def test_changed_paths_collects_staged_unstaged_untracked_and_base(self):
         with tempfile.TemporaryDirectory() as temp:

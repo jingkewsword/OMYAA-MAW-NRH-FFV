@@ -26,9 +26,9 @@ def fixture(file="example.spec.mjs", title="passes", *, skip=False):
 
 
 class BrowserResultsTests(unittest.TestCase):
-    def test_same_job_collection_and_exact_five_portable_skips(self):
+    def test_same_job_collection_and_exact_four_portable_skips(self):
         self.assertEqual(browser_results.validate(*fixture(), 1, 4)["passed"], 1)
-        self.assertEqual(len(browser_results.PORTABLE_SKIPS), 5)
+        self.assertEqual(len(browser_results.PORTABLE_SKIPS), 4)
         for file, title in browser_results.PORTABLE_SKIPS:
             result = browser_results.validate(*fixture(file, title[0], skip=True), 1, 4)
             self.assertEqual(len(result["skips"]), 1)
@@ -71,12 +71,18 @@ class BrowserResultsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             browser_results.validate(listed, actual, 1, 4)
 
-    def test_runtime_worker_metadata_does_not_change_resolved_config(self):
+    def test_runtime_ci_and_worker_metadata_does_not_change_resolved_config(self):
         listed, actual = fixture()
         listed["config"].update(metadata={}, projects=[{"id": "chromium", "metadata": {}}])
-        actual["config"].update(metadata={"actualWorkers": 2},
-                                projects=[{"id": "chromium", "metadata": {"actualWorkers": 2}}])
+        runtime = {"actualWorkers": 2, "ci": {"buildHref": "example"},
+                   "gitCommit": {"hash": "abc"}, "gitDiff": "runtime"}
+        actual["config"].update(metadata=runtime,
+                                projects=[{"id": "chromium", "metadata": dict(runtime)}])
         self.assertEqual(browser_results.validate(listed, actual, 1, 4)["passed"], 1)
+        actual["config"]["metadata"]["custom"] = "different"
+        with self.assertRaises(ValueError):
+            browser_results.validate(listed, actual, 1, 4)
+        del actual["config"]["metadata"]["custom"]
         actual["config"]["projects"][0]["id"] = "different"
         with self.assertRaises(ValueError):
             browser_results.validate(listed, actual, 1, 4)
