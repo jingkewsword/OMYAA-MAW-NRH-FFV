@@ -209,11 +209,14 @@ def commands(packs: list[str], report_dir: Path, *, dev: bool = False, component
 
 def read_selection(path: Path) -> dict:
     plan = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(plan, dict) or plan.get("mode") not in {"targeted", "full"}:
-        raise ValueError("selection plan requires targeted/full mode")
-    if plan.get("head"):
+    if not isinstance(plan, dict) or plan.get("mode") not in {"targeted", "full", "explicit-pack"}:
+        raise ValueError("selection plan requires targeted, full or explicit-pack mode")
+    head = plan.get("head")
+    if plan["mode"] == "explicit-pack" and not head:
+        raise ValueError("explicit pack selection plan requires a commit")
+    if head:
         current = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
-        if plan["head"] != current:
+        if head != current:
             raise ValueError("selection plan belongs to a different commit")
     for key in ("packs", "python_tests", "node_tests", "e2e_specs", "reasons"):
         if not isinstance(plan.get(key), list) or any(not isinstance(item, str) for item in plan[key]):
