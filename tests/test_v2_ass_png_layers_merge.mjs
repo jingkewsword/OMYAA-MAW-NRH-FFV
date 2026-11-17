@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { loadEditorModule } from './helpers/editor-module-loader.mjs';
+import { loadEditorModule, prepareEditorModule } from './helpers/editor-module-loader.mjs';
+await prepareEditorModule('shared/editor-utils.js');
 
 test('PNG event names coexist with v2 manual ASS layer order', () => {
   const context = { window: {} };

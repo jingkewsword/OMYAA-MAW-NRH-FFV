@@ -20,7 +20,7 @@ class WindowsCacheGateTests(unittest.TestCase):
         script = textwrap.dedent(match.group(1))
         namespace = "test_thumbnail_cache.ThumbnailCacheTests.test_symlink_registration_matches_resolved_source_namespace"
         modules = ("test_thumbnail_cache", "test_thumbnail_jobs_integration", "test_thumbnail_server", "test_reapeaks_fixture")
-        generated = ["test_reapeaks_fixture.GeneratedFixtureTests.test_" + source + "_generated_matches_fixture"
+        generated = ["test_reapeaks_fixture." + ("LongMediaGeneratedFixtureTests" if source == "tone30" else "GeneratedFixtureTests") + ".test_" + source + "_generated_matches_fixture"
                      for source in ("tone30", "tone_dual", "tone_48k")]
         selected = ["tests." + namespace, *[m + ".Contract.test_valid" for m in modules[1:]], *generated]
         good = {"selected_ids": selected,
@@ -33,6 +33,8 @@ class WindowsCacheGateTests(unittest.TestCase):
         scenarios.append(("unrelated class skip", unrelated_class_skip, True))
         for label, key, value in (("namespace skip", "skips", [{"id": "tests." + namespace}]),
                                   ("class skip", "skips", [{"id": "setUpClass (tests.test_reapeaks_fixture.GeneratedFixtureTests)"}]),
+                                  ("long class skip", "skips", [{"id": "setUpClass (tests.test_reapeaks_fixture.LongMediaGeneratedFixtureTests)"}]),
+                                  ("tone30 skip", "skips", [{"id": "tests." + generated[0]}]),
                                   ("module skip", "skips", [{"id": "unittest.loader.ModuleSkipped.test_thumbnail_server"}]),
                                   ("empty run", "run", 0), ("excess run", "run", len(selected) + 1), ("failed exit", "exit_code", 1),
                                   *[(field, field, 1) for field in ("failures", "errors", "expected_failures", "unexpected_successes")]):

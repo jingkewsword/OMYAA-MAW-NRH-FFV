@@ -1,0 +1,572 @@
+import copy
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import unittest
+from unittest import mock
+
+from scripts import browser_results, ci_impact, ci_matrix
+from tests.test_browser_results import fixture as browser_fixture
+from scripts.test_policy import python_pack
+from scripts.run_tests import build_suite, cases, filter_pack
+from tests.compact_assertions import CompactContainerAssertions
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def gate_fixture(profile):
+    plan = ci_impact.plan(profile, "test", base="a" * 40, head="b" * 40, trusted=True)
+    needs = {"selection": {"result": "success", "outputs": {"mode": plan["mode"], "plan": json.dumps(plan)}},
+             "full-tests": {"result": "success" if profile == "full" else "skipped"},
+             "browser": {"result": "skipped" if profile == "light" else "success"}}
+    receipts = [{"cell": cell["cell"], "fingerprint": ci_matrix.fingerprint(plan), "status": "success",
+                 "reports": {name: {"validated": True, "required": required,
+                                    **({"tone30_verified": True} if name == "python.json" else {})}
+                             for name, required in (("python.json", False), ("media-required.json", True))}
+                 if cell["layer"] == "python" else {}}
+                for cell in ci_matrix.cells(plan)]
+    total = 4 if profile == "full" else 1
+    for system in ci_matrix.SYSTEMS:
+        browsers = [r for r in receipts if r["cell"].startswith(system + "-browser-")]
+        reports = []
+        for shard, receipt in enumerate(browsers, 1):
+            listed, actual = browser_fixture(f"case-{shard}.spec.mjs", f"case {shard}")
+            for report in (listed, actual):
+                report["config"]["shard"] = {"current": shard, "total": total}
+            data = {"listed": listed, "actual": actual,
+                    "validated": browser_results.validate(listed, actual, shard, total),
+                    "metadata": {"revision": plan["head"], "os": system, "profile": profile,
+                                 "cell": receipt["cell"], "playwright_version": "1.62.0"}}
+            receipt["_browser_evidence"] = data
+            reports.append(listed)
+        if browsers:
+            full = copy.deepcopy(reports[0])
+            full["config"]["shard"] = None
+            full["suites"] = [suite for report in reports for suite in report["suites"]]
+            browsers[0]["_browser_evidence"]["full"] = full
+    return plan, needs, receipts
+
+
+def write_receipts(root, receipts):
+    filenames = {"listed": "browser-list.json", "actual": "browser-results.json",
+                 "validated": "browser-validated.json", "metadata": "browser-metadata.json",
+                 "full": "browser-full.json"}
+    for n, original in enumerate(receipts):
+        receipt = copy.deepcopy(original)
+        data = receipt.pop("_browser_evidence", {})
+        for key, value in data.items():
+            ci_matrix.write_json(root / str(n) / filenames[key], value)
+        ci_matrix.write_json(root / str(n) / "receipt.json", receipt)
+
+
+MEDIA_ID = "tests.test_fcp7_png.RenderTests.test_fixture"
+COMMON_ID = "tests.test_common.Case.test_private_fixture"
+
+
+def python_fixture(*, full=False):
+    return {"selected_ids": [MEDIA_ID, COMMON_ID] if full else [MEDIA_ID], "run": 2 if full else 1,
+            "failures": 0, "errors": 0, "expected_failures": 0, "unexpected_successes": 0,
+            "exit_code": 0, "skips": []}
+
+
+def full_python_fixture():
+    report = python_fixture(full=True)
+    report["selected_ids"].append("tests." + ci_matrix.TONE30_ID)
+    report["run"] += 1
+    return report
+
+
+class TestMatrixTests(CompactContainerAssertions, unittest.TestCase):
+    def test_v2_website_is_prepared_only_for_its_real_browser_consumer(self):
+        def listed(file):
+            return {"suites": [{"title": file, "line": 0, "specs": [
+                {"file": file, "title": "fixture", "tests": [{"projectName": "chromium"}]}]}]}
+        self.assertTrue(ci_matrix.browser_needs_website(listed("editor-entry-retirement.spec.mjs")))
+        self.assertFalse(ci_matrix.browser_needs_website(listed("word-timing.spec.mjs")))
+
+    def test_editor_browser_failure_evidence_does_not_mask_test_failure(self):
+        workflow = (ROOT / ".github/workflows/editor-checks.yml").read_text(encoding="utf-8")
+        browser_steps = workflow.split("      - name: Real file and HTTP editor", 1)[1].split(
+            "      # README and user guides", 1)[0]
+        self.assertIn("      - name: Independent browser tool pages", browser_steps)
+        self.assertIn("      - name: Preserve failed browser evidence\n"
+                      "        if: ${{ failure() && needs.selection.outputs.light != 'true' }}", browser_steps)
+        self.assertIn("uses: actions/upload-artifact@v6", browser_steps)
+        self.assertIn("path: test-results/", browser_steps)
+        self.assertIn("retention-days: 7", browser_steps)
+        # Uploading evidence is a later step, not a wrapper that swallows exits.
+        self.assertNotIn("continue-on-error", browser_steps)
+        self.assertNotIn("|| true", browser_steps)
+        self.assertIn("run: pnpm exec playwright test", browser_steps)
+        self.assertIn("run: uv run --no-sync python scripts/run_check.py --timeout 300", browser_steps)
+        for spec in ("unified-tracks", "v2-migration-save", "review-data-safety"):
+            self.assertIn(f"tests/e2e/{spec}.spec.mjs", browser_steps)
+        config = (ROOT / "tests/config/playwright.config.mjs").read_text(encoding="utf-8")
+        self.assertIn("trace: 'retain-on-failure'", config)
+
+    def test_finite_plans_and_explicit_intentional_skips(self):
+        for profile in ci_impact.PROFILES:
+            plan, needs, receipts = gate_fixture(profile)
+            ci_matrix.gate(plan, needs, receipts)
+            self.assertEqual(len(receipts), 12 if profile == "full" else 0 if profile == "light" else 2)
+
+    def test_gate_negative_controls(self):
+        for profile in ci_impact.PROFILES:
+            for job in ("selection", "full-tests", "browser"):
+                for bad in ("failure", "cancelled", "", "skipped", "success"):
+                    plan, needs, receipts = gate_fixture(profile)
+                    if needs[job]["result"] == bad:
+                        continue
+                    needs[job]["result"] = bad
+                    with self.subTest(profile=profile, job=job, bad=bad), self.assertRaises(ValueError):
+                        ci_matrix.gate(plan, needs, receipts)
+        for mutate in (lambda r: r.pop(), lambda r: r.append(copy.deepcopy(r[0])),
+                       lambda r: r[0].update(status="skipped"), lambda r: r[0].update(fingerprint="other"),
+                       lambda r: r[0].pop("reports")):
+            plan, needs, receipts = gate_fixture("full")
+            mutate(receipts)
+            with self.assertRaises(ValueError):
+                ci_matrix.gate(plan, needs, receipts)
+
+    def test_browser_gate_proves_full_discovery_and_each_outcome(self):
+        def data(receipts, shard):
+            return next(r["_browser_evidence"] for r in receipts
+                        if r["cell"] == f"ubuntu-latest-browser-{shard}-4")
+        def missing_id(r):
+            data(r, 1)["full"]["suites"].pop()
+        def duplicate_id(r):
+            one, two = data(r, 1), data(r, 2)
+            for field in ("listed", "actual"):
+                two[field]["suites"] = copy.deepcopy(one[field]["suites"])
+            two["validated"] = browser_results.validate(two["listed"], two["actual"], 2, 4)
+        def wrong_config(r):
+            for field in ("listed", "actual"):
+                data(r, 2)[field]["config"]["workers"] = 1
+        def fake_skip(r):
+            test = data(r, 2)["actual"]["suites"][0]["specs"][0]["tests"][0]
+            test.update(expectedStatus="skipped", status="skipped",
+                        annotations=[{"type": "skip", "description": browser_results.PORTABLE_REASON}],
+                        results=[{"status": "skipped", "retry": 0}])
+        def wrong_version(r):
+            data(r, 1)["metadata"]["playwright_version"] = "0.0.0"
+        def wrong_sha(r):
+            data(r, 1)["metadata"]["revision"] = "c" * 40
+        def wrong_os(r):
+            data(r, 1)["metadata"]["os"] = "windows-latest"
+        def wrong_profile(r):
+            data(r, 1)["metadata"]["profile"] = "editor"
+        def forged_summary(r):
+            data(r, 1)["validated"]["passed"] = 0
+        def missing_full(r):
+            del data(r, 1)["full"]
+        for mutate in (missing_id, duplicate_id, wrong_config, fake_skip, wrong_version, wrong_sha,
+                       wrong_os, wrong_profile, forged_summary, missing_full):
+            plan, needs, receipts = gate_fixture("full")
+            mutate(receipts)
+            with self.subTest(mutation=mutate.__name__), self.assertRaises((ValueError, TypeError, KeyError)):
+                ci_matrix.gate(plan, needs, receipts)
+
+    def test_browser_gate_accepts_only_exact_retired_portable_skip(self):
+        plan, needs, receipts = gate_fixture("full")
+        selected = next(r for r in receipts if r["cell"] == "ubuntu-latest-browser-2-4")
+        file, title = next(iter(browser_results.PORTABLE_SKIPS))
+        listed, actual = browser_fixture(file, title[0], skip=True)
+        for report in (listed, actual):
+            report["config"]["shard"] = {"current": 2, "total": 4}
+        data = selected["_browser_evidence"]
+        data.update(listed=listed, actual=actual, validated=browser_results.validate(listed, actual, 2, 4))
+        first = next(r for r in receipts if r["cell"] == "ubuntu-latest-browser-1-4")
+        first["_browser_evidence"]["full"]["suites"][1] = copy.deepcopy(listed["suites"][0])
+        ci_matrix.gate(plan, needs, receipts)
+        actual["suites"][0]["specs"][0]["tests"][0]["annotations"][0]["description"] += " forged"
+        with self.assertRaises(ValueError):
+            ci_matrix.gate(plan, needs, receipts)
+
+    def test_public_gate_reads_artifact_reports_and_rejects_missing_full(self):
+        plan, needs, receipts = gate_fixture("full")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            ci_matrix.write_json(root / "plan.json", plan)
+            write_receipts(root, receipts)
+            command = [sys.executable, str(Path(ci_matrix.__file__).resolve()), "gate",
+                       "--plan", str(root / "plan.json"), "--root", str(root)]
+            env = {**os.environ, "CI_NEEDS": json.dumps(needs), "GITHUB_SHA": plan["head"]}
+            self.assertEqual(subprocess.run(command, env=env, capture_output=True).returncode, 0)
+            for name in ("browser-full.json", "browser-list.json", "browser-results.json",
+                         "browser-validated.json", "browser-metadata.json"):
+                path = next(root.rglob(name))
+                saved = path.read_bytes()
+                path.unlink()
+                with self.subTest(missing=name):
+                    self.assertNotEqual(subprocess.run(command, env=env, capture_output=True).returncode, 0)
+                path.write_bytes(saved)
+
+    def test_bad_selector_cannot_green(self):
+        for key, value in (("mode", "domain"), ("profile", "unknown"), ("version", 2),
+                           ("head", "bad"), ("light", "false"), ("trusted_diff", False)):
+            plan, needs, receipts = gate_fixture("editor")
+            plan[key] = value
+            if key == "mode":
+                plan[key] = "full"
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                ci_matrix.gate(plan, needs, receipts)
+        plan, needs, receipts = gate_fixture("light")
+        needs["selection"]["outputs"]["plan"] = "{}"
+        with self.assertRaises(ValueError):
+            ci_matrix.gate(plan, needs, receipts)
+
+    def test_public_gate_rejects_missing_receipts_bad_plan_and_bad_workflow_head(self):
+        script = Path(ci_matrix.__file__).resolve()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            plan, needs, receipts = gate_fixture("full")
+            ci_matrix.write_json(root / "plan.json", plan)
+            command = [sys.executable, str(script), "gate", "--plan", str(root / "plan.json"), "--root", str(root)]
+            env = {**os.environ, "CI_NEEDS": json.dumps(needs), "GITHUB_SHA": plan["head"]}
+            self.assertNotEqual(subprocess.run(command, env=env, capture_output=True, timeout=10).returncode, 0)
+            write_receipts(root, receipts)
+            self.assertEqual(subprocess.run(command, env=env, capture_output=True, timeout=10).returncode, 0)
+            env["GITHUB_SHA"] = "c" * 40
+            self.assertNotEqual(subprocess.run(command, env=env, capture_output=True, timeout=10).returncode, 0)
+            ci_matrix.write_json(root / "plan.json", {"mode": "light"})
+            self.assertNotEqual(subprocess.run(command, env=env, capture_output=True, timeout=10).returncode, 0)
+
+    def test_fcp7_real_render_ownership_preserves_standard_discovery(self):
+        suite = build_suite(["tests.test_fcp7_png", "tests.test_fcp7_png_api",
+                             "tests.test_fcp7_png_v2_layers"], str(ROOT / "tests"), "test_*.py")
+        ids = [c.id() for c in cases(suite)]
+        media = [c.id() for c in cases(filter_pack(suite, "media"))]
+        expected = [i for i in ids if ".RenderTests." in i or i.endswith((
+            ".PngJobHttpTests.test_render_publish_and_repeated_export_preserve_prior_package",
+            ".V2ImageLayerTests.test_real_png_render_keeps_automatic_and_manual_main_cues"))]
+        self.assertTrue(expected)
+        self.assertEqual(media, expected)
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertEqual(python_pack("tests.test_fcp7_png.MatteTests.test_missing_glyph_stops_render_before_publishing_boxes"), "common")
+        self.assertEqual(python_pack("tests.test_new.NewTests.test_new"), "common")
+        self.assertEqual(python_pack("tests.test_other.RenderTests.test_fake"), "common")
+
+    def test_public_consumer_rechecks_non_pr_event_not_only_selector_or_sha(self):
+        script = Path(ci_matrix.__file__).resolve()
+        with tempfile.TemporaryDirectory() as temporary:
+            for profile in ("full", "tools", "light"):
+                root = Path(temporary) / profile
+                plan, needs, receipts = gate_fixture(profile)
+                ci_matrix.write_json(root / "plan.json", plan)
+                write_receipts(root, receipts)
+                for event in ("pull_request", "push", "schedule", "workflow_dispatch", "release", ""):
+                    env = {**os.environ, "GITHUB_EVENT_NAME": event, "GITHUB_SHA": plan["head"],
+                           "CI_NEEDS": json.dumps(needs), "GITHUB_OUTPUT": str(root / "outputs")}
+                    for action in ("gate", "expand"):
+                        command = [sys.executable, str(script), action, "--plan", str(root / "plan.json"), "--root", str(root)]
+                        outcome = subprocess.run(command, env=env, capture_output=True, timeout=10)
+                        with self.subTest(profile=profile, event=event, action=action):
+                            self.assertEqual(outcome.returncode == 0,
+                                             profile == "full" or event in {"", "pull_request"},
+                                             outcome.stderr.decode()[-700:])
+                            if outcome.returncode:
+                                self.assertIn(b"non-PR workflow event requires a full CI plan", outcome.stderr)
+
+    def test_workflow_keeps_additive_cross_platform_discovery(self):
+        workflow = (ROOT / ".github/workflows/test-matrix.yml").read_text(encoding="utf-8")
+        self.assertIn("schedule:", workflow)
+        self.assertIn("branches: [main, 2.0dev]", workflow)
+        self.assertIn("tags: ['v*']", workflow)
+        self.assertEqual(workflow.count("timeout-minutes: 15"), 1)
+        self.assertIn("timeout-minutes: 25", workflow.split("  browser:\n", 1)[1])
+        self.assertEqual(workflow.count("fail-fast: false"), 2)
+        self.assertIn("needs: [selection, full-tests, browser]", workflow)
+        self.assertIn("if: always()", workflow)
+        release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        self.assertEqual(release.count("--report .artifacts/release-python.json --github-summary"), 2)
+        self.assertIn("needs: [build-windows, build-aux]", release)
+        self.assertNotIn("test-matrix-required", release)
+        self.assertIn("install-browser: ${{ matrix.layer != 'python' && 'true' || 'false' }}", workflow)
+        setup = (ROOT / ".github/actions/test-environment/action.yml").read_text(encoding="utf-8")
+        self.assertIn("default: 'true'", setup)
+        self.assertIn("if: inputs.install-browser == 'true'", setup)
+
+    def test_browser_budget_progress_and_timeout_remain_fail_closed(self):
+        for profile, total in (("full", 4), ("editor", 1)):
+            plan, _, _ = gate_fixture(profile)
+            with self.subTest(profile=profile), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                listed, _ = browser_fixture()
+                listed["config"]["shard"] = None
+                def command(args, **kwargs):
+                    if kwargs["env"].get("PLAYWRIGHT_JSON_OUTPUT_FILE", "").endswith("browser-full.json"):
+                        ci_matrix.write_json(root / "browser-full.json", listed)
+                    elif kwargs["env"].get("PLAYWRIGHT_JSON_OUTPUT_FILE", "").endswith("browser-results.json"):
+                        raise subprocess.CalledProcessError(124, "browser")
+                with mock.patch.object(ci_matrix.subprocess, "run", side_effect=command) as run:
+                    with self.assertRaises(subprocess.CalledProcessError):
+                        ci_matrix.run_cell(plan, f"windows-latest-browser-1-{total}", root)
+                full, listing, execution = run.call_args_list
+                self.assertEqual(full.args[0][2:4], ["--timeout", "600"])
+                self.assertEqual(listing.args[0][2:4], ["--timeout", "600"])
+                self.assertEqual(execution.args[0][2:4], ["--timeout", "900"])
+                self.assertFalse(any(arg.startswith("--shard=") for arg in full.args[0]))
+                for call in (listing, execution):
+                    command = call.args[0]
+                    for arg in ("--reporter=line,json", "--retries=0", "--workers=2", "--forbid-only", f"--shard=1/{total}"):
+                        self.assertIn(arg, command)
+                    self.assertTrue(call.kwargs["check"])
+                self.assertIn("--list", full.args[0])
+                self.assertIn("--list", listing.args[0])
+                self.assertNotIn("--list", execution.args[0])
+                self.assertFalse((root / "receipt.json").exists())
+
+    def test_non_browser_budgets_are_not_increased(self):
+        plan, _, _ = gate_fixture("full")
+        for layer in ("node", "python"):
+            with self.subTest(layer=layer), tempfile.TemporaryDirectory() as temporary:
+                with mock.patch.object(ci_matrix.subprocess, "run", side_effect=
+                                       subprocess.CalledProcessError(124, layer)) as run:
+                    with self.assertRaises(subprocess.CalledProcessError):
+                        ci_matrix.run_cell(plan, f"windows-latest-{layer}", Path(temporary))
+                self.assertEqual(run.call_args.args[0][2:4], ["--timeout", "600"])
+                self.assertFalse((Path(temporary) / "receipt.json").exists())
+
+    def test_python_report_accounting_and_required_platform_recalculation(self):
+        full = python_fixture(full=True)
+        full["skips"] = [{"id": COMMON_ID, "reason": "private fixture", "platform_not_applicable": False}]
+        self.assertEqual(ci_matrix.validate_python_report(full, required=False)["skips"], 1)
+        with self.assertRaises(ValueError):
+            ci_matrix.validate_python_report(full, required=True)
+        full["skips"][0]["platform_not_applicable"] = True
+        with self.assertRaises(ValueError):
+            ci_matrix.validate_python_report(full, required=True)
+        full["skips"] = []
+        full["expected_failures"] = 1
+        self.assertEqual(ci_matrix.validate_python_report(full, required=False)["expected_failures"], 1)
+        with self.assertRaises(ValueError):
+            ci_matrix.validate_python_report(full, required=True)
+        if os.name == "nt":
+            guard = "tests.test_gui_web.GuiWebBridgeTests.test_open_existing_path_uses_external_opener_for_file_and_folder"
+            reason = "Non-Windows paths use the external opener"
+        else:
+            guard = "tests.test_ffmpeg.FfmpegResolverTests.test_windows_python_module_does_not_shadow_path_executables"
+            reason = "Windows PATHEXT resolution"
+        report = python_fixture()
+        report["selected_ids"] = [guard]
+        report["skips"] = [{"id": guard, "reason": reason, "platform_not_applicable": False}]
+        self.assertEqual(ci_matrix.validate_python_report(report, required=True)["skips"], 1)
+        report["skips"][0].update(reason="missing libass", platform_not_applicable=True)
+        with self.assertRaises(ValueError):
+            ci_matrix.validate_python_report(report, required=True)
+
+    def test_python_invalid_collections_counts_and_outcomes_rejected(self):
+        mutations = [lambda r: r.update(selected_ids=[]), lambda r: r["selected_ids"].append(MEDIA_ID),
+                     lambda r: r.update(selected_ids=[None]), lambda r: r.update(selected_ids=["\n"]),
+                     lambda r: r.update(run=0), lambda r: r.update(run=3), lambda r: r.update(run=True),
+                     lambda r: r.update(run=1), lambda r: r.update(exit_code=1),
+                     lambda r: r.update(expected_failures=3), lambda r: r.update(skips=None),
+                     lambda r: r.update(skips=[{"id": "outside", "reason": "missing"}]),
+                     lambda r: r.update(skips=[{"id": COMMON_ID, "reason": ""}]),
+                     *[lambda r, key=key: r.update({key: 1}) for key in ("failures", "errors", "unexpected_successes")]]
+        for n, mutate in enumerate(mutations):
+            report = python_fixture(full=True)
+            mutate(report)
+            with self.subTest(mutation=n), self.assertRaises(ValueError):
+                ci_matrix.validate_python_report(report, required=False)
+
+    def test_real_unittest_fixture_and_subtest_skips_keep_full_accounting(self):
+        from scripts.run_tests import CompactTextTestResult, _CapturedStream, result_report
+
+        class Guarded(unittest.TestCase):
+            @classmethod
+            def setUpClass(cls):
+                raise unittest.SkipTest("private fixture unavailable")
+
+            def test_one(self): pass
+            def test_two(self): pass
+
+        class Active(unittest.TestCase):
+            def test_subtest_skip(self):
+                with self.subTest(label="optional"):
+                    self.skipTest("optional case")
+
+        suite = unittest.TestSuite([Guarded("test_one"), Guarded("test_two"), Active("test_subtest_skip")])
+        selected = [case.id() for case in cases(suite)]
+        result = CompactTextTestResult(_CapturedStream(), False, 0)
+        suite.run(result)
+        report = {**result_report(result, selected), "exit_code": 0}
+        self.assertEqual(ci_matrix.validate_python_report(report, required=False)["run"], 1)
+        with self.assertRaises(ValueError):
+            ci_matrix.validate_python_report(report, required=True)
+
+    def test_python_cell_rejects_stale_reports_and_media_collection_mismatch(self):
+        plan, _, _ = gate_fixture("full")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            ci_matrix.write_json(root / "python.json", full_python_fixture())
+            ci_matrix.write_json(root / "media-required.json", python_fixture(full=True))
+            with self.assertRaises(ValueError):
+                ci_matrix.python_evidence(root)
+            with mock.patch.object(ci_matrix.subprocess, "run") as run:
+                with self.assertRaises(ValueError):
+                    ci_matrix.run_cell(plan, "windows-latest-python", root)
+            run.assert_not_called()
+            self.assertFalse((root / "receipt.json").exists())
+
+    def test_python_full_report_must_prove_tone30_ran_without_skip(self):
+        full = full_python_fixture()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            ci_matrix.write_json(root / "media-required.json", python_fixture())
+            ci_matrix.write_json(root / "python.json", full)
+            self.assertTrue(ci_matrix.python_evidence(root)["python.json"]["tone30_verified"])
+            bad_reports = []
+            missing = copy.deepcopy(full)
+            missing["selected_ids"].pop()
+            missing["run"] -= 1
+            bad_reports.append(missing)
+            for skip_id in ("tests." + ci_matrix.TONE30_ID,
+                            "tests." + ci_matrix.TONE30_ID + " (sample=1)",
+                            "setUpClass (tests.test_reapeaks_fixture.LongMediaGeneratedFixtureTests)",
+                            "setUpModule (tests.test_reapeaks_fixture)"):
+                report = copy.deepcopy(full)
+                report["skips"] = [{"id": skip_id, "reason": "fixture unavailable"}]
+                if skip_id.startswith("setUp"):
+                    report["run"] -= 1
+                bad_reports.append(report)
+            xfail = copy.deepcopy(full)
+            xfail["expected_failures"] = 1
+            bad_reports.append(xfail)
+            for report in bad_reports:
+                ci_matrix.write_json(root / "python.json", report)
+                with self.subTest(report=report), self.assertRaises(ValueError):
+                    ci_matrix.python_evidence(root)
+
+        plan, needs, receipts = gate_fixture("full")
+        receipts[0]["reports"]["python.json"].pop("tone30_verified")
+        with self.assertRaises(ValueError):
+            ci_matrix.gate(plan, needs, receipts)
+
+    def test_real_repeated_subtest_skips_are_full_compatible_but_not_required(self):
+        from scripts.run_tests import CompactTextTestResult, _CapturedStream, report_code, result_report
+
+        class Repeated(unittest.TestCase):
+            def test_optional_checks(self):
+                for _ in range(2):
+                    with self.subTest():
+                        self.skipTest("optional check unavailable")
+
+        case = Repeated("test_optional_checks")
+        result = CompactTextTestResult(_CapturedStream(), False, 0)
+        unittest.TestSuite([case]).run(result)
+        self.assertTrue(result.wasSuccessful())
+        report = result_report(result, [case.id()])
+        report["exit_code"] = report_code(report, required=False)
+        self.assertEqual(report["exit_code"], 0)
+        self.assertEqual(report["run"], 1)
+        self.assertEqual(len(report["skips"]), 2)
+        self.assertEqual(report["skips"][0]["id"], report["skips"][1]["id"])
+        self.assertEqual(ci_matrix.validate_python_report(report, required=False)["skips"], 2)
+        self.assertEqual(report_code(report, required=True), 1)
+        with self.assertRaisesRegex(ValueError, "unsupported required outcomes"):
+            ci_matrix.validate_python_report(report, required=True)
+
+    def test_real_case_and_fixture_skip_duplicates_still_fail(self):
+        from scripts.run_tests import CompactTextTestResult, _CapturedStream, report_code, result_report
+
+        class CaseSkip(unittest.TestCase):
+            def test_optional(self): self.skipTest("optional case unavailable")
+
+        class FixtureSkip(unittest.TestCase):
+            @classmethod
+            def setUpClass(cls): raise unittest.SkipTest("private fixture unavailable")
+
+            def test_optional(self): pass
+
+        class Pass(unittest.TestCase):
+            def test_present(self): pass
+
+        for skipped in (CaseSkip("test_optional"), FixtureSkip("test_optional")):
+            suite = unittest.TestSuite([skipped, Pass("test_present")])
+            selected = [case.id() for case in cases(suite)]
+            result = CompactTextTestResult(_CapturedStream(), False, 0)
+            suite.run(result)
+            report = result_report(result, selected)
+            report["exit_code"] = report_code(report, required=False)
+            self.assertEqual(ci_matrix.validate_python_report(report, required=False)["skips"], 1)
+            report["skips"].append(copy.deepcopy(report["skips"][0]))
+            with self.subTest(identity=skipped.id()), self.assertRaisesRegex(ValueError, "duplicate Python"):
+                ci_matrix.validate_python_report(report, required=False)
+
+    def test_real_cli_exit_zero_commands_cannot_forge_python_success_receipt(self):
+        # A real child CLI calls the real main()/run_cell(); only its test
+        # commands are controlled to return zero and optionally emit reports.
+        wrapper = '''import json, sys
+from pathlib import Path
+from unittest import mock
+sys.path.insert(0, sys.argv.pop(1))
+payload = json.loads(Path(sys.argv.pop(1)).read_text(encoding="utf-8"))
+from scripts import ci_matrix
+attempted = []
+def command(args, **kwargs):
+    path = Path(args[args.index("--report") + 1])
+    attempted.append(path.name)
+    if path.name in payload:
+        path.write_text(payload[path.name], encoding="utf-8")
+try:
+    with mock.patch.object(ci_matrix.subprocess, "run", side_effect=command):
+        ci_matrix.main()
+finally:
+    output = Path(sys.argv[sys.argv.index("--root") + 1])
+    (output.parent / "attempted.json").write_text(json.dumps({"attempted": attempted,
+        "receipt": (output / "receipt.json").exists()}), encoding="utf-8")
+'''
+        good = {"python.json": full_python_fixture(), "media-required.json": python_fixture()}
+        scenarios = [("positive", copy.deepcopy(good), True), ("missing-both", {}, False),
+                     ("missing-full", {"media-required.json": python_fixture()}, False),
+                     ("missing-required", {"python.json": full_python_fixture()}, False),
+                     ("corrupt-full", {**copy.deepcopy(good), "python.json": "{broken"}, False),
+                     ("empty-required", {**copy.deepcopy(good), "media-required.json": {}}, False)]
+        for name, field, value in (("reported-exit", "exit_code", 1), ("failure", "failures", 1),
+                                   ("error", "errors", 1), ("unexpected-success", "unexpected_successes", 1),
+                                   ("required-xfail", "expected_failures", 1), ("bad-run", "run", 0)):
+            pair = copy.deepcopy(good)
+            pair["media-required.json"][field] = value
+            scenarios.append((name, pair, False))
+        pair = copy.deepcopy(good)
+        pair["media-required.json"]["skips"] = [{"id": MEDIA_ID, "reason": "missing libass",
+                                                 "platform_not_applicable": True}]
+        scenarios.append(("forged-platform-skip", pair, False))
+        pair = copy.deepcopy(good)
+        pair["python.json"]["skips"] = [{"id": COMMON_ID, "reason": "manual private fixture",
+                                        "platform_not_applicable": False}]
+        scenarios.append(("positive-full-skip", pair, True))
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "cli.py").write_text(wrapper, encoding="utf-8", newline="\n")
+            plan, _, _ = gate_fixture("full")
+            ci_matrix.write_json(root / "plan.json", plan)
+            for name, pair, accepted in scenarios:
+                scenario = root / name
+                scenario.mkdir()
+                ci_matrix.write_json(scenario / "payload.json", {k: json.dumps(v) if not isinstance(v, str) else v
+                                                                 for k, v in pair.items()})
+                command = [sys.executable, str(root / "cli.py"), str(ROOT), str(scenario / "payload.json"),
+                           "run", "--plan", str(root / "plan.json"), "--cell", "windows-latest-python",
+                           "--root", str(scenario / "output")]
+                outcome = subprocess.run(command, env={**os.environ, "GITHUB_SHA": plan["head"]},
+                                         capture_output=True, timeout=20)
+                evidence = json.loads((scenario / "attempted.json").read_text(encoding="utf-8"))
+                with self.subTest(scenario=name):
+                    self.assertEqual(evidence["attempted"], ["python.json", "media-required.json"])
+                    self.assertEqual(outcome.returncode == 0, accepted, outcome.stderr.decode()[-1000:])
+                    self.assertEqual(evidence["receipt"], accepted)
+                    if accepted:
+                        receipt = json.loads((scenario / "output/receipt.json").read_text(encoding="utf-8"))
+                        self.assertTrue(receipt["reports"]["python.json"]["validated"])
+                        self.assertTrue(receipt["reports"]["python.json"]["tone30_verified"])
+                        self.assertTrue(receipt["reports"]["media-required.json"]["required"])
+                        self.assertEqual(len(receipt["reports"]["media-required.json"]["sha256"]), 64)
+
+
+if __name__ == "__main__":
+    unittest.main()

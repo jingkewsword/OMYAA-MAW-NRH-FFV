@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import fs from 'node:fs';
-import { loadEditorModule } from './helpers/editor-module-loader.mjs';
+import { loadEditorModule, prepareEditorModule } from './helpers/editor-module-loader.mjs';
+await prepareEditorModule('shared/editor-utils.js');
 import { fixtureNames, fixtureRoot, readFixture, createProjectHarness, browserOutputs } from './helpers/track-golden.mjs';
 const context = { window: {} };
 loadEditorModule(context, 'shared/editor-utils.js');
