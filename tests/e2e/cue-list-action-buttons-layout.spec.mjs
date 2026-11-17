@@ -2,14 +2,12 @@ import { expect, test } from '@playwright/test';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { buildPortableBlankEditor, cleanupTempDir, disableOnboarding, makeTempDir } from './helpers.mjs';
+import { buildBrowserEditorFixture, cleanupTempDir, disableOnboarding, makeTempDir } from './helpers.mjs';
 
 let dir, blankEditorUrl;
 test.beforeAll(() => {
   dir = makeTempDir('cue-list-toolbar');
-  const portable = join(dir, 'editor.html');
-  buildPortableBlankEditor(portable);
-  blankEditorUrl = pathToFileURL(portable).href;
+  blankEditorUrl = pathToFileURL(buildBrowserEditorFixture(join(dir, 'editor.html'))).href;
 });
 test.afterAll(() => cleanupTempDir(dir));
 
