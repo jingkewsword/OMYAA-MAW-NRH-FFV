@@ -54,6 +54,30 @@ class ConcreteWorkflowTests(unittest.TestCase):
             workflow.main(["--stage", "release", "--shard", "1/2", "--plan-only"])
         self.assertEqual(result.exception.code, 2)
 
+    def test_execution_preserves_the_callers_temporary_filesystem(self):
+        before = Path.cwd()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            chosen = root / "system-temp"
+            chosen.mkdir()
+            plan = {"mode": "targeted", "packs": [], "python_tests": [], "node_tests": [], "e2e_specs": [],
+                    "tools_scope": "all", "reasons": ["standard library probe"],
+                    "preparation": {"application": False, "real_media": False, "lint": False}}
+            def execute(name, command, timeout):
+                self.assertEqual(os.environ["TEMP"], str(chosen))
+                self.assertEqual(os.environ["TMP"], str(chosen))
+                return {"gate": name, "command": command, "exit_code": 0, "status": "completed", "log": "probe.log"}
+            try:
+                with mock.patch.dict(os.environ, {"TEMP": str(chosen), "TMP": str(chosen)}), \
+                        mock.patch.object(workflow, "ROOT", root), mock.patch.object(workflow, "select_packs", return_value=plan), \
+                        mock.patch.object(workflow, "commands", return_value=[("probe", ["probe"], 1)]), \
+                        mock.patch.object(workflow, "execute", side_effect=execute), \
+                        mock.patch.object(workflow.subprocess, "check_output", return_value="a" * 40), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(workflow.main(["--changed", "README.md"]), 0)
+            finally:
+                os.chdir(before)
+
     def test_platform_preservation_layers_execute_only_the_selected_intersection(self):
         plan = selected()
         plan["ci_platforms"] = {"existing_ubuntu_python": ["tests/test_project_contract.py"],

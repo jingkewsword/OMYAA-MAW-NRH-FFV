@@ -93,6 +93,12 @@ python scripts/run_check.py --timeout 180 -- python scripts/run_tests.py tests.t
 
 每次运行在 `.artifacts/test-workflow/<运行标识>/` 保存 `plan.json` 和 `summary.json`，并保留各语言报告与完整日志。`--report-dir` 可指定新的证据目录，已有目录不会覆盖。CI 用 `--selection-plan` 读取同提交的保存计划，用 `--layer` 执行明确的一层；报告只对应所请求的范围。浏览器可用 `--shard 1/2` 指定分片，完整发现和该片实际结果分别保存；本地 `release` 拒绝局部分片，CI 分片需经并集汇总验证。
 
+已选中的独立组在其他组失败后继续执行，最后统一返回非零。Python 和 Node 的定向选择按文件执行；报告随每组完成落盘。`summary.json` 区分实跑、失败、被前置阻塞及未运行，`process_exit_code` 保留原命令退出码，`exit_code` 另外反映报告和覆盖校验。`failures.json` 汇集完整失败 ID、位置、错误内容和日志入口，终端摘要不限制磁盘上的错误清单。
+
+CI 用可重复的 `--blocked-preparation` 传递已失败的准备项，由具体消费者决定阻塞范围；无关标准库检查继续执行。网站准备失败只阻塞发现清单中包含网站消费者的浏览器分片。动态依赖无法全部静态推断，未识别依赖仍由实际运行如实报告，不能据此声称已经验证。运行器继承系统或调用者的临时目录；沙箱需要其他可写目录时在调用前设置 `TEMP` / `TMP`，不改变系统配置或静默更换 Windows 卷。
+
+必要全量的准备失败时，原完整组保持 `blocked`，并继续尝试可独立执行的具体文件。报告将这些局部结果和原完整发现的缺口分开，最终仍非零；局部文件成功不等于包初始化、`load_tests` 及完整集合已经验收。准备全部成功时保留原完整运行及其报告，不叠加这条局部路径。
+
 修复后先用 `scripts/run_tests.py` 的文件、模块或具体用例入口重跑失败项；浏览器用原 spec 和 `--grep` 定向复验，再运行本次修改的消费者。当前没有自动文件级中断接续或预算参数；不要把手动少跑一部分解释成完整运行已恢复。
 
 GitHub Actions 可以[重跑失败或指定 job 及其依赖](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs)；重跑仍使用原运行的提交。修复代码后触发新提交的运行。原生 job 重跑不会自动接续 job 内部的测试文件；不能把旧提交的重跑结果写成修复提交的验证。

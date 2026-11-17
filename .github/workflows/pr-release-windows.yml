@@ -51,6 +51,8 @@ jobs:
         if: ${{ needs.selection.result != 'success' || needs.selection.outputs.plan == '' }}
         run: exit 1
       - name: Check out repository
+        id: checkout
+        if: ${{ !cancelled() && needs.selection.result == 'success' }}
         # 默认 checkout pull_request 事件的 merge commit，与 GitHub 选取的
         # workflow 文件版本（同样来自 merge ref）保持一致；checkout PR 头
         # commit 会在 PR 落后 main 时出现「workflow 要求的依赖组在旧
@@ -60,24 +62,29 @@ jobs:
           persist-credentials: false
 
       - name: Set up Python
+        id: python
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         uses: actions/setup-python@v6
         with:
           python-version: '3.11'
           architecture: x64
 
       - name: Set up uv
-        if: ${{ needs.selection.outputs.python_dependencies == 'true' || needs.selection.outputs.preview_windows == 'true' || needs.selection.outputs.real_media == 'true' }}
+        id: uv
+        if: ${{ !cancelled() && steps.python.outcome == 'success' && (needs.selection.outputs.python_dependencies == 'true' || needs.selection.outputs.preview_windows == 'true' || needs.selection.outputs.real_media == 'true') }}
         uses: astral-sh/setup-uv@v7
         with:
           version: "0.13.4"
           enable-cache: true
 
       - name: Verify Launcher version
-        if: ${{ needs.selection.outputs.preview_windows == 'true' }}
+        id: version
+        if: ${{ !cancelled() && steps.python.outcome == 'success' && needs.selection.outputs.preview_windows == 'true' }}
         run: python scripts/sync_launcher_version.py --check
 
       - name: Install locked dependencies
-        if: ${{ needs.selection.outputs.python_dependencies == 'true' || needs.selection.outputs.preview_windows == 'true' || needs.selection.outputs.real_media == 'true' }}
+        id: py_install
+        if: ${{ !cancelled() && steps.uv.outcome == 'success' }}
         shell: pwsh
         run: |
           if ('${{ needs.selection.outputs.preview_windows }}' -eq 'true') {
@@ -88,26 +95,33 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Set up pnpm
-        if: ${{ needs.selection.outputs.application == 'true' || needs.selection.outputs.preview_windows == 'true' }}
+        id: pnpm
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && (needs.selection.outputs.application == 'true' || needs.selection.outputs.preview_windows == 'true') }}
         uses: pnpm/action-setup@v6
         with:
           version: 11.28.4
           run_install: false
       - name: Set up Node
-        if: ${{ needs.selection.outputs.application == 'true' || needs.selection.outputs.preview_windows == 'true' }}
+        id: node
+        if: ${{ !cancelled() && steps.pnpm.outcome == 'success' }}
         uses: actions/setup-node@v5
         with:
           node-version: '22.23.4'
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
+      - name: Install application JavaScript dependencies
+        id: js_install
+        if: ${{ !cancelled() && steps.node.outcome == 'success' }}
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
       - name: Build web bundles
-        if: ${{ needs.selection.outputs.application == 'true' || needs.selection.outputs.preview_windows == 'true' }}
-        # bundle 是构建产物（不入库）：Python 全量测试与打包都会读取，在测试前
-        # 安装阶段跳过脚本，随后显式构建，避免 postinstall 重复编译。
-        run: pnpm install --frozen-lockfile --ignore-scripts && pnpm run build
+        id: build
+        if: ${{ !cancelled() && steps.js_install.outcome == 'success' }}
+        run: pnpm run build
 
       - name: Install Chromium for focused regression tests
-        if: ${{ needs.selection.outputs.preview_windows == 'true' }}
+        id: chromium
+        if: ${{ !cancelled() && needs.selection.outputs.preview_windows == 'true' && steps.build.outcome == 'success' }}
         shell: bash
         # 2026-11-11 PR #365 的 editor job 曾因 GitHub runner DNS 抖动失败
         # （apt resolve「Temporary failure resolving security.ubuntu.com」，
@@ -129,7 +143,8 @@ jobs:
           done
 
       - name: Install FFmpeg for media integration tests
-        if: ${{ needs.selection.outputs.real_media == 'true' }}
+        id: ffmpeg
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && needs.selection.outputs.real_media == 'true' }}
         shell: pwsh
         # Test dependency only: the lite preview must still contain no FFmpeg.
         run: |
@@ -182,18 +197,21 @@ jobs:
           $FfmpegBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Run packaging contract tests
-        if: ${{ needs.selection.outputs.preview_windows == 'true' }}
+        id: packaging_tests
+        if: ${{ !cancelled() && needs.selection.outputs.preview_windows == 'true' && steps.py_install.outcome == 'success' }}
         run: uv run --no-sync python scripts/run_check.py --timeout 180 -- uv run --no-sync python scripts/run_tests.py tests/test_packaging_contract.py
 
       - name: Run editor display regression tests
-        if: ${{ needs.selection.outputs.preview_windows == 'true' }}
+        id: display
+        if: ${{ !cancelled() && needs.selection.outputs.preview_windows == 'true' && steps.py_install.outcome == 'success' && steps.build.outcome == 'success' && steps.chromium.outcome == 'success' }}
         env:
           MAW_E2E_PYTHON: '${{ github.workspace }}/.venv/Scripts/python.exe'
           PLAYWRIGHT_JSON_OUTPUT_FILE: .artifacts/editor-display-results.json
         run: uv run --no-sync python scripts/run_check.py --timeout 540 -- node node_modules/@playwright/test/cli.js test --config=tests/config/playwright.config.mjs --project=chromium --workers=1 --retries=0 --forbid-only --reporter=line,json tests/e2e/ass-stacking-boundaries.spec.mjs tests/e2e/editor-i18n-save.spec.mjs tests/e2e/shared-tooltip.spec.mjs
 
       - name: Require complete display regression results
-        if: ${{ needs.selection.outputs.preview_windows == 'true' }}
+        id: display_report
+        if: ${{ !cancelled() && steps.display.outcome == 'success' }}
         shell: pwsh
         run: |
           uv run --no-sync python -c @'
@@ -235,15 +253,18 @@ jobs:
           retention-days: 7
 
       - name: Save selected plan
+        id: plan
+        if: ${{ !cancelled() && steps.python.outcome == 'success' }}
         run: python -c "import os,pathlib; p=pathlib.Path('.artifacts/ci-plan.json'); p.parent.mkdir(parents=True,exist_ok=True); p.write_text(os.environ['CI_PLAN'],encoding='utf-8')"
 
       - name: Selected Python tests
-        if: ${{ needs.selection.outputs.full != 'true' && needs.selection.outputs.python == 'true' && needs.selection.outputs.python_dependencies == 'true' }}
-        run: uv run --no-sync python scripts/test_workflow.py --stage merge --selection-plan .artifacts/ci-plan.json --layer python --report-dir .artifacts/ci-python
-
-      - name: Selected standard-library Python tests
-        if: ${{ needs.selection.outputs.full != 'true' && needs.selection.outputs.python == 'true' && needs.selection.outputs.python_dependencies == 'false' }}
-        run: python scripts/test_workflow.py --stage merge --selection-plan .artifacts/ci-plan.json --layer python --report-dir .artifacts/ci-python
+        id: python_selected
+        if: ${{ !cancelled() && needs.selection.outputs.full != 'true' && needs.selection.outputs.python == 'true' && steps.plan.outcome == 'success' }}
+        env:
+          CI_PREPARATION: ${{ toJSON(steps) }}
+          CI_REQUIREMENTS: >-
+            {"build":${{ needs.selection.outputs.application }},"python-dependencies":${{ needs.selection.outputs.python_dependencies }},"ffmpeg":${{ needs.selection.outputs.real_media }},"chromium":false,"node-dependencies":${{ toJSON(needs.selection.outputs.application == 'true' || needs.selection.outputs.preview_windows == 'true') }}}
+        run: python scripts/ci_run_layer.py --layer python --report-dir .artifacts/ci-python
 
       - name: Preserve selected Python evidence
         if: ${{ always() && needs.selection.outputs.full != 'true' && needs.selection.outputs.python == 'true' }}
@@ -258,11 +279,35 @@ jobs:
           retention-days: 7
 
       - name: Run Python tests
-        if: ${{ needs.selection.outputs.full == 'true' }}
+        id: python_full
+        if: ${{ !cancelled() && needs.selection.outputs.full == 'true' && steps.py_install.outcome == 'success' && steps.build.outcome == 'success' && steps.ffmpeg.outcome == 'success' }}
         run: uv run --no-sync python scripts/run_check.py --timeout 600 -- uv run --no-sync python scripts/run_tests.py --report .artifacts/windows-python.json --github-summary
 
+      # Preserve the original complete run when prepared. If preparation
+      # fails, run independent files and keep the full/cache gates blocked.
+      - name: Continue independent Python files after preparation failure
+        id: python_partial
+        if: ${{ !cancelled() && needs.selection.outputs.full == 'true' && steps.plan.outcome == 'success' && (steps.py_install.outcome != 'success' || steps.build.outcome != 'success' || steps.ffmpeg.outcome != 'success') }}
+        env:
+          CI_PREPARATION: ${{ toJSON(steps) }}
+          CI_REQUIREMENTS: '{"build":true,"python-dependencies":true,"ffmpeg":true,"chromium":false,"node-dependencies":true}'
+        run: python scripts/ci_run_layer.py --layer python --report-dir .artifacts/ci-python-partial
+
+      - name: Preserve partial Python evidence
+        if: ${{ always() && needs.selection.outputs.full == 'true' && steps.python_partial.outcome != 'skipped' }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: windows-partial-python
+          path: |
+            .artifacts/ci-plan.json
+            .artifacts/ci-python-partial/
+            .artifacts/checks/
+          include-hidden-files: true
+          retention-days: 7
+
       - name: Require cache coverage from the same Python run
-        if: ${{ needs.selection.outputs.full == 'true' }}
+        id: cache_report
+        if: ${{ !cancelled() && steps.python_full.outcome == 'success' }}
         shell: pwsh
         run: |
           @'
@@ -305,7 +350,8 @@ jobs:
           retention-days: 7
 
       - name: Required media failure compatibility
-        if: ${{ needs.selection.outputs.full == 'true' }}
+        id: media
+        if: ${{ !cancelled() && needs.selection.outputs.full == 'true' && steps.py_install.outcome == 'success' && steps.ffmpeg.outcome == 'success' }}
         run: uv run --no-sync python scripts/run_check.py --timeout 180 -- uv run --no-sync python scripts/run_tests.py tests/test_media.py tests/test_ffmpeg.py tests/test_ffprobe_failure_integration.py --required --report .artifacts/media-required.json
       - name: Preserve media required report
         if: ${{ always() && needs.selection.outputs.full == 'true' }}
@@ -321,7 +367,8 @@ jobs:
 
 
       - name: Launcher readiness and real cancellation
-        if: ${{ needs.selection.outputs.preview_windows == 'true' }}
+        id: launcher
+        if: ${{ !cancelled() && needs.selection.outputs.preview_windows == 'true' && steps.py_install.outcome == 'success' && steps.build.outcome == 'success' && steps.chromium.outcome == 'success' }}
         env:
           MAW_E2E_PYTHON: ${{ github.workspace }}/.venv/Scripts/python.exe
           PLAYWRIGHT_JSON_OUTPUT_FILE: .artifacts/launcher-readiness.json
@@ -366,19 +413,22 @@ jobs:
           retention-days: 7
 
       - name: Download embedded Python bootstrap assets
-        if: ${{ needs.selection.outputs.preview_windows == 'true' }}
+        id: bootstrap
+        if: ${{ !cancelled() && needs.selection.outputs.preview_windows == 'true' && steps.checkout.outcome == 'success' }}
         run: |
           mkdir -p build
           curl -L --retry 3 --connect-timeout 20 --max-time 300 -o build/python-3.11.9-embed-amd64.zip https://www.python.org/ftp/python/3.11.9/python-3.11.9-embed-amd64.zip
           curl -L --retry 3 --connect-timeout 20 --max-time 120 -o build/get-pip.py https://bootstrap.pypa.io/get-pip.py
 
       - name: Build MAW bundle
-        if: ${{ needs.selection.outputs.preview_windows == 'true' }}
+        id: package
+        if: ${{ !cancelled() && needs.selection.outputs.preview_windows == 'true' && steps.py_install.outcome == 'success' && steps.build.outcome == 'success' && steps.bootstrap.outcome == 'success' }}
         shell: pwsh
         run: .\scripts\build-windows.ps1 -SkipTests
 
       - name: Verify bundled FAQ
-        if: ${{ needs.selection.outputs.preview_windows == 'true' }}
+        id: faq
+        if: ${{ !cancelled() && steps.package.outcome == 'success' }}
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -387,7 +437,8 @@ jobs:
           }
 
       - name: Verify runtime requirements bundled
-        if: ${{ needs.selection.outputs.preview_windows == 'true' }}
+        id: requirements
+        if: ${{ !cancelled() && steps.package.outcome == 'success' }}
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -404,7 +455,8 @@ jobs:
           }
 
       - name: Smoke MAW executable
-        if: ${{ needs.selection.outputs.preview_windows == 'true' }}
+        id: smoke
+        if: ${{ !cancelled() && steps.package.outcome == 'success' && steps.py_install.outcome == 'success' }}
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -427,7 +479,8 @@ jobs:
           retention-days: 7
 
       - name: Verify no FFmpeg is bundled
-        if: ${{ needs.selection.outputs.preview_windows == 'true' }}
+        id: no_ffmpeg
+        if: ${{ !cancelled() && steps.package.outcome == 'success' }}
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -438,7 +491,8 @@ jobs:
           }
 
       - name: Create MAW-lite release preview archive
-        if: ${{ needs.selection.outputs.preview_windows == 'true' }}
+        id: archive
+        if: ${{ !cancelled() && steps.package.outcome == 'success' && steps.faq.outcome == 'success' && steps.requirements.outcome == 'success' && steps.smoke.outcome == 'success' && steps.no_ffmpeg.outcome == 'success' }}
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -448,7 +502,8 @@ jobs:
           Compress-Archive -LiteralPath 'dist\MAW' -DestinationPath $Archive -Force
 
       - name: Upload MAW-lite release preview
-        if: ${{ needs.selection.outputs.preview_windows == 'true' }}
+        id: upload
+        if: ${{ !cancelled() && steps.archive.outcome == 'success' }}
         uses: actions/upload-artifact@v6
         with:
           name: MAW-lite-Windows-x64-pr-${{ github.event.pull_request.number || 'manual' }}-${{ github.event.pull_request.head.sha || github.sha }}
@@ -456,3 +511,38 @@ jobs:
             MAW-lite-Windows-x64-pr-${{ github.event.pull_request.number || 'manual' }}-${{ github.event.pull_request.head.sha || github.sha }}.zip
           if-no-files-found: error
           retention-days: 14
+
+      - name: Summarize preview checks
+        if: ${{ !cancelled() && steps.python.outcome == 'success' }}
+        env:
+          CI_STEPS: ${{ toJSON(steps) }}
+          CI_GROUPS: >-
+            [
+              {"id":"version","selected":${{ needs.selection.outputs.preview_windows }},"requires":["python"]},
+              {"id":"packaging_tests","selected":${{ needs.selection.outputs.preview_windows }},"requires":["py_install"]},
+              {"id":"display","selected":${{ needs.selection.outputs.preview_windows }},"requires":["py_install","build","chromium"]},
+              {"id":"display_report","selected":${{ needs.selection.outputs.preview_windows }},"requires":["display"]},
+              {"id":"python_selected","selected":${{ toJSON(needs.selection.outputs.full != 'true' && needs.selection.outputs.python == 'true') }},"requires":["plan"]},
+              {"id":"python_full","selected":${{ needs.selection.outputs.full }},"requires":["py_install","build","ffmpeg"]},
+              {"id":"python_partial","selected":${{ toJSON(needs.selection.outputs.full == 'true' && (steps.py_install.outcome != 'success' || steps.build.outcome != 'success' || steps.ffmpeg.outcome != 'success')) }},"requires":["plan"]},
+              {"id":"cache_report","selected":${{ needs.selection.outputs.full }},"requires":["python_full"]},
+              {"id":"media","selected":${{ needs.selection.outputs.full }},"requires":["py_install","ffmpeg"]},
+              {"id":"launcher","selected":${{ needs.selection.outputs.preview_windows }},"requires":["py_install","build","chromium"]},
+              {"id":"bootstrap","selected":${{ needs.selection.outputs.preview_windows }},"requires":["checkout"]},
+              {"id":"package","selected":${{ needs.selection.outputs.preview_windows }},"requires":["py_install","build","bootstrap"]},
+              {"id":"faq","selected":${{ needs.selection.outputs.preview_windows }},"requires":["package"]},
+              {"id":"requirements","selected":${{ needs.selection.outputs.preview_windows }},"requires":["package"]},
+              {"id":"smoke","selected":${{ needs.selection.outputs.preview_windows }},"requires":["package","py_install"]},
+              {"id":"no_ffmpeg","selected":${{ needs.selection.outputs.preview_windows }},"requires":["package"]},
+              {"id":"archive","selected":${{ needs.selection.outputs.preview_windows }},"requires":["package","faq","requirements","smoke","no_ffmpeg"]},
+              {"id":"upload","selected":${{ needs.selection.outputs.preview_windows }},"requires":["archive"]}
+            ]
+        run: python scripts/ci_matrix.py steps --report .artifacts/windows-preview-summary.json
+      - name: Preserve preview summary
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: windows-preview-summary
+          path: .artifacts/windows-preview-summary.json
+          include-hidden-files: true
+          retention-days: 7

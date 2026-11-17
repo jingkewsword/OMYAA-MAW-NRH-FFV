@@ -11,7 +11,6 @@ import shutil
 import subprocess
 import sys
 import uuid
-import xml.etree.ElementTree as ET
 
 if __package__:
     from .run_check import run
@@ -62,11 +61,14 @@ def _pack_commands(packs: list[str], report_dir: Path, *, dev: bool = False, com
                   "--forbid-only", "--workers=2", "--retries=0", "--shard=1/1"]
     if dev:
         if component in {"python", "all"}:
-            yield "python-kernel", [python, "scripts/run_tests.py", "--required", *DEV_PYTHON], 60
+            yield "python-kernel", [python, "scripts/run_tests.py", "--required", "--report", str(report_dir / "python-kernel.json"), *DEV_PYTHON], 60
         if component in {"editor", "all"}:
-            yield "editor-kernel", [node, "--test", *(f"tests/{name}" for name in DEV_NODE)], 60
+            yield "editor-kernel", [node, "--test", "--test-reporter=spec", "--test-reporter-destination=stdout",
+                  "--test-reporter=junit", f"--test-reporter-destination={report_dir / 'editor-kernel.xml'}",
+                  *(f"tests/{name}" for name in DEV_NODE)], 60
         if component in {"launcher", "all"}:
-            yield "launcher-kernel", [python, "scripts/run_tests.py", "--required", "tests.test_launcher_contract"], 60
+            yield "launcher-kernel", [python, "scripts/run_tests.py", "--required", "--report", str(report_dir / "launcher-kernel.json"),
+                  "tests.test_launcher_contract"], 60
         return
     if "common" in packs or "tools" in packs and tools_scope != "checklist":
         yield "python-lint", [python, "-m", "ruff", "check"], 60
@@ -83,7 +85,8 @@ def _pack_commands(packs: list[str], report_dir: Path, *, dev: bool = False, com
             yield "release-docs", [python, "scripts/prepare_release_notes.py", "--check-all"], 60
             if "tools" not in packs or tools_scope == "checklist":
                 yield "docs-regressions", [python, "scripts/run_tests.py", "--required", "tests.test_docs_check", "tests.test_release_notes",
-                                           "tests.test_release_site", "tests.test_release_publication"], 120
+                                           "tests.test_release_site", "tests.test_release_publication", "--report",
+                                           str(report_dir / "docs-regressions.json")], 120
         if pack in PYTHON_PACKS:
             targets = list(CHECKLIST_PYTHON) if pack == "tools" and tools_scope == "checklist" else ["--pack", pack]
             # Pack discovery retains unittest package/import/load_tests semantics.
@@ -120,7 +123,7 @@ def command_layer(name: str) -> str:
         return "docs"
     if name.startswith("website-"):
         return "website"
-    if name.startswith("node-"):
+    if name.startswith("node-") or name == "editor-kernel":
         return "node"
     if name in {"editor-http-smoke", "browser-regressions"}:
         return "browser"
@@ -178,14 +181,15 @@ def commands(packs: list[str], report_dir: Path, *, dev: bool = False, component
             ("release-docs", [python, "scripts/prepare_release_notes.py", "--check-all"], 60),
         ))
     targets = selection["python_tests"]
-    if targets:
-        steps.append(("python-selected", [python, "scripts/run_tests.py", "--automated", "--required", "--report",
-                      str(report_dir / "python-selected.json"), *targets], 300))
+    for target in targets:
+        name = "python-selected" if len(targets) == 1 else f"python-{Path(target).stem}"
+        steps.append((name, [python, "scripts/run_tests.py", "--automated", "--required", "--report",
+                      str(report_dir / f"{name}.json"), target], 300))
     targets = selection["node_tests"]
-    if targets:
-        steps.append(("node-selected", [node, "--test", "--test-reporter=spec", "--test-reporter-destination=stdout",
-                      "--test-reporter=junit", f"--test-reporter-destination={report_dir / 'node-selected.xml'}",
-                      *targets], 240))
+    for target in targets:
+        name = "node-selected" if len(targets) == 1 else f"node-{Path(target).stem}"
+        steps.append((name, [node, "--test", "--test-reporter=spec", "--test-reporter-destination=stdout",
+                      "--test-reporter=junit", f"--test-reporter-destination={report_dir / (name + '.xml')}", target], 240))
     if specs:
         steps.append(("browser-regressions", [node, "node_modules/@playwright/test/cli.js", "test",
                       "--config=tests/config/playwright.config.mjs", "--project=chromium", "--forbid-only",
@@ -270,6 +274,190 @@ def prepare_browser(name, command, directory, specs, selection, results):
     return listed
 
 
+def write_json(path: Path, value) -> None:
+    temporary = path.with_name(path.name + ".tmp")
+    with temporary.open("w", encoding="utf-8", newline="\n") as stream:
+        stream.write(json.dumps(value, ensure_ascii=False, indent=2) + "\n")
+    temporary.replace(path)
+
+
+def step_dependencies(steps, plan, external=()):
+    """Only named preparation outcomes block their actual consumers."""
+    names = {name for name, _, _ in steps}
+    if __package__:
+        from .test_prerequisites import prerequisites
+    else:
+        from test_prerequisites import prerequisites
+    dependencies = {}
+    for name, command, _ in steps:
+        required = list(prerequisites(command, ROOT))
+        targets = [Path(arg).stem for arg in command if arg.startswith("tests/")]
+        if name == "website-build":
+            required.extend(("website-docs", "website-releases"))
+        if "test_launcher_bundle" in targets:
+            required.append("build-launcher")
+        if command_layer(name) == "browser":
+            if plan.get("preparation", {}).get("application"):
+                required.append("build")
+            specs = plan.get("e2e_specs", [])
+            if not specs or any("/launcher-" in path for path in specs):
+                required.append("build-launcher")
+            if not specs or "tests/e2e/editor-entry-retirement.spec.mjs" in specs:
+                required.append("website-build")
+        dependencies[name] = sorted({dependency for dependency in required if dependency in names or dependency in external})
+    return dependencies
+
+
+def run_steps(steps, output_dir, plan, *, metadata, requirements=None, blocked_preparation=()):
+    """Complete independent groups and persist every outcome as it arrives."""
+    if __package__:
+        from .test_result_details import collect_failures
+    else:
+        from test_result_details import collect_failures
+    names = [name for name, _, _ in steps]
+    if len(names) != len(set(names)):
+        raise ValueError("duplicate execution group names")
+    unavailable = set(blocked_preparation)
+    requirements = requirements if requirements is not None else step_dependencies(steps, plan, unavailable)
+    states = {name: {"gate": name, "status": "not-run", "origin": None, "process_exit_code": None} for name in names}
+    results, failures, report_errors = [], [], []
+    fallback_added = False
+
+    def save():
+        failed = [name for name, state in states.items() if state["status"] == "failed"]
+        blocked = [name for name, state in states.items() if state["status"] == "blocked"]
+        unfinished = [name for name, state in states.items() if state["status"] in {"not-run", "running"}]
+        code = int(bool(failed or blocked or unfinished or report_errors))
+        summary = {**metadata, "plan": plan, "selected_gates": names, "groups": list(states.values()), "results": results,
+                   "executed": [name for name, state in states.items() if state["origin"] == "executed"],
+                   "reused": [], "failed": failed, "blocked": blocked, "not_run": unfinished,
+                   "status": "not-selected" if not names else "failed" if failed else "incomplete" if code else "passed",
+                   "failures_file": str((output_dir / "failures.json").resolve()), "exit_code": code}
+        write_json(output_dir / "failures.json", {"failures": failures, "report_errors": report_errors})
+        write_json(output_dir / "summary.json", summary)
+        return summary
+
+    save()
+    for name, command, timeout in steps:
+        blocked_by = [dependency for dependency in requirements.get(name, [])
+                      if dependency in unavailable or dependency not in states or states[dependency]["status"] != "passed"]
+        if command_layer(name) == "browser":
+            # All shards share Node and Chromium. App/media/site requirements
+            # depend on the actual shard collection and are checked after list.
+            blocked_by = [dependency for dependency in blocked_by if dependency not in
+                          {"website", "website-build", "build", "build-launcher", "ffmpeg", "python-dependencies"}]
+        if blocked_by:
+            state = {"gate": name, "status": "blocked", "origin": None, "process_exit_code": None,
+                     "exit_code": 1, "blocked_by": blocked_by, "command": command}
+            states[name] = state
+            results.append(state)
+            if plan.get("mode") == "full" and any(str(arg).endswith("scripts/run_tests.py") for arg in command) and not fallback_added:
+                # A full discovery group may require unavailable application
+                # setup. Still attempt every independent concrete file, without
+                # pretending these partial results satisfy full discovery/hooks.
+                fallback_added = True
+                fallback = []
+                for path in sorted((ROOT / "tests").glob("test_*.py")):
+                    group = f"python-fallback-{path.stem}"
+                    target = path.relative_to(ROOT).as_posix()
+                    fallback.append((group, [sys.executable, "scripts/run_tests.py", "--automated", "--required", "--report",
+                                             str(output_dir / f"{group}.json"), target], 300))
+                requirements.update(step_dependencies(fallback, plan, unavailable | {key for key, value in states.items()
+                                                                                   if value["status"] == "failed"}))
+                for group, _, _ in fallback:
+                    names.append(group)
+                    states[group] = {"gate": group, "status": "not-run", "origin": None, "process_exit_code": None,
+                                     "fallback_for": name}
+                steps.extend(fallback)
+            if command_layer(name) == "node":
+                # The old full Node packs already contain concrete files; keep
+                # their independent standard-library tests runnable as well.
+                targets = [arg for arg in command if str(arg).replace("\\", "/").startswith("tests/") and arg.endswith(".mjs")]
+                if len(targets) > 1:
+                    fallback = []
+                    for target in targets:
+                        group = f"node-fallback-{Path(target).stem}"
+                        if group in states:
+                            continue
+                        concrete = [arg for arg in command if arg not in targets]
+                        concrete = [f"--test-reporter-destination={output_dir / (group + '.xml')}"
+                                    if arg.startswith("--test-reporter-destination=") and arg.endswith(".xml") else arg
+                                    for arg in concrete]
+                        fallback.append((group, [*concrete, target], timeout))
+                    requirements.update(step_dependencies(fallback, plan, unavailable | {key for key, value in states.items()
+                                                                                       if value["status"] == "failed"}))
+                    for group, _, _ in fallback:
+                        names.append(group)
+                        states[group] = {"gate": group, "status": "not-run", "origin": None, "process_exit_code": None,
+                                         "fallback_for": name}
+                    steps.extend(fallback)
+            save()
+            continue
+        states[name].update(status="running", origin="executed")
+        save()
+        browser_record = None
+        try:
+            if command_layer(name) == "browser":
+                browser_record = prepare_browser(name, command, output_dir, plan.get("e2e_specs", []), "selected", results)
+                if __package__:
+                    from .browser_results import collection
+                    from .test_prerequisites import prerequisites
+                else:
+                    from browser_results import collection
+                    from test_prerequisites import prerequisites
+                files = {identity[0] for identity in collection(browser_record)}
+                concrete = [arg for arg in command if not arg.startswith("tests/e2e/")] + [f"tests/e2e/{file}" for file in sorted(files)]
+                needed = prerequisites(concrete, ROOT)
+                failed_steps = {key for key, value in states.items() if value["status"] in {"failed", "blocked"}}
+                actual_blocked = (unavailable | failed_steps) & needed
+                if any(file.startswith("launcher-") for file in files) and "build-launcher" in failed_steps:
+                    actual_blocked.add("build-launcher")
+                if "editor-entry-retirement.spec.mjs" in files:
+                    actual_blocked.update((unavailable | failed_steps) & {"website", "website-build"})
+                if actual_blocked:
+                    state = {"gate": name, "status": "blocked", "origin": None, "process_exit_code": None,
+                             "exit_code": 1, "blocked_by": sorted(actual_blocked), "command": command}
+                    states[name] = state
+                    results.append(state)
+                    save()
+                    continue
+            os.environ["PLAYWRIGHT_JSON_OUTPUT_FILE"] = str((output_dir / f"{name}.json").resolve())
+            result = execute(name, command, timeout)
+            result.update(process_exit_code=result["exit_code"], process_status=result["status"], origin="executed")
+            details = collect_failures(name, output_dir, result)
+            if not details["complete"] and not details["report_errors"]:
+                details["report_errors"].append("failure evidence is incomplete")
+            failures.extend({"gate": name, **detail} for detail in details["failures"])
+            report_errors.extend({"gate": name, "error": error} for error in details["report_errors"])
+            if details["failures"] or details["report_errors"]:
+                result["exit_code"] = result["exit_code"] or 1
+            if details["report_errors"]:
+                result["report_errors"] = details["report_errors"]
+            if browser_record:
+                try:
+                    actual = json.loads((output_dir / f"{name}.json").read_text(encoding="utf-8"))
+                    validated = validate_browser(browser_record, actual, metadata["shard"]["current"], metadata["shard"]["total"])
+                    write_json(output_dir / f"{name}-validated.json", validated)
+                except (OSError, ValueError, KeyError, TypeError) as error:
+                    result["exit_code"] = result["exit_code"] or 1
+                    report_errors.append({"gate": name, "error": str(error)})
+            result["status"] = "passed" if not result["exit_code"] else "failed"
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            result = {"gate": name, "status": "failed", "origin": "executed", "exit_code": 1,
+                      "process_exit_code": None, "command": command, "error": str(error)}
+            report_errors.append({"gate": name, "error": str(error)})
+        if "fallback_for" in states[name]:
+            result["fallback_for"] = states[name]["fallback_for"]
+        states[name] = result
+        results.append(result)
+        save()
+        if result["exit_code"]:
+            print(f"{name}: failed; complete evidence: {output_dir / 'failures.json'}", flush=True)
+        if result.get("process_status") == "interrupted":
+            break  # An explicit user interruption stops scheduling new groups.
+    return save()
+
+
 def main(argv=None) -> int:
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
@@ -289,6 +477,9 @@ def main(argv=None) -> int:
                                            "python-ubuntu-existing", "python-windows-existing", "node-windows-existing"), default="all")
     parser.add_argument("--report-dir", type=Path, help="fresh evidence directory (default: unique local run)")
     parser.add_argument("--shard", default="1/1", help="browser shard CURRENT/TOTAL; all other layers stay unchanged")
+    parser.add_argument("--blocked-preparation", action="append", default=[],
+                        choices=("build", "python-dependencies", "ffmpeg", "chromium", "node-dependencies", "website"),
+                        help="CI preparation that failed; only its actual consumers are blocked")
     args = parser.parse_args(argv)
     try:
         current, total = (int(value) for value in args.shard.split("/"))
@@ -352,11 +543,9 @@ def main(argv=None) -> int:
     # Explicit interpreter settings avoid implicit environment synchronization.
     os.environ.setdefault("MAW_TEST_PYTHON", sys.executable)
     os.environ.setdefault("MAW_E2E_PYTHON", sys.executable)
-    temp = output_dir / "tmp"
-    temp.mkdir()
-    for key in ("TEMP", "TMP", "TMPDIR"):
-        os.environ[key] = str(temp)
-    results = []
+    # Preserve the caller's effective temporary filesystem. In particular, moving
+    # Windows fixtures from the system drive to a workspace drive can remove 8.3
+    # aliases. Sandboxed callers can explicitly choose a writable TEMP/TMP.
     try:
         steps = list(commands(packs, output_dir, dev=bool(args.component), component=args.component or "all", specs=specs,
                               tools_scope=tools_scope, selection=plan, layer=args.layer, shard=(current, total)))
@@ -365,45 +554,10 @@ def main(argv=None) -> int:
         (output_dir / "summary.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
         print(str(error))
         return 1
-    for name, command, timeout in steps:
-        browser_record = None
-        if name in {"editor-http-smoke", "browser-regressions"}:
-            try:
-                browser_record = prepare_browser(name, command, output_dir,
-                    specs if "e2e" in packs and name == "browser-regressions" else [],
-                    "smoke" if name == "editor-http-smoke" else "e2e" if "e2e" in packs else "editor-e2e", results)
-            except (OSError, ValueError, KeyError, TypeError) as error:
-                print(str(error))
-                results.append({"gate": name, "status": "invalid-discovery", "exit_code": 1, "error": str(error)})
-                break
-        browser_report = output_dir / f"{name}.json"
-        os.environ["PLAYWRIGHT_JSON_OUTPUT_FILE"] = str(browser_report.resolve())
-        result = execute(name, command, timeout)
-        code = result["exit_code"]
-        try:
-            if not code and name.startswith("node-"):
-                xml = ET.parse(output_dir / f"{name}.xml")
-                if not xml.findall(".//testcase") or any(xml.findall(f".//{tag}") for tag in ("skipped", "failure", "error")):
-                    raise ValueError("Required Node report is empty or contains non-passing cases")
-            if not code and browser_record:
-                report = json.loads(browser_report.read_text(encoding="utf-8"))
-                validated = validate_browser(browser_record, report, current, total)
-                (output_dir / f"{name}-validated.json").write_text(
-                    json.dumps(validated, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        except (OSError, ValueError, KeyError, TypeError, ET.ParseError) as error:
-            code = 1
-            result.update(exit_code=1, status="invalid-required-report", error=str(error))
-            print(str(error))
-        results.append(result)
-        if code:
-            print("\n".join(dict.fromkeys(result["diagnostics"] + result["tail"])))
-            break
-    summary = {"plan": plan, "results": results, "head": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
-               "selection_fingerprint": selection_fingerprint, "shard": {"current": current, "total": total},
-               "requested_layer": args.layer, "selected_gates": [name for name, _, _ in steps],
-               "status": "not-selected" if not steps else "failed" if any(r["exit_code"] for r in results) else "passed",
-               "exit_code": next((r["exit_code"] for r in results if r["exit_code"]), 0)}
-    (output_dir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    metadata = {"head": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+                "selection_fingerprint": selection_fingerprint, "shard": {"current": current, "total": total},
+                "requested_layer": args.layer, "blocked_preparation": sorted(set(args.blocked_preparation))}
+    summary = run_steps(steps, output_dir, plan, metadata=metadata, blocked_preparation=args.blocked_preparation)
     return 1 if summary["exit_code"] else 0
 
 

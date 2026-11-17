@@ -168,7 +168,13 @@ def result_report(result, selected_ids):
                        "platform_not_applicable": allowed_platform_skip(test.id(), reason)}
                       for test, reason in result.skipped],
             "expected_failures": len(result.expectedFailures),
-            "unexpected_successes": len(result.unexpectedSuccesses)}
+            "unexpected_successes": len(result.unexpectedSuccesses),
+            "failure_details": [
+                {"id": case.id(), "kind": kind, "traceback": trace}
+                for kind, entries in (("failure", result.failures), ("error", result.errors),
+                                      ("expected_failure", result.expectedFailures),
+                                      ("unexpected_success", [(case, "") for case in result.unexpectedSuccesses]))
+                for case, trace in entries]}
 
 
 def report_code(report, required):
@@ -398,6 +404,7 @@ def _run_parallel(args) -> int:
     wall = time.perf_counter() - wall_start
     ordered = [outcomes[payload["file"]] for payload in payloads]
     report = {"selected_ids": [identity for item in ordered for identity in item["selected_ids"]],
+              "failure_details": [detail for item in ordered for detail in item.get("failure_details", [])],
               **{key: sum(item[key] for item in ordered) for key in
                  ("run", "failures", "errors", "expected_failures", "unexpected_successes")},
               "skips": [skip for item in ordered for skip in item["skips"]],

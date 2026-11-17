@@ -57,40 +57,82 @@ jobs:
   website:
     needs: selection
     if: ${{ needs.selection.outputs.website == 'true' }}
+    outputs:
+      build: ${{ steps.build.outcome }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        id: checkout
       - uses: actions/setup-python@v6
+        id: python
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         with:
           python-version: '3.11'
       - uses: pnpm/action-setup@v6
+        id: pnpm
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         with:
           version: 11.28.4
           run_install: false
       - uses: actions/setup-node@v5
+        id: node
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         with:
           node-version: '22.23.4'
-          cache: pnpm
-          cache-dependency-path: website/pnpm-lock.yaml
-      - run: pnpm --dir website install --frozen-lockfile
+          package-manager-cache: false
+      - name: Install website dependencies
+        id: install
+        if: ${{ !cancelled() && steps.node.outcome == 'success' && steps.pnpm.outcome == 'success' }}
+        run: pnpm --dir website install --frozen-lockfile
       - name: README content synchronization
-        if: ${{ needs.selection.outputs.readme_node != 'true' }}
+        id: readme
+        if: ${{ !cancelled() && needs.selection.outputs.readme_node != 'true' && steps.node.outcome == 'success' && steps.python.outcome == 'success' }}
         run: python scripts/run_check.py --timeout 180 -- node --test tests/test_readme_content_sync.mjs
-      - name: Website document consumers
-        run: |
-          python scripts/run_check.py --timeout 180 -- pnpm --dir website run sync:docs
-          python scripts/run_check.py --timeout 180 -- python scripts/build_release_site.py --preview
-          python scripts/run_check.py --timeout 300 -- pnpm --dir website run build
+      - name: Synchronize website docs
+        id: docs
+        if: ${{ !cancelled() && steps.node.outcome == 'success' && steps.python.outcome == 'success' }}
+        run: python scripts/run_check.py --timeout 180 -- node website/scripts/sync-maw-docs.mjs
+      - name: Generate website releases
+        id: releases
+        if: ${{ !cancelled() && steps.python.outcome == 'success' }}
+        run: python scripts/run_check.py --timeout 180 -- python scripts/build_release_site.py --preview
+      - name: Build website
+        id: build
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && steps.docs.outcome == 'success' && steps.releases.outcome == 'success' }}
+        run: python scripts/run_check.py --timeout 300 -- pnpm --dir website run build
       - uses: actions/upload-artifact@v6
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         with:
           name: selected-website-dist
           path: website/dist/
           if-no-files-found: error
           retention-days: 1
+      - name: Summarize website checks
+        if: ${{ !cancelled() && steps.python.outcome == 'success' }}
+        env:
+          CI_STEPS: ${{ toJSON(steps) }}
+          CI_GROUPS: >-
+            [
+              {"id":"readme","selected":${{ toJSON(needs.selection.outputs.readme_node != 'true') }},"requires":["python","node"]},
+              {"id":"docs","selected":true,"requires":["python","node"]},
+              {"id":"releases","selected":true,"requires":["python"]},
+              {"id":"build","selected":true,"requires":["install","docs","releases"]}
+            ]
+        run: python scripts/ci_matrix.py steps --report .artifacts/website-summary.json
+      - name: Preserve website check evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: website-check-evidence
+          path: |
+            .artifacts/website-summary.json
+            .artifacts/checks/
+          include-hidden-files: true
+          retention-days: 7
 
   browser:
     needs: [selection, website]
-    if: ${{ always() && needs.selection.result == 'success' && needs.selection.outputs.browser == 'true' && (needs.website.result == 'success' || needs.website.result == 'skipped') }}
+    if: ${{ !cancelled() && needs.selection.result == 'success' && needs.selection.outputs.browser == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
@@ -103,43 +145,71 @@ jobs:
       MAW_E2E_PYTHON: ${{ github.workspace }}/.venv/bin/python
     steps:
       - uses: actions/checkout@v5
+        id: checkout
       - uses: actions/setup-python@v6
+        id: python
         with:
           python-version: '3.11'
       - name: Save selected plan
+        id: plan
         run: python -c "import os,pathlib; p=pathlib.Path('.artifacts/ci-plan.json'); p.parent.mkdir(parents=True,exist_ok=True); p.write_text(os.environ['CI_PLAN'],encoding='utf-8')"
       - uses: pnpm/action-setup@v6
+        id: pnpm
         with:
           version: 11.28.4
           run_install: false
       - uses: actions/setup-node@v5
+        id: node
         with:
           node-version: '22.23.4'
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Install application JavaScript dependencies
+        id: js_install
+        run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Build browser application
-        if: ${{ needs.selection.outputs.application == 'true' }}
+        id: build
+        if: ${{ !cancelled() && needs.selection.outputs.application == 'true' && steps.js_install.outcome == 'success' }}
         run: python scripts/run_check.py --timeout 180 -- pnpm run build
       - uses: astral-sh/setup-uv@v7
+        id: uv
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' }}
         with:
           version: '0.13.4'
           enable-cache: true
-      - run: uv sync --frozen --group test --group dev
-      - run: pnpm exec playwright install --with-deps chromium
+      - name: Install Python dependencies
+        id: py_install
+        if: ${{ !cancelled() && steps.uv.outcome == 'success' }}
+        run: uv sync --frozen --group test --group dev
+      - name: Install Chromium
+        id: chromium
+        if: ${{ !cancelled() && steps.js_install.outcome == 'success' }}
+        run: pnpm exec playwright install --with-deps chromium
       - name: Install FFmpeg
-        if: ${{ needs.selection.outputs.real_media == 'true' }}
+        id: ffmpeg
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' && needs.selection.outputs.real_media == 'true' }}
         run: |
           sudo apt-get update
           sudo apt-get install --yes ffmpeg
       - name: Restore website for its browser consumers
-        if: ${{ needs.selection.outputs.website == 'true' }}
+        id: website
+        if: ${{ !cancelled() && needs.website.outputs.build == 'success' && (fromJSON(needs.selection.outputs.plan).mode == 'full' || contains(fromJSON(needs.selection.outputs.plan).e2e_specs, 'tests/e2e/editor-entry-retirement.spec.mjs')) }}
         uses: actions/download-artifact@v7
         with:
           name: selected-website-dist
           path: website/dist/
       - name: Discover and run selected browser shard
-        run: uv run --no-sync python scripts/test_workflow.py --stage merge --selection-plan .artifacts/ci-plan.json --layer browser --shard ${{ matrix.shard }}/${{ matrix.total }} --report-dir .artifacts/ci-browser
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' && steps.js_install.outcome == 'success' && steps.chromium.outcome == 'success' }}
+        env:
+          CI_PREPARATION: ${{ toJSON(steps) }}
+          CI_REQUIREMENTS: '{"build":${{ needs.selection.outputs.application }},"python-dependencies":true,"ffmpeg":${{ needs.selection.outputs.real_media }},"chromium":true,"node-dependencies":true}'
+        shell: bash
+        run: |
+          args=(--layer browser --shard '${{ matrix.shard }}/${{ matrix.total }}' --report-dir .artifacts/ci-browser)
+          if [ '${{ toJSON(fromJSON(needs.selection.outputs.plan).mode == 'full' || contains(fromJSON(needs.selection.outputs.plan).e2e_specs, 'tests/e2e/editor-entry-retirement.spec.mjs')) }}' = 'true' ] && [ '${{ steps.website.outcome }}' != 'success' ]; then
+            args+=(--blocked-preparation website)
+          fi
+          python scripts/ci_run_layer.py "${args[@]}"
       - name: Preserve browser shard evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@v6
@@ -157,28 +227,39 @@ jobs:
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
-      - name: Require successful selection and browser jobs
-        if: ${{ needs.selection.result != 'success' || (needs.selection.outputs.browser == 'true' && needs.browser.result != 'success') || (needs.selection.outputs.browser == 'false' && needs.browser.result != 'skipped') }}
-        run: exit 1
       - uses: actions/checkout@v5
-        if: ${{ needs.selection.outputs.browser == 'true' }}
+        id: checkout
+        if: ${{ !cancelled() && needs.selection.outputs.browser == 'true' }}
       - uses: actions/setup-python@v6
-        if: ${{ needs.selection.outputs.browser == 'true' }}
+        id: python
+        if: ${{ !cancelled() && needs.selection.outputs.browser == 'true' && steps.checkout.outcome == 'success' }}
         with:
           python-version: '3.11'
       - name: Save selected plan
-        if: ${{ needs.selection.outputs.browser == 'true' }}
+        id: plan
+        if: ${{ !cancelled() && needs.selection.outputs.browser == 'true' && steps.python.outcome == 'success' }}
         env:
           CI_PLAN: ${{ needs.selection.outputs.plan }}
         run: python -c "import os,pathlib; p=pathlib.Path('.artifacts/ci-plan.json'); p.parent.mkdir(parents=True,exist_ok=True); p.write_text(os.environ['CI_PLAN'],encoding='utf-8')"
       - uses: actions/download-artifact@v7
-        if: ${{ needs.selection.outputs.browser == 'true' }}
+        if: ${{ !cancelled() && needs.selection.outputs.browser == 'true' && steps.plan.outcome == 'success' }}
         with:
           pattern: selected-browser-*
           path: .artifacts/browser-evidence/
       - name: Require complete matching browser outcomes
-        if: ${{ needs.selection.outputs.browser == 'true' }}
+        if: ${{ !cancelled() && needs.selection.outputs.browser == 'true' && steps.plan.outcome == 'success' }}
         run: python scripts/ci_matrix.py gate --total ${{ needs.selection.outputs.browser_shards }}
+      - name: Preserve browser gate diagnostics
+        if: ${{ always() && needs.selection.outputs.browser == 'true' }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: selected-browser-gate
+          path: .artifacts/browser-gate.json
+          include-hidden-files: true
+          retention-days: 7
+      - name: Require successful selection and browser jobs
+        if: ${{ !cancelled() && (needs.selection.result != 'success' || (needs.selection.outputs.browser == 'true' && needs.browser.result != 'success') || (needs.selection.outputs.browser == 'false' && needs.browser.result != 'skipped')) }}
+        run: exit 1
 
   debug-tools:
     name: Debug tooling (${{ matrix.os }})
@@ -192,25 +273,44 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v5
+        id: checkout
       - uses: actions/setup-node@v5
+        id: node
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         with:
           node-version: '22.23.4'
           package-manager-cache: false
       - uses: actions/setup-python@v6
+        id: python
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         with:
           python-version: '3.11'
       - name: Documentation navigation and consumers
+        id: docs
+        if: ${{ !cancelled() && steps.python.outcome == 'success' }}
         run: python scripts/run_check.py --timeout 180 -- python scripts/check_docs.py
       - name: Offline tool documentation freshness
+        id: freshness
+        if: ${{ !cancelled() && steps.python.outcome == 'success' && steps.node.outcome == 'success' }}
         run: python scripts/run_check.py --timeout 60 -- node scripts/build-tool-docs.mjs --check
       - name: Release documents
+        id: releases
+        if: ${{ !cancelled() && steps.python.outcome == 'success' }}
         run: python scripts/run_check.py --timeout 60 -- python scripts/prepare_release_notes.py --check-all
-      - name: Preserve failed check evidence
-        if: failure()
+      - name: Summarize documentation checks
+        if: ${{ !cancelled() && steps.python.outcome == 'success' }}
+        env:
+          CI_STEPS: ${{ toJSON(steps) }}
+          CI_GROUPS: '[{"id":"docs","selected":true,"requires":["python"]},{"id":"freshness","selected":true,"requires":["python","node"]},{"id":"releases","selected":true,"requires":["python"]}]'
+        run: python scripts/ci_matrix.py steps --report .artifacts/debug-tools-summary.json
+      - name: Preserve check evidence
+        if: ${{ always() }}
         uses: actions/upload-artifact@v6
         with:
           name: debug-tools-${{ matrix.os }}
-          path: .artifacts/checks/
+          path: |
+            .artifacts/checks/
+            .artifacts/debug-tools-summary.json
           include-hidden-files: true
           retention-days: 7
 
@@ -224,28 +324,41 @@ jobs:
       CI_PLAN: ${{ needs.selection.outputs.plan }}
     steps:
       - uses: actions/checkout@v5
+        id: checkout
       - uses: actions/setup-node@v5
-        if: ${{ needs.selection.outputs.windows_node == 'true' }}
+        id: node
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && needs.selection.outputs.windows_node == 'true' }}
         with:
           node-version: '22.23.4'
           package-manager-cache: false
       - uses: actions/setup-python@v6
         id: python
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         with:
           python-version: '3.11'
       - name: Save selected plan
+        id: plan
+        if: ${{ !cancelled() && steps.python.outcome == 'success' }}
         run: python -c "import os,pathlib; p=pathlib.Path('.artifacts/ci-plan.json'); p.parent.mkdir(parents=True,exist_ok=True); p.write_text(os.environ['CI_PLAN'],encoding='utf-8')"
       # Replaces the old unconditional Windows lifecycle checks with their
       # intersection with the shared selection; no application install.
       - name: Selected Windows lifecycle contracts
-        if: ${{ needs.selection.outputs.windows_node == 'true' }}
+        id: node_tests
+        if: ${{ !cancelled() && needs.selection.outputs.windows_node == 'true' && steps.plan.outcome == 'success' && steps.node.outcome == 'success' }}
         env:
           MAW_TEST_PYTHON: ${{ steps.python.outputs.python-path }}
           MAW_E2E_PYTHON: ${{ steps.python.outputs.python-path }}
         run: python scripts/test_workflow.py --stage merge --selection-plan .artifacts/ci-plan.json --layer node-windows-existing --report-dir .artifacts/ci-windows-node
       - name: Selected Windows standard-library Python contracts on push
-        if: ${{ needs.selection.outputs.windows_python == 'true' }}
+        id: python_tests
+        if: ${{ !cancelled() && needs.selection.outputs.windows_python == 'true' && steps.plan.outcome == 'success' }}
         run: python scripts/test_workflow.py --stage merge --selection-plan .artifacts/ci-plan.json --layer python-windows-existing --report-dir .artifacts/ci-windows-python
+      - name: Summarize Windows contracts
+        if: ${{ !cancelled() && steps.python.outcome == 'success' }}
+        env:
+          CI_STEPS: ${{ toJSON(steps) }}
+          CI_GROUPS: '[{"id":"node_tests","selected":${{ needs.selection.outputs.windows_node }},"requires":["plan","node"]},{"id":"python_tests","selected":${{ needs.selection.outputs.windows_python }},"requires":["plan"]}]'
+        run: python scripts/ci_matrix.py steps --report .artifacts/windows-contracts-summary.json
       - name: Preserve Windows lifecycle evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@v6
@@ -254,6 +367,7 @@ jobs:
           path: |
             .artifacts/ci-windows-node/
             .artifacts/ci-windows-python/
+            .artifacts/windows-contracts-summary.json
             .artifacts/checks/
           include-hidden-files: true
           retention-days: 7
@@ -273,62 +387,98 @@ jobs:
         if: ${{ needs.selection.result != 'success' || needs.selection.outputs.plan == '' }}
         run: exit 1
       - uses: actions/checkout@v5
+        id: checkout
       - uses: actions/setup-python@v6
+        id: python
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' && needs.selection.result == 'success' }}
         with:
           python-version: '3.11'
       - name: Save selected plan
+        id: plan
+        if: ${{ !cancelled() && steps.python.outcome == 'success' }}
         run: python -c "import os,pathlib; p=pathlib.Path('.artifacts/ci-plan.json'); p.parent.mkdir(parents=True,exist_ok=True); p.write_text(os.environ['CI_PLAN'],encoding='utf-8')"
       - uses: pnpm/action-setup@v6
-        if: ${{ needs.selection.outputs.application == 'true' || needs.selection.outputs.node == 'true' }}
+        id: pnpm
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' && (needs.selection.outputs.application == 'true' || needs.selection.outputs.node == 'true') }}
         with:
           version: 11.28.4
           run_install: false
       - uses: actions/setup-node@v5
-        if: ${{ needs.selection.outputs.application == 'true' || needs.selection.outputs.node == 'true' }}
+        id: node
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' && (needs.selection.outputs.application == 'true' || needs.selection.outputs.node == 'true') }}
         with:
           node-version: '22.23.4'
           package-manager-cache: false
       - name: Install application JavaScript dependencies
-        if: ${{ needs.selection.outputs.application == 'true' || needs.selection.outputs.node == 'true' }}
+        id: js_install
+        if: ${{ !cancelled() && steps.node.outcome == 'success' && steps.pnpm.outcome == 'success' }}
         run: pnpm install --frozen-lockfile --ignore-scripts
-      - name: Build and typecheck application
-        if: ${{ needs.selection.outputs.application == 'true' }}
-        run: |
-          python scripts/run_check.py --timeout 180 -- pnpm run build
-          python scripts/run_check.py --timeout 180 -- pnpm run typecheck
+      - name: Build application
+        id: build
+        if: ${{ !cancelled() && needs.selection.outputs.application == 'true' && steps.js_install.outcome == 'success' }}
+        run: python scripts/run_check.py --timeout 180 -- pnpm run build
+      - name: Typecheck application
+        id: typecheck
+        if: ${{ !cancelled() && needs.selection.outputs.application == 'true' && steps.js_install.outcome == 'success' }}
+        run: python scripts/run_check.py --timeout 180 -- pnpm run typecheck
       - uses: astral-sh/setup-uv@v7
-        if: ${{ needs.selection.outputs.node == 'true' || (needs.selection.outputs.python_dependencies == 'true' && (needs.selection.outputs.ubuntu_python == 'true' || (github.event_name == 'push' && needs.selection.outputs.python == 'true'))) }}
+        id: uv
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' && (needs.selection.outputs.node == 'true' || (needs.selection.outputs.python_dependencies == 'true' && (needs.selection.outputs.ubuntu_python == 'true' || (github.event_name == 'push' && needs.selection.outputs.python == 'true')))) }}
         with:
           version: '0.13.4'
           enable-cache: true
       - name: Install Python dependencies
-        if: ${{ needs.selection.outputs.node == 'true' || (needs.selection.outputs.python_dependencies == 'true' && (needs.selection.outputs.ubuntu_python == 'true' || (github.event_name == 'push' && needs.selection.outputs.python == 'true'))) }}
+        id: py_install
+        if: ${{ !cancelled() && steps.uv.outcome == 'success' }}
         run: uv sync --frozen --group test --group dev
       - name: Install Chromium
-        if: ${{ needs.selection.outputs.node == 'true' }}
+        id: chromium
+        if: ${{ !cancelled() && needs.selection.outputs.node == 'true' && steps.js_install.outcome == 'success' }}
         run: pnpm exec playwright install --with-deps chromium
       - name: Install FFmpeg
-        if: ${{ needs.selection.outputs.real_media == 'true' && (needs.selection.outputs.node == 'true' || needs.selection.outputs.ubuntu_python == 'true' || (github.event_name == 'push' && needs.selection.outputs.python == 'true')) }}
+        id: ffmpeg
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' && needs.selection.outputs.real_media == 'true' && (needs.selection.outputs.node == 'true' || needs.selection.outputs.ubuntu_python == 'true' || (github.event_name == 'push' && needs.selection.outputs.python == 'true')) }}
         run: |
           sudo apt-get update
           sudo apt-get install --yes ffmpeg
       - name: Selected Python tests on push
-        if: ${{ github.event_name == 'push' && needs.selection.outputs.python == 'true' && needs.selection.outputs.python_dependencies == 'true' }}
-        run: uv run --no-sync python scripts/test_workflow.py --stage merge --selection-plan .artifacts/ci-plan.json --layer python --report-dir .artifacts/ci-python
-      - name: Selected standard-library Python tests on push
-        if: ${{ github.event_name == 'push' && needs.selection.outputs.python == 'true' && needs.selection.outputs.python_dependencies == 'false' }}
-        run: python scripts/test_workflow.py --stage merge --selection-plan .artifacts/ci-plan.json --layer python --report-dir .artifacts/ci-python
+        id: python_push
+        if: ${{ !cancelled() && github.event_name == 'push' && needs.selection.outputs.python == 'true' && steps.plan.outcome == 'success' }}
+        env:
+          CI_PREPARATION: ${{ toJSON(steps) }}
+          CI_REQUIREMENTS: >-
+            {"build":${{ needs.selection.outputs.application }},"python-dependencies":${{ needs.selection.outputs.python_dependencies }},"ffmpeg":${{ needs.selection.outputs.real_media }},"chromium":${{ needs.selection.outputs.node }},"node-dependencies":${{ toJSON(needs.selection.outputs.application == 'true' || needs.selection.outputs.node == 'true') }}}
+        run: python scripts/ci_run_layer.py --layer python --report-dir .artifacts/ci-python
       # Original Editor/debug Python contracts retain Ubuntu coverage only for
       # their selected intersection; the Windows Preview owns the PR suite.
       - name: Selected existing Ubuntu Python contracts
-        if: ${{ needs.selection.outputs.ubuntu_python == 'true' && needs.selection.outputs.python_dependencies == 'true' }}
-        run: uv run --no-sync python scripts/test_workflow.py --stage merge --selection-plan .artifacts/ci-plan.json --layer python-ubuntu-existing --report-dir .artifacts/ci-ubuntu-python
-      - name: Selected existing Ubuntu standard-library contracts
-        if: ${{ needs.selection.outputs.ubuntu_python == 'true' && needs.selection.outputs.python_dependencies == 'false' }}
-        run: python scripts/test_workflow.py --stage merge --selection-plan .artifacts/ci-plan.json --layer python-ubuntu-existing --report-dir .artifacts/ci-ubuntu-python
+        id: python_existing
+        if: ${{ !cancelled() && needs.selection.outputs.ubuntu_python == 'true' && steps.plan.outcome == 'success' }}
+        env:
+          CI_PREPARATION: ${{ toJSON(steps) }}
+          CI_REQUIREMENTS: >-
+            {"build":${{ needs.selection.outputs.application }},"python-dependencies":${{ needs.selection.outputs.python_dependencies }},"ffmpeg":${{ needs.selection.outputs.real_media }},"chromium":${{ needs.selection.outputs.node }},"node-dependencies":${{ toJSON(needs.selection.outputs.application == 'true' || needs.selection.outputs.node == 'true') }}}
+        run: python scripts/ci_run_layer.py --layer python-ubuntu-existing --report-dir .artifacts/ci-ubuntu-python
       - name: Selected Node tests
-        if: ${{ needs.selection.outputs.node == 'true' }}
-        run: uv run --no-sync python scripts/test_workflow.py --stage merge --selection-plan .artifacts/ci-plan.json --layer node --report-dir .artifacts/ci-node
+        id: node_tests
+        if: ${{ !cancelled() && needs.selection.outputs.node == 'true' && steps.plan.outcome == 'success' }}
+        env:
+          CI_PREPARATION: ${{ toJSON(steps) }}
+          CI_REQUIREMENTS: '{"build":${{ needs.selection.outputs.application }},"python-dependencies":true,"ffmpeg":${{ needs.selection.outputs.real_media }},"chromium":true,"node-dependencies":true}'
+        run: python scripts/ci_run_layer.py --layer node --report-dir .artifacts/ci-node
+      - name: Summarize selected tests
+        if: ${{ !cancelled() && steps.python.outcome == 'success' }}
+        env:
+          CI_STEPS: ${{ toJSON(steps) }}
+          CI_GROUPS: >-
+            [
+              {"id":"build","selected":${{ needs.selection.outputs.application }},"requires":["js_install"]},
+              {"id":"typecheck","selected":${{ needs.selection.outputs.application }},"requires":["js_install"]},
+              {"id":"python_push","selected":${{ toJSON(github.event_name == 'push' && needs.selection.outputs.python == 'true') }},"requires":["plan"]},
+              {"id":"python_existing","selected":${{ needs.selection.outputs.ubuntu_python }},"requires":["plan"]},
+              {"id":"node_tests","selected":${{ needs.selection.outputs.node }},"requires":["plan"]}
+            ]
+        run: python scripts/ci_matrix.py steps --report .artifacts/editor-tests-summary.json
       - name: Preserve selected test evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@v6
@@ -337,6 +487,7 @@ jobs:
           path: |
             .artifacts/ci-plan.json
             .artifacts/ci-*/
+            .artifacts/editor-tests-summary.json
             .artifacts/checks/
             test-results/
           include-hidden-files: true
