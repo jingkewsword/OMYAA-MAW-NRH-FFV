@@ -13,24 +13,52 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  selection:
+    runs-on: ubuntu-latest
+    outputs:
+      lint: ${{ steps.scope.outputs.lint }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Select change scope
+        id: scope
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: python scripts/ci_impact.py
+
   ruff:
     name: Ruff check
+    needs: selection
+    if: ${{ always() }}
     runs-on: ubuntu-latest
 
     steps:
+      - name: Require valid selection
+        if: ${{ needs.selection.result != 'success' || (needs.selection.outputs.lint != 'true' && needs.selection.outputs.lint != 'false') }}
+        run: exit 1
       - name: Check out repository
+        if: ${{ needs.selection.outputs.lint == 'true' }}
         uses: actions/checkout@v5
 
       - name: Set up Python
+        if: ${{ needs.selection.outputs.lint == 'true' }}
         uses: actions/setup-python@v6
         with:
           python-version: '3.11'
 
       - name: Set up uv
+        if: ${{ needs.selection.outputs.lint == 'true' }}
         uses: astral-sh/setup-uv@v7
         with:
           version: "0.13.4"
           enable-cache: true
 
       - name: Run Ruff check
+        if: ${{ needs.selection.outputs.lint == 'true' }}
         run: uv run --frozen ruff check

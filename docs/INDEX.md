@@ -150,6 +150,11 @@
 
 [打开正文](engineering/DEBUG_WORKFLOW.md)
 
+<a name="engineering-test-governance"></a>
+### 按影响选测与可信结果
+
+[维护目标、CI 范围与验收原则](engineering/TEST_GOVERNANCE.md)
+
 <a name="engineering-prproj"></a>
 ### PRPROJ capability gate
 

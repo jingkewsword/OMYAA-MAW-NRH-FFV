@@ -65,14 +65,43 @@ e2e helper 仅保留最近 4096 字符的服务输出，stdout/stderr 分别解�
 | 变化 | 首轮验证 | 扩大验证的条件 |
 | --- | --- | --- |
 | 调试运行器 / 日志工具 | 上面两条标准库回归，无需前端安装 | 进程生命周期变更需在 Windows / Linux 跑 CI |
-| Python 业务逻辑 | 对应 unittest 模块 | 公共契约/导出变化时扩大到相关模块，最后一次全量 |
+| Python 业务逻辑 | 对应 unittest 模块及直接、间接消费者 | 公共契约/导出变化时扩大到实际消费者；必要整体回归另说明理由 |
 | 编辑器 JS / 装配清单 | 相关 Node 用例 + build/check + typecheck | 宿主、选择范围、交互变化时增加相关浏览器 spec |
 | CSS / HTML / 交互 | 构建契约 + 对应 spec + 人工操作 | 多入口共享行为变化时扩大浏览器范围 |
 | 发布 | 1.x 按需重建便携 HTML；2.0+ 核对退役产物缺席，完整契约与回归矩阵 | 真实媒体、推理和听感仍单独验收 |
 
 `pnpm test` 是 Chromium e2e；`pnpm run test:unit` 执行根目录全部 `.mjs` 测试，其中已有跨 Python 与浏览器测试，不能假定它们都零依赖。不要每改一个断言就跑全量。先复现一次，改代码后跑最小回归，必要时扩大；连续两次同类失败先分类原因，不循环重跑。
 
-CI 的 Editor job 目前只运行两类 Python 装配契约与两份 browser spec，并非完整 Python/e2e 套件。新 Debug tooling job 在 Windows / Linux 验证标准库调试工具；同样不能冒充产品全量验证。UI 的拖动、听感和布局仍需人工核验。
+CI 的实际选中范围、平台分工与结果核验见[测试治理](TEST_GOVERNANCE.md)。UI 的拖动、听感和布局仍需人工核验。
+
+### 按影响运行与复验
+
+准备好本次所需依赖后，在仓库根执行：
+
+```powershell
+python scripts/test_workflow.py --changed maw/energy_valley.py --plan-only
+python scripts/test_workflow.py --stage merge --changed web/editor/cues/editor-color-filter.js --changed CHANGELOG.md
+python scripts/test_workflow.py --stage merge --base-ref origin/2.0dev
+python scripts/run_check.py --timeout 180 -- python scripts/run_tests.py tests.test_project_contract
+```
+
+`dev` 和 `merge` 默认都按影响选择。没有 `--changed` 或 `--base-ref` 时，读取已暂存、未暂存和未跟踪文件；`--base-ref` 只比较该基线与 HEAD 的已提交差异，使用前先更新引用。可重复传 `--changed` 指定真实路径。读取 Git 差异失败会报错；不可确认的范围会在计划中解释扩大原因。文档与代码取消费者并集，删除按剩余引用及受影响领域处理。
+
+`--plan-only` 保存计划而不执行。`--stage merge --pack media` 显式运行一个组；`--stage dev --component editor` 显式运行固定开发核心，两者都不代表完整影响范围。`pnpm run test:dev`、`test:merge`、`test:release` 是对应快捷入口。`--stage release` 运行完整本地必需集合，拒绝局部包、分层及保存计划覆盖；真实工程与人工验收仍单列。
+
+自动选中的 Python 文件使用 `scripts/run_tests.py --automated --required`：已登记为 `manual`、依赖私有输入的用例不属于自动集合，报告在 `excluded` 中逐项列出。显式 `--pack manual` 仍保留人工输入回归；不能与 `--automated` 同用。已核对的异平台排除按精确用例和原因记录，缺少实际能力导致的 skip 仍失败。
+
+每次运行在 `.artifacts/test-workflow/<运行标识>/` 保存 `plan.json` 和 `summary.json`，并保留各语言报告与完整日志。`--report-dir` 可指定新的证据目录，已有目录不会覆盖。CI 用 `--selection-plan` 读取同提交的保存计划，用 `--layer` 执行明确的一层；报告只对应所请求的范围。浏览器可用 `--shard 1/2` 指定分片，完整发现和该片实际结果分别保存；本地 `release` 拒绝局部分片，CI 分片需经并集汇总验证。
+
+已选中的独立组在其他组失败后继续执行，最后统一返回非零。Python 和 Node 的定向选择按文件执行；报告随每组完成落盘。`summary.json` 区分实跑、失败、被前置阻塞及未运行，`process_exit_code` 保留原命令退出码，`exit_code` 另外反映报告和覆盖校验。`failures.json` 汇集完整失败 ID、位置、错误内容和日志入口，终端摘要不限制磁盘上的错误清单。
+
+CI 用可重复的 `--blocked-preparation` 传递已失败的准备项，由具体消费者决定阻塞范围；无关标准库检查继续执行。网站准备失败只阻塞发现清单中包含网站消费者的浏览器分片。动态依赖无法全部静态推断，未识别依赖仍由实际运行如实报告，不能据此声称已经验证。运行器继承系统或调用者的临时目录；沙箱需要其他可写目录时在调用前设置 `TEMP` / `TMP`，不改变系统配置或静默更换 Windows 卷。
+
+必要全量的准备失败时，原完整组保持 `blocked`，并继续尝试可独立执行的具体文件。报告将这些局部结果和原完整发现的缺口分开，最终仍非零；局部文件成功不等于包初始化、`load_tests` 及完整集合已经验收。准备全部成功时保留原完整运行及其报告，不叠加这条局部路径。
+
+修复后先用 `scripts/run_tests.py` 的文件、模块或具体用例入口重跑失败项；浏览器用原 spec 和 `--grep` 定向复验，再运行本次修改的消费者。当前没有自动文件级中断接续或预算参数；不要把手动少跑一部分解释成完整运行已恢复。
+
+GitHub Actions 可以[重跑失败或指定 job 及其依赖](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs)；重跑仍使用原运行的提交。修复代码后触发新提交的运行。原生 job 重跑不会自动接续 job 内部的测试文件；不能把旧提交的重跑结果写成修复提交的验证。
 
 ## 中断恢复与结果记录
 
