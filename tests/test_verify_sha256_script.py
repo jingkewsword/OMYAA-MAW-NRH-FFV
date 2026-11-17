@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import shutil
 import subprocess
 import tempfile
@@ -14,28 +15,31 @@ ARCHIVE_BYTES = b"tarball-bytes"
 
 
 def usable_bash() -> str | None:
-    """挑一个真能执行本脚本的 bash。
+    """选择能读取仓库路径并具备摘要校验工具的 Bash。"""
+    candidates = []
+    if os.name == "nt" and (git := shutil.which("git")):
+        # Git for Windows 能读盘符路径，PATH 上的 WSL 启动器通常不能。
+        git_bash = Path(git).parent.parent / "bin" / "bash.exe"
+        if git_bash.is_file():
+            candidates.append(str(git_bash))
+    if bash := shutil.which("bash"):
+        candidates.append(bash)
 
-    Windows 上 PATH 里排第一的往往是 WSL 的 bash，它看不到 ``C:\\`` 形式的仓库路径；
-    这里直接让它 ``test -f`` 本脚本，顺带确认 sha256sum/awk/grep 可用，读不到就跳过，
-    避免把维护者本机跑成一片红。Linux CI 上探测必然通过，测试真实执行。
-    """
-    candidate = shutil.which("bash")
-    if not candidate:
-        return None
     probe = (
         f'test -f "{VERIFIER.as_posix()}"'
         " && command -v sha256sum >/dev/null"
         " && command -v awk >/dev/null"
         " && command -v grep >/dev/null"
     )
-    try:
-        # The Windows WSL launcher may print UTF-16 diagnostics. This probe
-        # only needs its exit code, so keep bytes instead of decoding them.
-        proc = subprocess.run([candidate, "-c", probe], capture_output=True, timeout=60)
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    return candidate if proc.returncode == 0 else None
+    for candidate in dict.fromkeys(candidates):
+        try:
+            # WSL 的失败诊断可能是 UTF-16，只读取退出码。
+            proc = subprocess.run([candidate, "-c", probe], capture_output=True, timeout=60)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if proc.returncode == 0:
+            return candidate
+    return None
 
 
 BASH = usable_bash()
