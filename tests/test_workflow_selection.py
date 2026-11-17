@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -54,6 +55,17 @@ class ConcreteWorkflowTests(unittest.TestCase):
         targets = [arg for name, command, _ in steps if name.startswith("node-")
                    for arg in command if arg.startswith("tests/") and arg.endswith(".mjs")]
         self.assertEqual(len(targets), len(set(targets)))
+
+    def test_windows_common_pack_owns_the_explicit_lifecycle_ffmpeg_cases(self):
+        from scripts.test_policy import python_pack
+
+        reports = Path("reports")
+        with mock.patch.object(workflow, "os", SimpleNamespace(name="nt")):
+            lifecycle = [name for name, _, _ in workflow.commands(["lifecycle"], reports)]
+            combined = [name for name, _, _ in workflow.commands(["common", "lifecycle"], reports)]
+        self.assertIn("python-windows-ffmpeg", lifecycle)
+        self.assertNotIn("python-windows-ffmpeg", combined)
+        self.assertEqual({python_pack(case) for case in workflow.WINDOWS_FFMPEG_TESTS}, {"common"})
 
     def test_website_inputs_precede_their_browser_consumer(self):
         plan = selected()

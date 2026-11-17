@@ -17,6 +17,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -405,6 +406,18 @@ class ParallelCommandTests(CompactContainerAssertions, unittest.TestCase):
         self.assertTrue(allowed_platform_skip(identity, reason))
         self.assertFalse(allowed_platform_skip(identity, 'dependency missing'))
         self.assertFalse(allowed_platform_skip(identity.replace('GuiWebBridgeTests', 'OtherTests'), reason))
+
+    def test_known_posix_path_guards_are_exempt_only_on_windows(self):
+        from scripts import test_policy
+
+        test_id = "tests.test_runtime_pathwin.NonWindowsPassthroughTests.test_prepare_install_root_is_noop_on_unix"
+        reason = "非 Windows 直通断言仅适用 POSIX 平台"
+        with mock.patch.object(test_policy.os, "name", "nt"):
+            self.assertTrue(test_policy.allowed_platform_skip(test_id, reason))
+            self.assertFalse(test_policy.allowed_platform_skip(test_id, "missing dependency"))
+            self.assertFalse(test_policy.allowed_platform_skip(test_id + "_other", reason))
+        with mock.patch.object(test_policy.os, "name", "posix"):
+            self.assertFalse(test_policy.allowed_platform_skip(test_id, reason))
 
     def test_pack_keeps_dynamic_imported_hooks_and_load_errors(self):
         with tempfile.TemporaryDirectory() as temporary:

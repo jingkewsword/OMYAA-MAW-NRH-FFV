@@ -80,7 +80,7 @@ def _pack_commands(packs: list[str], report_dir: Path, *, dev: bool = False, com
         yield "build-launcher", [node, "scripts/build-launcher.mjs", "--write"], 60
         yield "typecheck", [node, "node_modules/typescript/bin/tsc", "-p", "web/tsconfig.typecheck.json"], 120
     for pack in packs:
-        if pack == "lifecycle" and os.name == "nt":
+        if pack == "lifecycle" and os.name == "nt" and "common" not in packs:
             yield "python-windows-ffmpeg", [python, "scripts/run_tests.py", "--required",
                    "--report", str(report_dir / "python-windows-ffmpeg.json"), *WINDOWS_FFMPEG_TESTS], 60
         if pack == "docs":
@@ -94,7 +94,7 @@ def _pack_commands(packs: list[str], report_dir: Path, *, dev: bool = False, com
             # Pack discovery retains unittest package/import/load_tests semantics.
             # The measured file-parallel engine remains available for full discovery.
             yield f"python-{pack}", [python, "scripts/run_tests.py", *targets, "--required",
-                   "--report", str(report_dir / f"python-{pack}.json")], 300 if pack == "long-media" else 240
+                   "--report", str(report_dir / f"python-{pack}.json")], {"common": 360, "long-media": 300}.get(pack, 240)
         if pack in {"common", "browser", "lifecycle", "tools"}:
             targets = [str(p.relative_to(ROOT)) for p in sorted((ROOT / "tests").glob("*.mjs")) if node_pack(p.name) == pack]
             if pack == "tools" and tools_scope == "checklist":
