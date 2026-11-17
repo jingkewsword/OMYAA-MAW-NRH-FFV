@@ -345,7 +345,7 @@ test('waveform cue double-click activates its subtitle editor while blank double
   await cue.scrollIntoViewIfNeeded();
   await cue.dblclick();
   await expect(page.locator('#cue-panel-target')).toHaveText('主字幕');
-  await expect(page.locator('#cue-panel-text')).toBeFocused();
+  await expect(page.locator('.waveform-cue-quick-edit textarea')).toBeFocused();
   expect(await page.locator('#player').evaluate((element) => element.paused)).toBe(true);
 
   const blankRow = page.locator('.waveform-row:not(:has(.waveform-cue-block))').first();
@@ -572,16 +572,16 @@ test('list context menu leads with text-position split', async ({ page }) => {
   await expect(page.locator('#ctxmenu .item').first()).toContainText('按文字位置拆分');
 });
 
-test('Enter focuses the current subtitle editor after list or waveform clicks', async ({ page }) => {
+test('Enter opens the current subtitle quick editor after list or waveform clicks', async ({ page }) => {
   await page.goto(server.url);
   const cue = page.locator('.cue[data-idx="0"]');
-  const panelText = page.locator('#cue-panel-text');
+  const quickText = page.locator('.waveform-cue-quick-edit textarea');
   await cue.click();
   // 最后点击在列表：即使鼠标已移出列表，Enter 仍聚焦当前字幕编辑区
   await page.locator('#media-controls').hover();
   await page.keyboard.press('Enter');
   await expect(cue).not.toHaveClass(/editing/);
-  await expect(panelText).toBeFocused();
+  await expect(quickText).toBeFocused();
   await page.keyboard.press('Escape');
 
   // 最后点击在波形背景：仍聚焦当前字幕编辑区
@@ -591,7 +591,7 @@ test('Enter focuses the current subtitle editor after list or waveform clicks', 
   await page.evaluate(() => MaweSelection.selectOnly(0));
   await page.keyboard.press('Enter');
   await expect(cue).not.toHaveClass(/editing/);
-  await expect(panelText).toBeFocused();
+  await expect(quickText).toBeFocused();
 });
 
 test('B splits at the pointer inside the cue list and at the playhead outside it', async ({ page }) => {

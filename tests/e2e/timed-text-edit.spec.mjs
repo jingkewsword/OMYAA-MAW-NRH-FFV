@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { createUtilsModule as createProjectTracks } from '../../web/shared/utils/project-tracks.js';
 import {
   cleanupTempDir,
   findFreePort,
@@ -26,7 +27,7 @@ test.beforeAll(async () => {
   const mediaPath = join(tempDir, 'synthetic.wav');
   const projectPath = join(tempDir, 'timed-text.json');
   generateWav(mediaPath, 3);
-  writeFileSync(projectPath, JSON.stringify({
+  writeFileSync(projectPath, JSON.stringify(createProjectTracks().importProject({
     media: 'synthetic.wav',
     waveform: generateWaveformPayload(3000),
     segments: [
@@ -50,7 +51,7 @@ test.beforeAll(async () => {
         items: [{ start: 2300, end: 2800, text: 'disabled' }],
       },
     ],
-  }, null, 2), 'utf8');
+  }).project, null, 2), 'utf8');
   server = await startServer(projectPath, mediaPath, await findFreePort());
 });
 
@@ -417,7 +418,7 @@ test('English whole-text search mirror preserves subtitles through highlights an
 test('regex replacement uses captures, single replacement advances, and changes stay in the draft until applied', async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('moy.asr.editor.onboarding.v1', 'completed'));
   await page.goto(server.url);
-  const before = await page.evaluate(() => JSON.parse(JSON.stringify(AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments)));
+  const before = await page.evaluate(() => AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments.map(({ _dirty, ...segment }) => JSON.parse(JSON.stringify(segment))));
   await page.locator('#timed-text-edit-btn').click();
   await page.locator('#timed-text-edit-view [data-view="single"]').click();
   const find = page.locator('#timed-text-edit-find');
@@ -438,11 +439,11 @@ test('regex replacement uses captures, single replacement advances, and changes 
   await expect(page.locator('#timed-text-edit-modal')).not.toHaveClass(/show/);
   expect(await page.evaluate(() => AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments[0].text)).toBe('XX是这颗');
   expect(await page.evaluate(() => AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments[1].text)).toBe('aabbcc');
-  const applied = await page.evaluate(() => JSON.parse(JSON.stringify(AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments)));
+  const applied = await page.evaluate(() => AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments.map(({ _dirty, ...segment }) => JSON.parse(JSON.stringify(segment))));
   await page.keyboard.press('Control+z');
-  expect(await page.evaluate(() => JSON.parse(JSON.stringify(AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments)))).toEqual(before);
+  expect(await page.evaluate(() => AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments.map(({ _dirty, ...segment }) => JSON.parse(JSON.stringify(segment))))).toEqual(before);
   await page.keyboard.press('Control+Shift+z');
-  expect(await page.evaluate(() => JSON.parse(JSON.stringify(AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments)))).toEqual(applied);
+  expect(await page.evaluate(() => AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments.map(({ _dirty, ...segment }) => JSON.parse(JSON.stringify(segment))))).toEqual(applied);
 });
 
 test('cancelling pure-text replacement discards the draft', async ({ page }) => {
@@ -600,7 +601,7 @@ test('search clear, native focus order and row diff layout stay usable at narrow
   await page.locator('#timed-text-edit-modal').screenshot({path: testInfo.outputPath('timed-text-narrow.png')});
 });
 
-test('timed-text view preference survives save and reopen and rows is omitted', async ({ page }) => {
+test('timed-text view preference survives save and reopen for both views', async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('moy.asr.editor.onboarding.v1', 'completed'));
   await page.goto(server.url);
   await page.evaluate(() => { MaweSettings.EDITOR_SETTINGS.autoSaveProject = false; });
@@ -615,12 +616,12 @@ test('timed-text view preference survives save and reopen and rows is omitted', 
   await expect(page.locator('#timed-text-edit-single-textarea')).toBeVisible();
   await page.locator('#timed-text-edit-view [data-view="rows"]').click();
   expect(await page.evaluate(() => MaweServerSave.hasUnsavedProjectChanges())).toBe(true);
-  expect(await page.evaluate(() => JSON.parse(MaweJsonRepair.buildJson()).timed_text_edit_view)).toBeUndefined();
+  expect(await page.evaluate(() => JSON.parse(MaweJsonRepair.buildJson()).timed_text_edit_view)).toBe('rows');
   expect(await page.evaluate(() => MaweProjectSave.saveProjectToServer())).toBe(true);
   await page.reload();
   await page.locator('#timed-text-edit-btn').click();
   await expect(page.locator('#timed-text-edit-rows')).toBeVisible();
-  expect(await page.evaluate(() => MaweBoot.DATA.timed_text_edit_view)).toBeUndefined();
+  expect(await page.evaluate(() => MaweBoot.DATA.timed_text_edit_view)).toBe('rows');
 });
 
 test('unavailable single view falls back only at runtime and loading another project clears its preference', async ({ page }) => {
@@ -644,7 +645,7 @@ test('unavailable single view falls back only at runtime and loading another pro
   await page.evaluate(() => {
     MaweProjectLoad.applyCanonicalProject(MaweProjectLoad.buildBlankProject(), 'blank.mosp');
   });
-  expect(await page.evaluate(() => MaweBoot.DATA.timed_text_edit_view)).toBe('rows');
+  expect(await page.evaluate(() => MaweBoot.DATA.timed_text_edit_view)).toBeUndefined();
   expect(await page.evaluate(() => MaweState.hasProjectChanges())).toBe(false);
   expect(await page.evaluate(() => JSON.parse(MaweJsonRepair.buildJson()).timed_text_edit_view)).toBeUndefined();
 });

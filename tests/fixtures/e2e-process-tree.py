@@ -15,14 +15,26 @@ if '--leaf' not in sys.argv:
         'localAppData': os.environ.get('LOCALAPPDATA'),
         'parentOnlyMarker': 'MAW_LIFECYCLE_PARENT_ONLY' in os.environ,
     }))
-    child = subprocess.Popen([sys.executable, __file__, *sys.argv[1:], '--leaf'])
+    child = subprocess.Popen([sys.executable, __file__, *sys.argv[1:], '--leaf'], stdin=subprocess.PIPE)
     (root / 'owned-pids.json').write_text(json.dumps([os.getpid(), child.pid]))
+    # The leaf must not advertise readiness until the process evidence is complete.
+    assert child.stdin is not None
+    child.stdin.write(b'1')
+    child.stdin.close()
     if mode == 'wrapper-exit':
         sys.exit(7)
     child.wait()
 else:
-    # Last-resort bound even if the test runner itself is forcibly killed.
-    threading.Timer(60, lambda: os._exit(91)).start()
+    # Bound the handshake too, without keeping an EOF-exiting leaf alive.
+    watchdog = threading.Timer(60, lambda: os._exit(91))
+    watchdog.daemon = True
+    watchdog.start()
+    if os.environ.get('MAW_LIFECYCLE_TEST_HANDSHAKE'):
+        print('LEAF_WAITING', flush=True)
+    # EOF means the wrapper died before publishing complete evidence.
+    if sys.stdin.buffer.read(1) != b'1':
+        watchdog.cancel()
+        sys.exit(1)
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):

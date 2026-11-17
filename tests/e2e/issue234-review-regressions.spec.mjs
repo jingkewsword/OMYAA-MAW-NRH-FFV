@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { createUtilsModule } from '../../web/shared/utils/project-tracks.js';
 import { cleanupTempDir, disableOnboarding, findFreePort, generateWav, makeTempDir, startServer } from './helpers.mjs';
 
 let dir, server, projectPath;
@@ -11,11 +12,12 @@ test.beforeEach(async ({ page }) => {
   generateWav(media, 5);
   writeFileSync(join(dir, 'cat.png'), Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j5V8AAAAASUVORK5CYII=', 'base64'));
   writeFileSync(join(dir, 'dog.png'), readFileSync(join(dir, 'cat.png')));
-  writeFileSync(projectPath, JSON.stringify({ media, sticker_root: dir,
+  writeFileSync(projectPath, JSON.stringify(createUtilsModule().importProject({ media, sticker_root: dir,
+    overlay_track: { enabled: true, segments: [] },
     segments: [{ id: 'a', start: 0, end: 3000, text: '甲乙丙',
       items: [{ text: '甲', start: 0, end: 1000 }, { text: '乙', start: 1000, end: 2000 },
         { text: '丙', start: 2000, end: 3000 }], sticker: { name: 'cat', rel: 'cat.png' } }],
-  }), 'utf8');
+  }).project), 'utf8');
   server = await startServer(projectPath, media, await findFreePort());
   await disableOnboarding(page);
   await page.goto(server.url);
@@ -58,17 +60,17 @@ test('disabled track groups disappear from preview and all timeline exporters wi
     const u = window.AsrEditorUtils, data = MaweBoot.DATA;
     // Resolve requires a color or sticker payload; a visible color keeps that
     // export meaningful while the only sticker's track is disabled.
-    data.segments.push({ id: 'visible-main', start: 3500, end: 4500, text: 'visible' });
-    u.moveSegmentBetweenTracks(data.segments, data.overlay_track.segments, 0);
-    data.overlay_track.enabled = false;
-    u.assignSubtitleGroup(data, data.segments, [0], 'color', { name: 'blue', value: '#0000ff' });
+    data.tracks.find(t => t.role === 'main').segments.push({ id: 'visible-main', start: 3500, end: 4500, text: 'visible' });
+    u.moveSegmentBetweenTracks(data.tracks.find(t => t.role === 'main').segments, data.tracks.find(t => t.role === 'overlay').segments, 0);
+    data.tracks.find(t => t.role === 'overlay').enabled = false;
+    u.assignSubtitleGroup(data, data.tracks.find(t => t.role === 'main').segments, [0], 'color', { name: 'blue', value: '#0000ff' });
     u.refreshSubtitleGroupViews(data);
     MaweStickerOverlay.stickerOverlayDataVersion += 1;
     const plan = u.buildProjectExportPlan(data, { durationMs: 5000 });
     return { preview: MaweStickerOverlay.activeStickersAt(1000).length,
       fcp: u.buildFcp7ExportArtifacts(plan, { fps: '30', nativeTextObjects: true })[0].content.includes('cat.png'),
       resolve: JSON.parse(MaweExportTimeline.buildResolveJson()).stickers.length,
-      otio: MaweExportTimeline.collectStickerOtioEntries([], data.overlay_track.segments).entries.length,
+      otio: MaweExportTimeline.collectStickerOtioEntries([], data.tracks.find(t => t.role === 'overlay').segments).entries.length,
       groups: data.subtitle_groups.sticker.length };
   });
   expect(result).toEqual({ preview: 0, fcp: false, resolve: 0, otio: 0, groups: 1 });
@@ -76,7 +78,7 @@ test('disabled track groups disappear from preview and all timeline exporters wi
   await page.reload();
   await expect(page.locator('#cues-container')).toBeVisible();
   expect(await page.evaluate(() => {
-    MaweBoot.DATA.overlay_track.enabled = true;
+    MaweBoot.DATA.tracks.find(t => t.role === 'overlay').enabled = true;
     MaweStickerOverlay.stickerOverlayDataVersion += 1;
     return MaweStickerOverlay.activeStickersAt(1000).length;
   })).toBe(1);
@@ -86,8 +88,9 @@ test('sticker geometry participates in saved checkpoints, undo and actual save/r
   await page.evaluate(async () => {
     MaweDom.stickerOverlayToggle.checked = true;
     MaweDom.stickerOverlayToggle.dispatchEvent(new Event('change'));
-    await MaweProjectSave.saveCurrentProject();
-  });
+    return MaweProjectSave.saveCurrentProject();
+  }).then(result => expect(result).toBe(true));
+  expect(await page.evaluate(() => MaweServerSave.hasUnsavedProjectChanges())).toBe(false);
   const initial = await page.evaluate(() => MawePreviewGeometry.getStickerGeometry());
   await page.locator('#sticker-overlay-layer').focus();
   await page.keyboard.press('ArrowLeft');
@@ -109,20 +112,20 @@ test('sticker geometry participates in saved checkpoints, undo and actual save/r
 test('manual creation and word conversion reserve IDs after track transfers', async ({ page }) => {
   const ids = await page.evaluate(() => {
     const u = window.AsrEditorUtils, data = MaweBoot.DATA;
-    data.segments[0].id = 'main-1';
-    u.moveSegmentBetweenTracks(data.segments, data.overlay_track.segments, 0);
+    data.tracks.find(t => t.role === 'main').segments[0].id = 'main-1';
+    u.moveSegmentBetweenTracks(data.tracks.find(t => t.role === 'main').segments, data.tracks.find(t => t.role === 'overlay').segments, 0);
     MaweAddCue.addCueRangeFromWaveform(3200, 4200);
     return u.subtitleGroupTracks(data).flatMap(t => t.segments.map(s => s.id));
   });
   expect(ids).toEqual(['main-1-2', 'main-1']);
-  // Recreate a timed main cue whose converted first item already exists on a
+  // Recreate a timed main cue whose converted second item already exists on a
   // different track, then apply the production conversion dialog.
   await page.evaluate(() => {
     const data = MaweBoot.DATA;
     MaweCuePanel.commitCuePanelEdit();
     MaweCuePanelState.currentCuePanelIdx = -1;
-    data.overlay_track.segments[0].id = 'a-item-1';
-    data.segments[0] = { id: 'a', start: 3200, end: 4200, text: '甲乙', items: [
+    data.tracks.find(t => t.role === 'overlay').segments[0].id = 'a-item-2';
+    data.tracks.find(t => t.role === 'main').segments[0] = { id: 'a', start: 3200, end: 4200, text: '甲乙', items: [
       { text: '甲', start: 3200, end: 3700 }, { text: '乙', start: 3700, end: 4200 },
     ] };
     MaweWordTiming.openConversion([0]);
@@ -135,14 +138,14 @@ test('manual creation and word conversion reserve IDs after track transfers', as
   await expect(page.locator('#cues-container')).toBeVisible();
   const saved = await page.evaluate(() => window.AsrEditorUtils.subtitleGroupTracks(MaweBoot.DATA).flatMap(t => t.segments.map(s => s.id)));
   expect(new Set(saved).size).toBe(3);
-  expect(saved).toContain('a-item-1-2');
+  expect(saved).toContain('a-item-2-2');
 });
 
 test('same-name groups render their own asset and clear at the exact final boundary', async ({ page }) => {
   const result = await page.evaluate(() => {
     const u = window.AsrEditorUtils, data = MaweBoot.DATA;
-    data.segments.push({ id: 'second', start: 3100, end: 4000, text: 'second' });
-    u.assignSubtitleGroup(data, data.segments, [1], 'sticker', { name: 'cat', rel: 'dog.png' });
+    data.tracks.find(t => t.role === 'main').segments.push({ id: 'second', start: 3100, end: 4000, text: 'second' });
+    u.assignSubtitleGroup(data, data.tracks.find(t => t.role === 'main').segments, [1], 'sticker', { name: 'cat', rel: 'dog.png' });
     MaweDom.stickerOverlayToggle.checked = true;
     MaweStickerOverlay.stickerOverlayDataVersion += 1;
     MaweStickerOverlay.renderStickerOverlay(1000);
