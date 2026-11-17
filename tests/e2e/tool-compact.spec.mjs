@@ -345,7 +345,9 @@ test('long compact checklist preserves 15px text and bounded layout across break
   await page.locator('.tool-density').click();
   const measurements = [];
   for (const theme of ['dark','light']) {
-    await setTheme(page,theme);
+    // This stress case checks geometry and font size, not transition colors.
+    // Screenshots document the layout and may capture an in-progress color transition.
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
     for (const width of [320,375,414,768,979,980,981,1440]) {
       await page.setViewportSize({width,height:900});
       const measurement = await page.evaluate(() => {
