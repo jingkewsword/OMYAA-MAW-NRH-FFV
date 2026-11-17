@@ -93,6 +93,11 @@
 
 [打开正文](engineering/DEVELOPMENT.md)
 
+<a name="engineering-test-governance"></a>
+### 2.0 测试门禁与选测
+
+[打开正文](engineering/TEST_GOVERNANCE.md)
+
 <a name="engineering-e2e-lifecycle"></a>
 ### E2E 服务进程生命周期
 

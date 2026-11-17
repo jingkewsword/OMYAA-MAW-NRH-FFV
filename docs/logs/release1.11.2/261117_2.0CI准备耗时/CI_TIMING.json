@@ -1,0 +1,293 @@
+{
+  "schema": "maw.ci_preparation.v1",
+  "recorded_at": "2026-11-17",
+  "units": "seconds",
+  "purpose": "Reproducible baseline for GitHub-hosted Playwright preparation; temporary fork PRs were closed without merge.",
+  "source": {
+    "base_sha": "76bb330a1265b6c999b0a16dda85f98c8f58ca47",
+    "ab_pr": "https://github.com/jingkewsword/OMYAA-MAW-NRH-FFV/pull/83",
+    "full_matrix_pr": "https://github.com/jingkewsword/OMYAA-MAW-NRH-FFV/pull/84",
+    "focused_run": "https://github.com/jingkewsword/OMYAA-MAW-NRH-FFV/actions/runs/43932631016"
+  },
+  "phase_definitions": {
+    "uv_setup_and_cache_restore": "Entire setup-uv action, including cache lookup/restore and tool setup; not pure transfer time.",
+    "node_setup_and_cache_restore": "Entire setup-node action, including pnpm cache lookup/restore and tool setup; not pure transfer time.",
+    "test_initialization_after_reporter_load": "Playwright reporter construction to onBegin; CLI startup before reporter construction is included only in test_command.",
+    "test_window_including_workers_and_hooks": "Playwright onBegin to onEnd; includes worker startup and hooks, not isolated test-body CPU time.",
+    "checkout_to_test_end": "Experiment clock after checkout through test command; excludes checkout, artifact upload and post steps.",
+    "job_total": "First to last GitHub job log timestamp; includes checkout, artifact upload and post steps."
+  },
+  "focused_jobs": [
+    {
+      "run_id": 43932631016,
+      "head_sha": "7dd4457c7b055cd9e8c0e2aeba861b9060a679de",
+      "merge_sha": "da1267d13b73cd64cd8b408635297bd47afacd5e",
+      "playwright_version": "1.62.0",
+      "selected": 2,
+      "passed": 2,
+      "skipped": 0,
+      "retries": 0,
+      "media_probe": {
+        "h264_aac_mp4_played": true,
+        "wav_played": true
+      },
+      "job_id": 133528802712,
+      "os": "Windows",
+      "variant": "with-deps",
+      "image": "win25-vs2026 20261103.298.1",
+      "cache_hit": {
+        "uv": true,
+        "pnpm": true
+      },
+      "media_foundation": {
+        "before": "Available",
+        "after": "Installed"
+      },
+      "seconds": {
+        "uv_setup_and_cache_restore": 3.787,
+        "pnpm_setup": 17.64,
+        "node_setup_and_cache_restore": 7.709,
+        "python_dependencies": 1.172,
+        "node_dependencies": 4.125,
+        "chromium_install": 87.344,
+        "ffmpeg_install": 20.36,
+        "ffmpeg_capability_probe": 0.266,
+        "browser_media_probe": 2.844,
+        "test_initialization_after_reporter_load": 0.635,
+        "test_window_including_workers_and_hooks": 9.861,
+        "test_command": 11.891,
+        "checkout_to_test_end": 237.766,
+        "job_total": 252.51
+      }
+    },
+    {
+      "run_id": 43932631016,
+      "head_sha": "7dd4457c7b055cd9e8c0e2aeba861b9060a679de",
+      "merge_sha": "da1267d13b73cd64cd8b408635297bd47afacd5e",
+      "playwright_version": "1.62.0",
+      "selected": 2,
+      "passed": 2,
+      "skipped": 0,
+      "retries": 0,
+      "media_probe": {
+        "h264_aac_mp4_played": true,
+        "wav_played": true
+      },
+      "job_id": 133528802077,
+      "os": "Windows",
+      "variant": "without-deps",
+      "image": "win25-vs2026 20261103.298.1",
+      "cache_hit": {
+        "uv": true,
+        "pnpm": true
+      },
+      "media_foundation": {
+        "before": "Available",
+        "after": "Available"
+      },
+      "seconds": {
+        "uv_setup_and_cache_restore": 4.373,
+        "pnpm_setup": 21.738,
+        "node_setup_and_cache_restore": 13.042,
+        "python_dependencies": 0.75,
+        "node_dependencies": 5.25,
+        "chromium_install": 15.313,
+        "ffmpeg_install": 27.156,
+        "ffmpeg_capability_probe": 0.484,
+        "browser_media_probe": 2.875,
+        "test_initialization_after_reporter_load": 0.696,
+        "test_window_including_workers_and_hooks": 14.143,
+        "test_command": 16.359,
+        "checkout_to_test_end": 193.985,
+        "job_total": 217.492
+      }
+    },
+    {
+      "run_id": 43932631016,
+      "head_sha": "7dd4457c7b055cd9e8c0e2aeba861b9060a679de",
+      "merge_sha": "da1267d13b73cd64cd8b408635297bd47afacd5e",
+      "playwright_version": "1.62.0",
+      "selected": 2,
+      "passed": 2,
+      "skipped": 0,
+      "retries": 0,
+      "media_probe": {
+        "h264_aac_mp4_played": true,
+        "wav_played": true
+      },
+      "job_id": 133528802151,
+      "os": "Ubuntu",
+      "variant": "with-deps",
+      "image": "ubuntu26 20261111.196.1",
+      "cache_hit": {
+        "uv": true,
+        "pnpm": true
+      },
+      "seconds": {
+        "uv_setup_and_cache_restore": 2.76,
+        "pnpm_setup": 6.972,
+        "node_setup_and_cache_restore": 5.515,
+        "python_dependencies": 1.195,
+        "node_dependencies": 3.166,
+        "chromium_install": 18.637,
+        "ffmpeg_install": 16.289,
+        "ffmpeg_capability_probe": 0.282,
+        "browser_media_probe": 2.941,
+        "test_initialization_after_reporter_load": 0.651,
+        "test_window_including_workers_and_hooks": 5.643,
+        "test_command": 7.172,
+        "checkout_to_test_end": 67.214,
+        "job_total": 74.098
+      }
+    },
+    {
+      "run_id": 43932631016,
+      "head_sha": "7dd4457c7b055cd9e8c0e2aeba861b9060a679de",
+      "merge_sha": "da1267d13b73cd64cd8b408635297bd47afacd5e",
+      "playwright_version": "1.62.0",
+      "selected": 2,
+      "passed": 2,
+      "skipped": 0,
+      "retries": 0,
+      "media_probe": {
+        "h264_aac_mp4_played": true,
+        "wav_played": true
+      },
+      "job_id": 133528802127,
+      "os": "Ubuntu",
+      "variant": "without-deps",
+      "image": "ubuntu26 20261111.196.1",
+      "cache_hit": {
+        "uv": true,
+        "pnpm": true
+      },
+      "seconds": {
+        "uv_setup_and_cache_restore": 3.181,
+        "pnpm_setup": 5.919,
+        "node_setup_and_cache_restore": 2.742,
+        "python_dependencies": 2.783,
+        "node_dependencies": 3.584,
+        "chromium_install": 9.922,
+        "ffmpeg_install": 60.011,
+        "ffmpeg_capability_probe": 0.51,
+        "browser_media_probe": 3.036,
+        "test_initialization_after_reporter_load": 0.65,
+        "test_window_including_workers_and_hooks": 6.86,
+        "test_command": 8.612,
+        "checkout_to_test_end": 103.198,
+        "job_total": 109.45
+      }
+    }
+  ],
+  "windows_install_repetitions": [
+    {
+      "run_id": 43922443054,
+      "merge_sha": "0039f85a8ee22ee5c9a13333d0be49aafa268a95",
+      "image": "win25-vs2026 20261103.298.1",
+      "with_deps": 77.532,
+      "without_deps": 13.937,
+      "install_saved": 63.595,
+      "checkout_to_test_end_with": 229.672,
+      "checkout_to_test_end_without": 243.547,
+      "selected_each": 18,
+      "passed_each": 17,
+      "common_failure": "filmstrip-real.spec.mjs: real video frames stay cached during playback, stop decoding and resume the current view"
+    },
+    {
+      "run_id": 43924348866,
+      "merge_sha": "a12ed848a82f5d7e4263927e4e4a7305dd0402ad",
+      "image": "win25-vs2026 20261103.298.1",
+      "with_deps": 114.5,
+      "without_deps": 15.516,
+      "install_saved": 98.984,
+      "checkout_to_test_end_with": 344.469,
+      "checkout_to_test_end_without": 199.625,
+      "selected_each": 18,
+      "passed_each": 18
+    },
+    {
+      "run_id": 43932631016,
+      "merge_sha": "da1267d13b73cd64cd8b408635297bd47afacd5e",
+      "image": "win25-vs2026 20261103.298.1",
+      "with_deps": 87.344,
+      "without_deps": 15.313,
+      "install_saved": 72.031,
+      "checkout_to_test_end_with": 237.766,
+      "checkout_to_test_end_without": 193.985,
+      "selected_each": 2,
+      "passed_each": 2
+    }
+  ],
+  "full_matrix": {
+    "with_deps": {
+      "run_id": 43924348866,
+      "head_sha": "70145405a004b223a4df9d3f6d94251e7664089e",
+      "windows_browser_unexpected_by_shard": [
+        5,
+        2,
+        2,
+        9
+      ],
+      "ubuntu_browser_unexpected_by_shard": [
+        8,
+        3,
+        2,
+        9
+      ],
+      "full_python_and_node_cells_passed": 4,
+      "editor": "success",
+      "windows_preview": "success"
+    },
+    "windows_without_deps": {
+      "run_id": 43929637083,
+      "head_sha": "f7613c7e55115544af954828ee1c77ee7a16c20f",
+      "windows_browser_unexpected_by_shard": [
+        7,
+        2,
+        2,
+        9
+      ],
+      "ubuntu_browser_unexpected_by_shard": [
+        9,
+        2,
+        2,
+        9
+      ],
+      "full_python_and_node_cells_passed": 4,
+      "editor": "failure: editor-text-tools row count, unrelated workflow path; root cause not proven",
+      "windows_preview": "success"
+    },
+    "both": {
+      "browser_selected_per_os": 1265,
+      "approved_skips_per_os": 5,
+      "retries": 0,
+      "shard_collection_hashes": [
+        "2e50d8fbe8f758307dd8907c7df3e6bd3173304132ae30dd53ab65950535adb4",
+        "e7f96a619ce7415e1b220600ddf4f0d3ca40b46497d6063a5c7a57efa59f05db",
+        "2fb429dc3b76931be905802bd547974c597e24ac5679e84feb1767a33a01477a",
+        "92fc19faf3a42a43a2c61404a94ec6ec385d965d970254f7e0a4e5d307100db6"
+      ],
+      "required_gate": "failed as expected on real browser failures"
+    }
+  },
+  "secondary": {
+    "node_browser_install_in_full_matrix": {
+      "with_deps_windows_seconds": 213.289,
+      "with_deps_ubuntu_seconds": 15.819,
+      "windows_without_deps_seconds": 19.495,
+      "note": "Node cells launch Chromium in two tests; removing these installs requires relocating those tests with their receipts. Cross-run time difference is not a controlled A/B."
+    },
+    "old_editor_browser_steps": {
+      "run_id": 43924348901,
+      "first_browser_seconds_approx": 205.574,
+      "tool_pages_browser_seconds": 62.87,
+      "note": "Both are Ubuntu fixed checks also discoverable by full matrix; domain/light routing and typecheck/debug/preview are not equivalent and remain in place."
+    }
+  },
+  "interpretation": [
+    "Windows Media Foundation was Available before both variants. With-deps installed it; without-deps left it Available while the tested H.264/AAC and WAV playback passed.",
+    "Three same-SHA Windows A/B runs saved 63.595, 98.984 and 72.031 seconds in the Chromium install stage. End-to-end time was variable and no stable total CI saving is claimed.",
+    "The no-deps full matrix kept identical discovered cases and approved skip count but remained red with pre-existing and additional browser failures. A 33.333 ms paused-frame difference did not recur in the two-case same-SHA A/B; its low-frequency cause remains unproven.",
+    "Linux retains with-deps. The temporary comparison workflow and scripts are not included in the development branch."
+  ]
+}
