@@ -54,7 +54,7 @@ async function withFixture(page, run) {
         }) },
       };
     });
-    await page.addScriptTag({ content: projectLoad });
+    await page.addScriptTag({ type: 'module', content: `${projectLoad}\ninitMaweProjectLoad();` });
     await page.addScriptTag({ content: handler });
     await page.click('#download-gap-removed-video');
     await expect.poll(() => page.evaluate(() => window.pickerPending)).toBe(true);
