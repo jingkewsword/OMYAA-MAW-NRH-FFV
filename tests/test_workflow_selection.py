@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -89,6 +90,17 @@ class ConcreteWorkflowTests(unittest.TestCase):
                    for arg in command if arg.startswith("tests/") and arg.endswith(".mjs")]
         self.assertEqual(len(targets), len(set(targets)))
 
+    def test_windows_common_pack_owns_the_explicit_lifecycle_ffmpeg_cases(self):
+        from scripts.test_policy import python_pack
+
+        reports = Path("reports")
+        with mock.patch.object(workflow, "os", SimpleNamespace(name="nt")):
+            lifecycle = [name for name, _, _ in workflow.commands(["lifecycle"], reports)]
+            combined = [name for name, _, _ in workflow.commands(["common", "lifecycle"], reports)]
+        self.assertIn("python-windows-ffmpeg", lifecycle)
+        self.assertNotIn("python-windows-ffmpeg", combined)
+        self.assertEqual({python_pack(case) for case in workflow.WINDOWS_FFMPEG_TESTS}, {"common"})
+
     def test_website_inputs_precede_their_browser_consumer(self):
         plan = selected()
         plan["packs"].append("website")
@@ -103,6 +115,41 @@ class ConcreteWorkflowTests(unittest.TestCase):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as result:
             workflow.main(["--stage", "release", "--shard", "1/2", "--plan-only"])
         self.assertEqual(result.exception.code, 2)
+
+    def test_saved_explicit_pack_replays_a_single_browser_shard(self):
+        previous = Path.cwd()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = selected()
+            plan.update(python_tests=[], node_tests=[], e2e_specs=[])
+            try:
+                with mock.patch.object(workflow, "ROOT", root), \
+                        mock.patch.object(workflow, "select_packs", return_value=plan), \
+                        mock.patch.object(workflow.subprocess, "check_output", return_value="a" * 40), \
+                        mock.patch.object(workflow, "run_steps", return_value={"exit_code": 0}) as run_steps, \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(workflow.main(["--stage", "merge", "--changed", "package.json",
+                        "--pack", "website", "--pack", "editor-e2e", "--plan-only", "--report-dir", "plan"]), 0)
+                    run_steps.assert_not_called()
+                    self.assertEqual(workflow.main(["--stage", "merge", "--selection-plan", "plan/plan.json",
+                        "--layer", "browser", "--shard", "2/4", "--report-dir", "shard-2"]), 0)
+                steps, output, replayed = run_steps.call_args.args
+                self.assertEqual([name for name, _, _ in steps], ["browser-regressions"])
+                self.assertIn("--shard=2/4", steps[0][1])
+                self.assertEqual(output, root / "shard-2")
+                self.assertEqual(replayed["packs"], ["website", "editor-e2e"])
+                self.assertEqual(run_steps.call_args.kwargs["metadata"]["head"], "a" * 40)
+            finally:
+                os.chdir(previous)
+
+    def test_explicit_pack_plan_requires_a_commit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "plan.json"
+            plan = selected()
+            plan["mode"] = "explicit-pack"
+            path.write_text(json.dumps(plan), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "explicit pack.*commit"):
+                workflow.read_selection(path)
 
     def test_document_checks_do_not_expand_into_release_checks(self):
         plan = selected()

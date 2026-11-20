@@ -2,8 +2,7 @@ import { expect, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { cleanupTempDir, disableOnboarding, findFreePort, generateWaveformPayload, generateWav, getMainTrack, makeTempDir, startServer } from './helpers.mjs';
-import { projectModel } from '../helpers/runtime-project.mjs';
+import { getMainTrack, cleanupTempDir, disableOnboarding, findFreePort, generateWaveformPayload, generateWav, makeTempDir, startServer } from './helpers.mjs';
 
 const cases = [
   { name: 'an unselected emoji followed by a separate terminal punctuation item', expected: '正文😀。', artifactText: '正文😀。', manuscript: '正文', previewTime: 500,
@@ -74,8 +73,7 @@ print(json.dumps({'path': str(artifact.project_path), 'srt': render_srt(read_pro
       expect(artifact.stats.removed).toBe(1);
       expect(artifact.srt).toContain(fixture.artifactText || fixture.expected);
       expect(artifact.srt).not.toContain(fixture.removed);
-      const produced = projectModel.importProject(JSON.parse(readFileSync(artifact.path, 'utf-8'))).project;
-      writeFileSync(artifact.path, JSON.stringify(produced), 'utf-8');
+      const produced = JSON.parse(readFileSync(artifact.path, 'utf-8'));
       writeFileSync(test.info().outputPath('produced-project.json'), JSON.stringify(produced, null, 2));
       expect(getMainTrack(produced).segments[0].text).toBe(fixture.rows.map(([text]) => text).join(''));
       expect(getMainTrack(produced).segments[0].disabled).not.toBe(true);

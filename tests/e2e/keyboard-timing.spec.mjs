@@ -49,6 +49,8 @@ async function loadAttachedCues(page, autoSnapAdjacentCues, adjacentBoundaryMode
       { start: 10000, end: 18000, text: 'Second', items: [{ start: 10000, end: 18000, text: 'Second' }] },
       { start: 25000, end: 30000, text: 'Third', items: [{ start: 25000, end: 30000, text: 'Third' }] },
     );
+    const main = AsrEditorUtils.getMainTrack(MaweBoot.DATA);
+    AsrEditorUtils.ensureStableSegmentIds(main.segments, main.id);
     MaweCuePanel.renderAll();
   });
 }
@@ -566,8 +568,12 @@ for (const fps of [30, 29.97]) {
         expect(after.undo).toBe(1);
         await page.evaluate(() => MaweHistory.performUndo());
         const restored = await readOffsetProject(page);
-        expect(restored.segments).toEqual(before.segments);
-        expect(restored.multi).toEqual(before.multi);
+        // Undo marks changed cues dirty for the editor session; compare the
+        // restored project data independently of this transient UI flag.
+        const withoutDirty = (value) => JSON.parse(JSON.stringify(value,
+          (key, item) => key === '_dirty' ? undefined : item));
+        expect(withoutDirty(restored.segments)).toEqual(withoutDirty(before.segments));
+        expect(withoutDirty(restored.multi)).toEqual(withoutDirty(before.multi));
       });
     }
   }
@@ -613,7 +619,10 @@ test('automatic adjacent snapping links shared-boundary dragging by default and 
   await loadAttachedCues(page, true, 'classic');
   const dragSharedBoundary = async (altKey = false) => {
     const handle = page.locator('.waveform-cue-block[data-idx="0"] .waveform-cue-handle.right').first();
-    const handleBox = await stableVisibleBoundingBox(page, handle);
+    if (altKey) await page.keyboard.down('Alt');
+    await handle.hover();
+    const handleBox = await handle.boundingBox();
+    expect(handleBox).not.toBeNull();
     const row = handle.locator('xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " waveform-row ")][1]');
     const rowBox = await row.boundingBox();
     const rowStart = Number(await row.getAttribute('data-start-ms'));
@@ -624,10 +633,9 @@ test('automatic adjacent snapping links shared-boundary dragging by default and 
     const deltaX = (rowBox.width * deltaMs) / (rowEnd - rowStart);
     const startX = handleBox.x + handleBox.width / 2;
     const y = handleBox.y + handleBox.height / 2;
-    if (altKey) await page.keyboard.down('Alt');
-    await page.mouse.move(startX, y);
     await page.mouse.down();
-    await expect(page.locator('#waveform-pane')).toHaveClass(/cue-drag-active/);
+    await expect.poll(() => page.evaluate(() => MaweCoreState.waveformEditor.drag?.kind))
+      .toBe(altKey ? 'resize-boundary-independent' : 'resize-boundary');
     await page.mouse.move(startX + deltaX, y, { steps: 5 });
     await page.mouse.up();
     if (altKey) await page.keyboard.up('Alt');
@@ -995,6 +1003,8 @@ test('selected cue group reflows fragments into the next waveform row while drag
       { start: 29000, end: 33000, text: 'D', items: [] },
       { start: 33000, end: 35000, text: 'E', items: [] },
     );
+    const main = AsrEditorUtils.getMainTrack(MaweBoot.DATA);
+    AsrEditorUtils.ensureStableSegmentIds(main.segments, main.id);
     MaweCuePanel.renderAll();
     MaweSelection.selectOnly(2);
     MaweSelection.addManyToSelection([3, 4]);
@@ -1320,13 +1330,10 @@ test('A/D adjusts a held subtitle block and a held shared boundary', async ({ pa
   ]);
 
   // 新模式（中缝联动）下，按住中缝拖动区再按 D：共享边界联动移动。
-  const boundary = page.locator('.waveform-cue-boundary').first();
-  await expect(boundary).toBeVisible();
-  const boundaryBox = await boundary.boundingBox();
-  expect(boundaryBox).not.toBeNull();
-  await page.mouse.move(boundaryBox.x + boundaryBox.width / 2, boundaryBox.y + boundaryBox.height / 2);
+  const boundary = page.locator('.waveform-cue-boundary[data-track="main"][data-left-idx="0"]');
+  await boundary.hover();
   await page.mouse.down();
-  await expect(page.locator('#waveform-pane')).toHaveClass(/cue-drag-active/);
+  await expect(page.locator('#waveform-pane')).toHaveClass(/shared-boundary-drag-active/);
   await page.keyboard.press('d');
   await page.mouse.up();
   await expect.poll(() => readTimings(page)).toEqual([

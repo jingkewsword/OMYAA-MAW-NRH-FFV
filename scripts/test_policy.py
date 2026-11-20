@@ -71,7 +71,17 @@ def allowed_platform_skip(test_id: str, reason: str) -> bool:
                 and reason == "Non-Windows paths use the external opener"
                 or identity in {"test_process_tree_posix.RealPosixGroupTests.test_exited_root_live_child_is_reclaimed",
                                 "test_process_tree_posix.RealPosixGroupTests.test_exited_root_sigterm_ignoring_child_is_reclaimed"}
-                and reason == "POSIX process groups require a POSIX host")
+                and reason == "POSIX process groups require a POSIX host"
+                or identity in {
+                    "test_runtime_pathwin.NonWindowsPassthroughTests.test_ensure_ascii_root_returns_path_unchanged_without_fs_access",
+                    "test_runtime_pathwin.NonWindowsPassthroughTests.test_prepare_install_root_is_noop_on_unix",
+                    "test_runtime_pathwin.NonWindowsPassthroughTests.test_ascii_path_failure_hint_is_empty_on_unix",
+                    "test_runtime_pathwin.NonWindowsPassthroughTests.test_win32_get_short_path_never_touches_ctypes_on_unix",
+                } and reason == "非 Windows 直通断言仅适用 POSIX 平台"
+                or identity == "test_runtimes.RuntimeAsciiPathTests.test_resolve_root_is_passthrough_on_unix"
+                and reason == "unix 直通断言：Windows 上 resolve_root 会做 ASCII 化"
+                or identity == "test_runtime_pathwin.ProbeWritableTests.test_permission_error_becomes_actionable_failure"
+                and reason == "Windows 的 chmod 不阻止目录内建文件，无法这样模拟不可写")
     return (identity in {name.removeprefix("tests.") for name in WINDOWS_FFMPEG_TESTS} and reason == "Windows PATHEXT resolution"
             or identity == "test_gui_web.GuiWebBridgeTests.test_open_output_folder_uses_startfile_on_windows"
             and reason == "os.startfile 仅 Windows 可用；os.name 补丁会让 pathlib 选择 WindowsPath"

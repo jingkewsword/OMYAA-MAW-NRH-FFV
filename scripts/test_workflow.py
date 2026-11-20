@@ -80,7 +80,7 @@ def _pack_commands(packs: list[str], report_dir: Path, *, dev: bool = False, com
         yield "build-launcher", [node, "scripts/build-launcher.mjs", "--write"], 60
         yield "typecheck", [node, "node_modules/typescript/bin/tsc", "-p", "web/tsconfig.typecheck.json"], 120
     for pack in packs:
-        if pack == "lifecycle" and os.name == "nt":
+        if pack == "lifecycle" and os.name == "nt" and "common" not in packs:
             yield "python-windows-ffmpeg", [python, "scripts/run_tests.py", "--required",
                    "--report", str(report_dir / "python-windows-ffmpeg.json"), *WINDOWS_FFMPEG_TESTS], 60
         if pack == "docs":
@@ -94,7 +94,7 @@ def _pack_commands(packs: list[str], report_dir: Path, *, dev: bool = False, com
             # Pack discovery retains unittest package/import/load_tests semantics.
             # The measured file-parallel engine remains available for full discovery.
             yield f"python-{pack}", [python, "scripts/run_tests.py", *targets, "--required",
-                   "--report", str(report_dir / f"python-{pack}.json")], 300 if pack == "long-media" else 240
+                   "--report", str(report_dir / f"python-{pack}.json")], {"common": 360, "long-media": 300}.get(pack, 240)
         if pack in {"common", "browser", "lifecycle", "tools"}:
             targets = [str(p.relative_to(ROOT)) for p in sorted((ROOT / "tests").glob("*.mjs")) if node_pack(p.name) == pack]
             if pack == "tools" and tools_scope == "checklist":
@@ -209,11 +209,14 @@ def commands(packs: list[str], report_dir: Path, *, dev: bool = False, component
 
 def read_selection(path: Path) -> dict:
     plan = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(plan, dict) or plan.get("mode") not in {"targeted", "full"}:
-        raise ValueError("selection plan requires targeted/full mode")
-    if plan.get("head"):
+    if not isinstance(plan, dict) or plan.get("mode") not in {"targeted", "full", "explicit-pack"}:
+        raise ValueError("selection plan requires targeted, full or explicit-pack mode")
+    head = plan.get("head")
+    if plan["mode"] == "explicit-pack" and not head:
+        raise ValueError("explicit pack selection plan requires a commit")
+    if head:
         current = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
-        if plan["head"] != current:
+        if head != current:
             raise ValueError("selection plan belongs to a different commit")
     for key in ("packs", "python_tests", "node_tests", "e2e_specs", "reasons"):
         if not isinstance(plan.get(key), list) or any(not isinstance(item, str) for item in plan[key]):

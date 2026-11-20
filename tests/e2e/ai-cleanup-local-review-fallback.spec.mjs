@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { projectModel } from '../helpers/runtime-project.mjs';
+import { runtimeProject } from '../helpers/runtime-project.mjs';
 import { cleanupTempDir, disableOnboarding, findFreePort, generateWaveformPayload, generateWav, makeTempDir, startServer } from './helpers.mjs';
 
 test('two consecutive failed local mappings survive actual marker UI, save and reopening', async ({ page }) => {
@@ -11,14 +11,15 @@ test('two consecutive failed local mappings survive actual marker UI, save and r
     const mediaPath = join(directory, 'synthetic.wav');
     const projectPath = join(directory, 'review.mosp');
     generateWav(mediaPath, 6);
-    const project = projectModel.importProject({ media: 'synthetic.wav', waveform: generateWaveformPayload(6000),
-      segments: [{ id: 'initial', start: 0, end: 1000, text: '初始', items: [{ text: '初始', start: 0, end: 1000 }] }] }).project;
-    writeFileSync(projectPath, JSON.stringify(project), 'utf8');
+    writeFileSync(projectPath, JSON.stringify(runtimeProject(
+      [{ id: 'initial', start: 0, end: 1000, text: '初始', items: [{ text: '初始', start: 0, end: 1000 }] }],
+      { media: 'synthetic.wav', speakers: [], waveform: generateWaveformPayload(6000) })), 'utf8');
     server = await startServer(projectPath, mediaPath, await findFreePort());
     await disableOnboarding(page);
     await page.addInitScript(() => localStorage.setItem('moy.asr.editor.settings.v1', JSON.stringify({ autoSaveProject: false })));
     await page.goto(server.url);
     await expect(page.locator('.cue[data-idx="0"] .text')).toBeVisible();
+    expect(await page.evaluate(() => MaweServerSave.requiresMigrationSaveAs)).toBe(false);
     const snapshot = await page.evaluate(() => {
       const rows = [['我', 0, 110], ['我这个', 130, 400], ['，', 410, 430], ['功能', 500, 800],
         ['嗯', 810, 930], ['很好', 1000, 1200], ['呢', 1300, 2000]];

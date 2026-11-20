@@ -1,8 +1,8 @@
 import { test, expect } from '@playwright/test';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { cleanupTempDir, disableOnboarding, findFreePort, generateProjectJson,
-  generateWav, getMainTrack, makeTempDir, startServer } from './helpers.mjs';
+import { getMainTrack, cleanupTempDir, disableOnboarding, findFreePort, generateProjectJson,
+  generateWav, makeTempDir, startServer } from './helpers.mjs';
 
 let tempDir, server, projectPath;
 test.beforeAll(async () => {
@@ -11,15 +11,13 @@ test.beforeAll(async () => {
   projectPath = join(tempDir, 'project.mosp');
   generateWav(mediaPath, 1);
   generateProjectJson(projectPath);
-  // Canonical v2 project: segments live in the main track and the extra tracks
-  // are v2 track entries, so the checkpoint/save journey matches 2.0 saves.
   const project = JSON.parse(readFileSync(projectPath, 'utf8'));
-  const main = project.tracks.find(track => track.role === 'main');
+  const main = getMainTrack(project);
   main.preserve_punctuation = true;
   main.segments.forEach((segment, index) => { segment.id = `s${index}`; segment._dirty = true; });
   project.tracks.push({ id: 'e', role: 'secondary', name: 'extension', enabled: true, _dirty: true,
-    segments: [{ id: 'e1', start: 0, end: 1000, text: 'Extension', items: [], _dirty: true }] });
-  project.tracks.push({ id: 'o', role: 'overlay', name: 'overlay', enabled: true, _dirty: true,
+    segments: [{ id: 'e1', start: 0, end: 1000, text: 'Extension', items: [], _dirty: true }] },
+  { id: 'overlay', role: 'overlay', name: 'overlay', enabled: true, _dirty: true,
     segments: [{ id: 'o1', start: 0, end: 1000, text: 'Overlay', items: [], _dirty: true }] });
   project.bilingual.active_track_id = 'e';
   writeFileSync(projectPath, JSON.stringify(project));
@@ -96,11 +94,21 @@ test('save in flight acknowledges only sent bytes; undo reaches checkpoint and f
     await route.continue();
   });
   await page.evaluate(() => {
-    MaweCommands.run('first edit', () => { const segment = AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments[0]; segment.text = 'First'; segment.items = []; segment._dirty = true; });
+    MaweCommands.run('first edit', () => {
+      const cue = AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments[0];
+      cue.text = 'First';
+      cue.items = [];
+      cue._dirty = true;
+    });
     window.sessionSave = MaweProjectSave.saveCurrentProject();
   });
   await received;
-  await page.evaluate(() => MaweCommands.run('during save', () => { const segment = AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments[1]; segment.text = 'Later'; segment.items = []; segment._dirty = true; }));
+  await page.evaluate(() => MaweCommands.run('during save', () => {
+    const cue = AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments[1];
+    cue.text = 'Later';
+    cue.items = [];
+    cue._dirty = true;
+  }));
   release();
   expect(await page.evaluate(() => window.sessionSave)).toBe(true);
   expect(await dirty(page)).toBe(true);
@@ -150,10 +158,10 @@ test('pure snapshot covers non-subtitle persistence, preserves pos and never rep
     MaweState.establishProjectCheckpoint();
     AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments[0].end = -1;
     const before = JSON.stringify(MaweBoot.DATA);
-    const snapshot = JSON.parse(MaweState.projectFingerprint());
+    const fingerprint = MaweState.projectFingerprint();
     MaweServerSave.hasUnsavedProjectChanges();
     return { changes, unchanged: before === JSON.stringify(MaweBoot.DATA),
-      pos: AsrEditorUtils.getMainTrack(snapshot).segments[0].assOverride.pos };
+      pos: AsrEditorUtils.getMainTrack(JSON.parse(fingerprint)).segments[0].assOverride.pos };
   });
   expect(result.changes).toEqual([true, true, true, true]);
   expect(result.unchanged).toBe(true);
@@ -163,26 +171,24 @@ test('pure snapshot covers non-subtitle persistence, preserves pos and never rep
 
 test('browser import distinguishes ignored legacy flags from actual timing repairs', async ({ page }) => {
   const result = await page.evaluate(async () => {
-    const v2Base = AsrEditorUtils.importProject({ segments: [
-      { id: 'imported', start: 100, end: 1000, text: 'Imported', items: [] },
-    ] }).project;
-    // A canonical v2 import with a legacy runtime flag: the flag is ignored
-    // (no dirty state, no repair report) — unlike a real timing repair below.
-    v2Base.tracks[0].segments[0]._dirty = true;
-    const loaded = await MaweMultiImport.openProjectFile(
-      new File([JSON.stringify(v2Base)], 'imported.mosp', { type: 'application/json' }));
+    const make = (end, legacy = false) => {
+      const segments = [{ id: 'imported', start: 100, end, text: 'Imported', items: [], _dirty: true }];
+      const project = legacy ? { segments } : AsrEditorUtils.makeProject(segments);
+      return new File([JSON.stringify(project)], 'imported.mosp', { type: 'application/json' });
+    };
+    const loaded = await MaweMultiImport.openProjectFile(make(1000));
     const clean = !MaweServerSave.hasUnsavedProjectChanges();
     const unhighlighted = !AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments[0]._dirty;
-    const legacyRepaired = await MaweMultiImport.openProjectFile(new File([JSON.stringify((() => {
-      const broken = structuredClone(v2Base);
-      delete broken.tracks[0].segments[0]._dirty;
-      broken.tracks[0].segments[0].end = 100;
-      return broken;
-    })())], 'repaired.mosp', { type: 'application/json' }));
-    return { loaded, clean, unhighlighted, legacyRepaired,
+    const migrationRequired = MaweServerSave.requiresMigrationSaveAs;
+    const repairedLoaded = await MaweMultiImport.openProjectFile(make(100, true));
+    return { loaded, clean, unhighlighted, migrationRequired, repairedLoaded,
       dirty: MaweServerSave.hasUnsavedProjectChanges(), end: AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments[0].end,
       report: MaweJsonRepair.lastImportReport };
   });
-  expect(result).toMatchObject({ loaded: true, clean: true, unhighlighted: true, legacyRepaired: true, dirty: true, end: 200 });
-  expect(result.report).toContainEqual({ path: '$.tracks[0].segments[0].end', kind: 'replace', before: 100, after: 200 });
+  expect(result).toMatchObject({ loaded: true, clean: true, unhighlighted: true, migrationRequired: false,
+    repairedLoaded: true, dirty: true, end: 200 });
+  expect(result.report.find(change => change.path === '$.segments')).toMatchObject({ kind: 'remove',
+    before: [{ id: 'imported', start: 100, end: 100 }] });
+  expect(result.report.find(change => change.path === '$.tracks')).toMatchObject({ kind: 'add',
+    after: [{ role: 'main', segments: [{ id: 'imported', start: 100, end: 200 }] }] });
 });
