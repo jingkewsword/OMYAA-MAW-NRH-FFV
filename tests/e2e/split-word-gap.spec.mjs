@@ -113,7 +113,7 @@ test('splitting inside a word gap keeps both cues on their own word times', asyn
   await splitAtCaretOffset(page, 5);
 
   const [left, right] = await readSplitState(page);
-  expect(left.text).toBe('本地模型');
+  expect(left.text).toBe('本地模型、');
   expect(right.text).toBe('AI校准和翻译、双语字幕、');
   // 非对称边界：左段停在自家词尾，右段起于自家首词，空隙保留在两段之间。
   expect(left.end).toBe(6480);
@@ -121,8 +121,8 @@ test('splitting inside a word gap keeps both cues on their own word times', asyn
   expect(left.start).toBe(5760);
   expect(right.end).toBe(8880);
 
-  // cleanSplitItems 会裁掉左段末 item 文本的尾部标点（型、→型），时间保留。
-  expect(left.items.at(-1)).toEqual({ text: '型', start: 6160, end: 6480 });
+  // 默认保留拆分边界标点，词时间保持不变。
+  expect(left.items.at(-1)).toEqual({ text: '型、', start: 6160, end: 6480 });
   expect(right.items[0]).toEqual({ text: 'AI', start: 6720, end: 6880 });
   for (const segment of [left, right]) {
     for (const item of segment.items) {
@@ -138,12 +138,12 @@ test('splitting between contiguous words keeps a shared boundary', async ({ page
   await splitAtCaretOffset(page, 5);
 
   const [left, right] = await readSplitState(page);
-  expect(left.text).toBe('本地模型');
+  expect(left.text).toBe('本地模型、');
   expect(right.text).toBe('AI校准');
   // 连续 item 上 prev.end === next.start：左右段仍共享同一个切点（旧行为）。
   expect(left.end).toBe(20800);
   expect(right.start).toBe(20800);
-  expect(left.items.at(-1)).toEqual({ text: '型', start: 20480, end: 20800 });
+  expect(left.items.at(-1)).toEqual({ text: '型、', start: 20480, end: 20800 });
   expect(right.items[0]).toEqual({ text: 'AI', start: 20800, end: 21120 });
 });
 
@@ -156,8 +156,9 @@ test('splitting inside a word still interpolates a single shared point', async (
   // 词内切点仍为单一共享边界：6160 + (6480-6160) * 1/2 = 6320。
   expect(left.end).toBe(6320);
   expect(right.start).toBe(6320);
-  // 「型」留在左侧，「、」文本在右侧起点被裁剪，右侧第一个有效词是 AI。
+  // 默认保留标点：词内拆分后，标点位于右侧并保留对应时间。
   expect(left.items.at(-1)).toEqual({ text: '型', start: 6160, end: 6320 });
-  expect(right.items[0]).toEqual({ text: 'AI', start: 6720, end: 6880 });
+  expect(right.items[0]).toEqual({ text: '、', start: 6320, end: 6480 });
+  expect(right.items[1]).toEqual({ text: 'AI', start: 6720, end: 6880 });
   expect(right.start).toBeLessThanOrEqual(right.items[0].start);
 });
