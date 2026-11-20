@@ -30,7 +30,6 @@ async function enableAss(page) {
   await page.goto(server.url);
   await expect.poll(() => page.evaluate(() => window.MaweCoreState?.player?.videoWidth)).toBe(640);
   await openSettingsPage(page, 'subtitle-style');
-  await openSettingsPage(page, 'subtitle-style');
   await page.locator('#ass-mode-toggle').check();
   await closeSettingsPanels(page);
 }
@@ -57,7 +56,10 @@ test('only auto-renders while the comparison window or stage overlay needs a fra
   // Cover the render timer: neither consumer is visible by default.
   await page.waitForTimeout(350);
   expect(requests).toBe(0);
+  const render = page.waitForResponse(response =>
+    response.url().endsWith('/api/ass-frame') && response.request().method() === 'POST');
   await page.locator('#ass-frame-quick-open').click();
+  expect((await render).ok()).toBe(true);
   await expect(page.locator('#ass-frame-image')).toBeVisible();
   await expect(page.locator('#ass-frame-window-status')).toHaveText('渲染完成');
   await page.locator('#ass-frame-window-close').click();
@@ -312,11 +314,11 @@ test('preview visibility and speaker labels remain independent from exports and 
   await seek(page, 1.5);
   await expect(page.locator('#ass-stage-frame')).toBeVisible();
   const options = await page.evaluate(() => {
-    AsrEditorUtils.assignSubtitleGroup(MaweBoot.DATA, AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments, [0], 'color', { name: 'yellow' });
-    window.MaweBoot.DATA.preview.subtitle.speaker_labels = {
-      mapping_enabled: true, enabled: true, separator: '：', names: { yellow: 'Host' },
-    };
-    window.MaweSettings.EDITOR_SETTINGS.exportSpeakerLabels = false;
+    const project = MaweBoot.DATA;
+    project.speakers = [{ id: 'host', name: 'Host', color: '#e2ba29' }];
+    AsrEditorUtils.getMainTrack(project).segments[0].speaker = 'host';
+    MaweSpeakerLabels.setSpeakerLabelSettings({ enabled: true, export_enabled: false, separator: '：' });
+    MaweSettings.updateEditorSettings({ exportSpeakerLabels: false });
     const labelled = window.MaweExportSrt.buildAss({ preview: true });
     const exported = window.MaweExportSrt.buildAss();
     window.MaweDom.overlayToggle.checked = false;
@@ -643,11 +645,11 @@ test('overlays the sticker layer on the actual frame window following the previe
   // 尚未绑定表情包：图层保持隐藏。
   await expect(layer).toBeHidden();
 
-  // 注入覆盖整句的表情包区间（等价分配后的 head.sticker 数据并推进区间版本）。
+  // 为主字幕分配表情包组，并推进区间版本。
   await page.evaluate(() => {
-    window.MaweBoot.DATA.segments[0].sticker = {
-      name: 'demo', filename: 'demo.png', rel: 'demo.png', start: 1000, end: 2800,
-    };
+    const project = window.MaweBoot.DATA;
+    AsrEditorUtils.assignSubtitleGroup(project, AsrEditorUtils.getMainTrack(project).segments, [0], 'sticker',
+      { name: 'demo', filename: 'demo.png', rel: 'demo.png' });
     window.MaweStickerOverlay.stickerOverlayDataVersion += 1;
     window.MaweAssFrame.syncWindowStickers();
   });

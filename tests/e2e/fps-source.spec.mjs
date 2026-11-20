@@ -58,8 +58,15 @@ for (const fps of [30, 23.976]) {
     }
     const saved = await saveReload(page);
     expect(saved.timebase.fps_source).toBe('user');
+    // Import writes the new media reference to the bound project itself.
+    const mediaSave = page.waitForResponse(response =>
+      response.url().endsWith('/api/project') && response.request().method() === 'POST');
     await page.setInputFiles('#load-media-file', media24);
     await expect.poll(() => page.evaluate(() => MaweCoreState.player.currentSrc.startsWith('blob:'))).toBe(true);
+    const response = await mediaSave;
+    expect(response.ok()).toBe(true);
+    expect((await response.json()).ok).toBe(true);
+    await expect.poll(() => page.evaluate(() => MaweServerSave.projectSaveInFlight)).toBe(false);
     await page.locator('#timeline-timebase').selectOption('frames');
     expect(await page.evaluate(() => MaweBoot.DATA.timebase)).toEqual({ unit: 'frames', fps, fps_source: 'user' });
     await page.screenshot({ path: testInfo.outputPath(`user-${fps}.png`) });
