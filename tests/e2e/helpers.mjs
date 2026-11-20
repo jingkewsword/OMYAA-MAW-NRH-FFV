@@ -330,7 +330,13 @@ export function generateProjectJson(filePath) {
 // Returns { url, proc, stop } where stop() returns a Promise that resolves
 // when the process has fully exited.
 // ---------------------------------------------------------------------------
-async function launchServerProcess(pythonArgs, port, env, { waitForStartup = false, readinessTimeoutMs = 30_000 } = {}) {
+const EDITOR_STARTUP_STATUS = 'api/startup-status';
+
+async function launchServerProcess(pythonArgs, port, env, {
+  waitForStartup = false,
+  probePath = waitForStartup ? EDITOR_STARTUP_STATUS : '',
+  readinessTimeoutMs = 30_000,
+} = {}) {
   if (!Number.isFinite(readinessTimeoutMs) || readinessTimeoutMs <= 0) throw new RangeError('readinessTimeoutMs must be finite and positive');
   const proc = spawnServerProcess(PYTHON_RUNNER.command, pythonCommandArgs(pythonArgs), {
     cwd: process.cwd(),
@@ -345,6 +351,7 @@ async function launchServerProcess(pythonArgs, port, env, { waitForStartup = fal
     await new Promise((resolve, reject) => {
       let pollTimer;
       let settled = false;
+      let lastProbeFailure = 'no completed probe';
       const output = createOutputTail();
       const finish = (callback) => {
         if (settled) return;
@@ -354,7 +361,7 @@ async function launchServerProcess(pythonArgs, port, env, { waitForStartup = fal
         callback();
       };
       const timeout = setTimeout(() => {
-        finish(() => reject(new Error(`Server did not respond within ${readinessTimeoutMs}ms. Output tail: ${output.text()}`)));
+        finish(() => reject(new Error(`Server did not respond within ${readinessTimeoutMs}ms. Last probe: ${lastProbeFailure}. Output tail: ${output.text()}`)));
       }, readinessTimeoutMs);
       proc.stdout.on('data', (chunk) => output.append(chunk));
       proc.stderr.on('data', (chunk) => output.append(chunk, 'stderr'));
@@ -367,12 +374,18 @@ async function launchServerProcess(pythonArgs, port, env, { waitForStartup = fal
 
       const poll = async () => {
         try {
-          const res = await serverRequest(url);
+          // Editor fixtures expose a lightweight status endpoint. Project
+          // fixtures also wait for the project itself to report ready below.
+          const res = await serverRequest(`${url}${probePath}`);
           if (res.ok) {
             finish(resolve);
             return;
           }
-        } catch (_) {}
+          lastProbeFailure = 'non-success HTTP response';
+        } catch (error) {
+          const cause = error?.cause?.code ? ` (${error.cause.code})` : '';
+          lastProbeFailure = `${error?.name || 'Error'}: ${error?.message || String(error)}${cause}`.slice(0, 400);
+        }
         if (!settled) pollTimer = setTimeout(poll, 500);
       };
       poll();
@@ -390,7 +403,7 @@ async function launchServerProcess(pythonArgs, port, env, { waitForStartup = fal
         throw new Error(`Server exited during project startup: ${proc.exitCode ?? proc.signalCode}`);
       }
       try {
-        const response = await serverRequest(`${url}api/startup-status`, { json: true });
+        const response = await serverRequest(`${url}${EDITOR_STARTUP_STATUS}`, { json: true });
         const result = response.body;
         if (response.ok && result.status === 'ready') break;
         if (response.ok && result.status === 'error') {
@@ -457,7 +470,7 @@ export async function startBlankServer(port, settingsRoot) {
     LOCALAPPDATA: settingsRoot,
     XDG_CONFIG_HOME: settingsRoot,
     MAW_APP_DATA_ROOT: settingsRoot,
-  }));
+  }), { probePath: EDITOR_STARTUP_STATUS });
 }
 
 export async function startAlignmentServer(projectPath, scriptPath, port) {
