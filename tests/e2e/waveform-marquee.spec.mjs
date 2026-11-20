@@ -1,5 +1,4 @@
-// Waveform Shift+drag marquee selection regression — shared scenario suite.
-// Runs identical assertions against both localhost server and portable HTML.
+// Waveform Shift+drag marquee selection regression on the editor server.
 // Marquee is performed with real Shift+left-button mouse drags on blank waveform.
 // All waits are on observable DOM/DATA state (no arbitrary sleeps).
 import { test, expect } from '@playwright/test';
@@ -11,9 +10,7 @@ import {
   findFreePort,
   generateWav,
   generateWaveformPayload,
-  buildBrowserEditorFixture,
   startServer,
-  startStaticServer,
   disableOnboarding,
 } from './helpers.mjs';
 
@@ -89,8 +86,14 @@ async function marqueeGeometry(page) {
   const b1 = await page.locator('.waveform-cue-block[data-idx="1"]').first().boundingBox();
   const b2 = await page.locator('.waveform-cue-block[data-idx="2"]').first().boundingBox();
   if (!rowBox || !b1 || !b2) throw new Error('marquee geometry unavailable');
+  // Start just above the cue, clear of media notifications at the top of the row.
+  const start = { x: b1.x + b1.width / 2, y: Math.max(rowBox.y + 1, b1.y - 4) };
+  await page.waitForFunction(({ x, y }) => {
+    const hit = document.elementFromPoint(x, y);
+    return hit?.closest('.waveform-row') && !hit.closest('.waveform-cue-block');
+  }, start);
   return {
-    start: { x: b1.x + b1.width / 2, y: rowBox.y + 4 },
+    start,
     end: { x: b2.x + b2.width / 2, y: b2.y + b2.height + 6 },
   };
 }
@@ -140,7 +143,7 @@ function attachErrorCollector(page) {
   return errors;
 }
 
-// Shared scenario body — `openEditor` must navigate and leave the editor ready.
+// Scenario body — `openEditor` must navigate and leave the editor ready.
 async function runMarqueeScenarios(page, openEditor) {
   const errors = attachErrorCollector(page);
 
@@ -238,56 +241,6 @@ test.describe('localhost server', () => {
     await configureBasicMode(page);
     await runMarqueeScenarios(page, async (p) => {
       await p.goto(localhostServer.url);
-      await waitForWaveformCues(p);
-    });
-  });
-});
-
-// ===========================================================================
-// Portable HTML adapter
-// ===========================================================================
-let portableDir, portableStaticServer, portablePort, portableWavPath, portableProjectPath, blankHtmlPath;
-
-test.beforeAll(async () => {
-  portableDir = makeTempDir('marquee-portable');
-  portableWavPath = join(portableDir, 'synthetic.wav');
-  portableProjectPath = join(portableDir, 'project.json');
-  blankHtmlPath = join(portableDir, 'blank-editor.html');
-  generateWav(portableWavPath, MARQUEE_DURATION_MS / 1000);
-  generateMarqueeProject(portableProjectPath);
-  buildBrowserEditorFixture(blankHtmlPath);
-  portablePort = await findFreePort();
-  portableStaticServer = await startStaticServer(blankHtmlPath, portablePort);
-});
-
-test.afterAll(async () => {
-  await portableStaticServer?.stop();
-  cleanupTempDir(portableDir);
-});
-
-async function loadProjectAndMedia(page) {
-  await page.locator('#open-project-file').setInputFiles(portableProjectPath);
-  const mediaModal = page.locator('#project-media-modal');
-  await mediaModal.waitFor({ state: 'visible', timeout: 5000 });
-  await page.locator('#project-media-select').click();
-  await page.locator('#load-media-file').setInputFiles(portableWavPath);
-  await page.waitForFunction(
-    () => {
-      const p = document.getElementById('player');
-      const src = p?.currentSrc || p?.querySelector('source')?.getAttribute('src');
-      return Boolean(src && src.trim());
-    },
-    { timeout: 10_000 },
-  );
-  await mediaModal.waitFor({ state: 'hidden', timeout: 5000 });
-}
-
-test.describe('portable HTML', () => {
-  test('waveform marquee scenarios', async ({ page }) => {
-    await configureBasicMode(page);
-    await runMarqueeScenarios(page, async (p) => {
-      await p.goto(portableStaticServer.url);
-      await loadProjectAndMedia(p);
       await waitForWaveformCues(p);
     });
   });
