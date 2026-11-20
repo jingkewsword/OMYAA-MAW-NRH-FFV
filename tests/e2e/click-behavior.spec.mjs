@@ -345,7 +345,7 @@ test('waveform cue double-click activates its subtitle editor while blank double
   await cue.scrollIntoViewIfNeeded();
   await cue.dblclick();
   await expect(page.locator('#cue-panel-target')).toHaveText('主字幕');
-  await expect(page.locator('#cue-panel-text')).toBeFocused();
+  await expect(page.locator('.waveform-cue-quick-edit textarea')).toBeFocused();
   expect(await page.locator('#player').evaluate((element) => element.paused)).toBe(true);
 
   const blankRow = page.locator('.waveform-row:not(:has(.waveform-cue-block))').first();
@@ -572,16 +572,16 @@ test('list context menu leads with text-position split', async ({ page }) => {
   await expect(page.locator('#ctxmenu .item').first()).toContainText('按文字位置拆分');
 });
 
-test('Enter focuses the current subtitle editor after list or waveform clicks', async ({ page }) => {
+test('Enter opens the current subtitle quick editor after list or waveform clicks', async ({ page }) => {
   await page.goto(server.url);
   const cue = page.locator('.cue[data-idx="0"]');
-  const panelText = page.locator('#cue-panel-text');
+  const quickText = page.locator('.waveform-cue-quick-edit textarea');
   await cue.click();
   // 最后点击在列表：即使鼠标已移出列表，Enter 仍聚焦当前字幕编辑区
   await page.locator('#media-controls').hover();
   await page.keyboard.press('Enter');
   await expect(cue).not.toHaveClass(/editing/);
-  await expect(panelText).toBeFocused();
+  await expect(quickText).toBeFocused();
   await page.keyboard.press('Escape');
 
   // 最后点击在波形背景：仍聚焦当前字幕编辑区
@@ -591,7 +591,7 @@ test('Enter focuses the current subtitle editor after list or waveform clicks', 
   await page.evaluate(() => MaweSelection.selectOnly(0));
   await page.keyboard.press('Enter');
   await expect(cue).not.toHaveClass(/editing/);
-  await expect(panelText).toBeFocused();
+  await expect(quickText).toBeFocused();
 });
 
 test('B splits at the pointer inside the cue list and at the playhead outside it', async ({ page }) => {
@@ -650,9 +650,9 @@ test('B splits at the pointer inside the cue list and at the playhead outside it
   await expect(page.locator('.cue-split-flash.is-active')).toHaveCount(0);
 });
 
-test('B split keeps the source cue visually anchored while lazy rows relayout', async ({ page }) => {
+async function showLazyMainCueList(page) {
   await page.goto(server.url);
-  // 关闭「点击自动滚动」，只观察拆分重绘和 content-visibility 行高回填。
+  // Keep click scrolling disabled so the test observes only the edit relayout.
   await page.evaluate(() => {
     const saved = JSON.parse(localStorage.getItem('moy.asr.editor.settings.v1') || '{}');
     saved.cueListAutoScrollOnClick = false;
@@ -669,6 +669,7 @@ test('B split keeps the source cue visually anchored while lazy rows relayout', 
     AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments = Array.from({ length: 90 }, (_, index) => {
       const start = index * 2000;
       return {
+        id: `lazy-cue-${index}`,
         start,
         end: start + 1800,
         text: `${samples[index % samples.length]} ${index}`,
@@ -678,7 +679,10 @@ test('B split keeps the source cue visually anchored while lazy rows relayout', 
     MaweCuePanel.renderAll();
     MaweCueListAnchor.scrollCueToCenter(document.querySelector('.cue[data-idx="56"]'));
   });
+}
 
+test('B split keeps the source cue visually anchored while lazy rows relayout', async ({ page }) => {
+  await showLazyMainCueList(page);
   // 只等目标附近的可见行稳定，不能滚遍整张列表预热，否则会掩盖重绘后的
   // 懒布局回填问题。
   await expect.poll(async () => {
@@ -771,33 +775,7 @@ test('B split keeps the source cue visually anchored while lazy rows relayout', 
 });
 
 test('C merge keeps the source cue visually anchored while lazy rows relayout', async ({ page }) => {
-  await page.goto(server.url);
-  // 关闭点击后的自动滚动，只观察 C 合并本身的列表重绘和懒布局回填。
-  await page.evaluate(() => {
-    const saved = JSON.parse(localStorage.getItem('moy.asr.editor.settings.v1') || '{}');
-    saved.cueListAutoScrollOnClick = false;
-    localStorage.setItem('moy.asr.editor.settings.v1', JSON.stringify(saved));
-  });
-  await page.reload();
-  await page.evaluate(() => {
-    const samples = [
-      '短字幕',
-      '这是一条会在字幕列表里自动换行的真实长度字幕',
-      '较长字幕用于模拟采访视频中的自然断句和不同的列表行高',
-      '中等长度字幕内容',
-    ];
-    AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments = Array.from({ length: 90 }, (_, index) => {
-      const start = index * 2000;
-      return {
-        start,
-        end: start + 1800,
-        text: `${samples[index % samples.length]} ${index}`,
-        items: [],
-      };
-    });
-    MaweCuePanel.renderAll();
-    MaweCueListAnchor.scrollCueToCenter(document.querySelector('.cue[data-idx="56"]'));
-  });
+  await showLazyMainCueList(page);
 
   const first = page.locator('.cue[data-idx="56"]');
   const second = page.locator('.cue[data-idx="57"]');
