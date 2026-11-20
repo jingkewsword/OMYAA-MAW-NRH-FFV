@@ -1,9 +1,13 @@
 import { expect, test } from '@playwright/test';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
-import { disableOnboarding } from './helpers.mjs';
+import { cleanupTempDir, disableOnboarding, findFreePort, makeTempDir, startBlankServer } from './helpers.mjs';
 
-const blankEditorUrl = pathToFileURL(join(process.cwd(), 'blank-editor.html')).href;
+let directory, server;
+test.beforeAll(async () => {
+  directory = makeTempDir('media-controls-layout');
+  server = await startBlankServer(await findFreePort(), join(directory, 'settings'));
+});
+test.afterAll(async () => { await server?.stop(); cleanupTempDir(directory); });
 
 test.beforeEach(async ({ page }) => {
   await disableOnboarding(page);
@@ -12,14 +16,14 @@ test.beforeEach(async ({ page }) => {
 test('media controls stay on one line and keep fullscreen visible at narrow widths', async ({ page }) => {
   for (const width of [620, 500, 340]) {
     await page.setViewportSize({ width, height: 800 });
-    await page.goto(blankEditorUrl);
+    await page.goto(server.url);
 
     const metrics = await page.locator('#media-controls').evaluate((controls) => {
       const fullscreen = document.getElementById('media-fullscreen');
       const seek = document.getElementById('media-seek');
       const stepBack = document.getElementById('media-step-back');
       const stepForward = document.getElementById('media-step-forward');
-      const volume = document.querySelector('.media-volume-control');
+      const volume = document.getElementById('audio-processing-toggle');
       const controlsRect = controls.getBoundingClientRect();
       const fullscreenRect = fullscreen.getBoundingClientRect();
       return {
@@ -32,7 +36,11 @@ test('media controls stay on one line and keep fullscreen visible at narrow widt
         seekWidth: seek.getBoundingClientRect().width,
         stepBackDisplay: getComputedStyle(stepBack).display,
         stepForwardDisplay: getComputedStyle(stepForward).display,
-        volumeDisplay: getComputedStyle(volume).display,
+        volumeVisible: getComputedStyle(volume).display !== 'none'
+          && volume.getBoundingClientRect().width > 0 && volume.getBoundingClientRect().height > 0,
+        volumeInLine: volume.getBoundingClientRect().top >= controlsRect.top - 1
+          && volume.getBoundingClientRect().bottom <= controlsRect.bottom + 1
+          && volume.getBoundingClientRect().right <= controlsRect.right + 1,
       };
     });
 
@@ -42,7 +50,10 @@ test('media controls stay on one line and keep fullscreen visible at narrow widt
     expect(metrics.seekWidth).toBeGreaterThan(0);
     expect(metrics.stepBackDisplay).toBe('none');
     expect(metrics.stepForwardDisplay).toBe('none');
-    if (width <= 500) expect(metrics.volumeDisplay).toBe('none');
-    if (width === 620) expect(metrics.volumeDisplay).not.toBe('none');
+    expect(metrics.volumeVisible).toBe(true);
+    expect(metrics.volumeInLine).toBe(true);
+    await page.locator('#audio-processing-toggle').click();
+    await expect(page.locator('#audio-processing-panel')).toBeVisible();
+    await expect(page.locator('#media-volume')).toBeVisible();
   }
 });
