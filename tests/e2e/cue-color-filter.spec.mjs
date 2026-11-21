@@ -18,8 +18,6 @@ let tempDir;
 let server;
 let projectPath;
 
-const FIRST_SEGMENT_END_MS = 58000;
-
 test.beforeAll(async () => {
   tempDir = makeTempDir('colorfilter');
   const mediaPath = join(tempDir, 'synthetic.wav');
@@ -36,6 +34,8 @@ test.afterAll(async () => {
 
 test.beforeEach(async ({ page }) => {
   await disableOnboarding(page);
+  // Keep palette interactions from writing to the shared on-disk fixture.
+  await page.addInitScript(() => localStorage.setItem('moy.asr.editor.settings.v1', JSON.stringify({ autoSaveProject: false })));
 });
 
 async function waitEditorReady(page) {
@@ -44,12 +44,11 @@ async function waitEditorReady(page) {
 }
 
 async function paintFirstSegmentRed(page) {
-  await page.evaluate((segmentEndMs) => {
-    const segment = AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments[0];
+  await page.evaluate(() => {
     AsrEditorUtils.assignSubtitleGroup(MaweBoot.DATA, AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments, [0], 'color',
       { name: 'red', value: '#e74c3c' });
     MaweCuePanel.renderAll({ waveform: 'none' });
-  }, FIRST_SEGMENT_END_MS);
+  });
 }
 
 test('recoloring part of an existing color group keeps the remaining head valid', async ({ page }) => {
@@ -109,7 +108,7 @@ test('detaches a cue from a color group while keeping its color and limiting the
   const detachItem = page.locator('#ctxmenu .item > span')
     .filter({ hasText: /^移出颜色组$/u }).locator('..');
 
-  // 中间 cue 脱离：前半组保留原 head，后半组提升为新 head。
+  // 中间 cue 独立保留颜色，两侧成员继续留在原组。
   await setColorGroup();
   await page.locator('.cue[data-idx="1"]').click({ button: 'right' });
   await expect(detachItem).toBeVisible();
@@ -118,9 +117,9 @@ test('detaches a cue from a color group while keeping its color and limiting the
     color: color ? { name: color.name, start: color.start, end: color.end } : null,
     color_ref: color_ref ? { ...color_ref } : null,
   })))).toEqual([
-    { color: { name: 'yellow', start: 0, end: 1000 }, color_ref: null },
+    { color: { name: 'yellow', start: 0, end: 3000 }, color_ref: null },
     { color: { name: 'yellow', start: 1000, end: 2000 }, color_ref: null },
-    { color: { name: 'yellow', start: 2000, end: 3000 }, color_ref: null },
+    { color: null, color_ref: { name: 'yellow', headIdx: 0 } },
   ]);
   await page.locator('.cue[data-idx="1"]').click({ button: 'right' });
   await expect(detachItem).toHaveCount(0);
@@ -150,14 +149,20 @@ test('color filter button appears only for projects with colored subtitles', asy
   await expect(page.locator('#color-filter-btn')).toBeVisible();
 });
 
-test('colored subtitle indexes remain readable against tinted rows', async ({ page }) => {
+test('colored subtitle indexes use the theme secondary text color', async ({ page }) => {
   await waitEditorReady(page);
   await paintFirstSegmentRed(page);
 
-  await expect(page.locator('.cue[data-idx="0"] .index')).toHaveCSS(
-    'color',
-    'rgb(168, 177, 192)',
-  );
+  const index = page.locator('.cue[data-idx="0"].has-color .index');
+  const secondaryColor = await index.evaluate(element => {
+    const sample = document.createElement('span');
+    sample.style.color = 'var(--text-secondary, transparent)';
+    element.parentElement.append(sample);
+    const color = getComputedStyle(sample).color;
+    sample.remove();
+    return color;
+  });
+  await expect(index).toHaveCSS('color', secondaryColor);
 });
 
 test('clicking a row shows only that color; checkboxes multi-select; clear restores all', async ({ page }) => {
@@ -377,17 +382,19 @@ test('split trim chips and extra input drive shared trim behavior and persist', 
   const reset = page.locator('#split-trim-symbols-reset');
   await expect(reset).toBeHidden();
   const extra = page.locator('#split-trim-extra-symbols');
-  // 文本框默认预填半角逗号句点（延续历史行为）。
-  await expect(extra).toHaveValue(', .');
+  // 默认保留边界标点，用户可按需启用修剪。
+  await expect(extra).toHaveValue('');
 
-  // 关闭全角逗号 chip 后，拆分修剪不再移除右缘全角逗号（半角逗号仍由文本框生效）。
   const fullwidthCommaChip = grid.locator('label[data-title="全角逗号"]');
   const fullwidthComma = grid.locator('input[value="，"]');
-  await expect(fullwidthComma).toBeChecked();
-  await fullwidthCommaChip.click();
   await expect(fullwidthComma).not.toBeChecked();
-  await expect(reset).toBeVisible();
   expect(await page.evaluate(() => window.AsrEditorUtils.applySplitEdgeTrim('世界，', 'end'))).toBe('世界，');
+  await fullwidthCommaChip.click();
+  await expect(fullwidthComma).toBeChecked();
+  await expect(reset).toBeVisible();
+  expect(await page.evaluate(() => window.AsrEditorUtils.applySplitEdgeTrim('世界，', 'end'))).toBe('世界');
+  await extra.fill(', .');
+  await extra.press('Tab');
   expect(await page.evaluate(() => window.AsrEditorUtils.applySplitEdgeTrim('ok,', 'end'))).toBe('ok');
 
   // 文本框输入即时生效：改为省略号后存储与修剪行为同时体现。
@@ -396,17 +403,20 @@ test('split trim chips and extra input drive shared trim behavior and persist', 
   await expect(extra).toHaveValue('…');
   const storedSymbols = await page.evaluate(() =>
     JSON.parse(localStorage.getItem('moy.asr.editor.settings.v1')).splitTrimSymbols);
-  expect(storedSymbols).not.toContain('，');
-  expect(storedSymbols).toContain('。');
+  expect(storedSymbols).toContain('，');
   expect(storedSymbols).toContain('…');
+  expect(storedSymbols).not.toContain(',');
+  expect(storedSymbols).not.toContain('.');
   expect(await page.evaluate(() => window.AsrEditorUtils.applySplitEdgeTrim('真的……', 'end'))).toBe('真的');
 
-  // 恢复默认符号：chip 全部回勾、文本框回到预填值、行为还原。
+  // 恢复默认后，标点重新保留。
   await reset.click();
-  await expect(fullwidthComma).toBeChecked();
-  await expect(extra).toHaveValue(', .');
+  await expect(fullwidthComma).not.toBeChecked();
+  await expect(extra).toHaveValue('');
   await expect(reset).toBeHidden();
-  expect(await page.evaluate(() => window.AsrEditorUtils.applySplitEdgeTrim('世界，', 'end'))).toBe('世界');
+  expect(await page.evaluate(() => window.AsrEditorUtils.applySplitEdgeTrim('世界，', 'end'))).toBe('世界，');
+  await expect.poll(() => page.evaluate(() =>
+    JSON.parse(localStorage.getItem('moy.asr.editor.settings.v1')).splitTrimSymbols ?? [])).toEqual([]);
 });
 
 test('merge join hint shows detected main type; clicking pins and syncs the multi-subtitle dropdown', async ({ page }) => {
