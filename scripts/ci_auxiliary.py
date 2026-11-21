@@ -46,6 +46,8 @@ def write_plan(plan: dict, output: Path) -> None:
         with Path(output).open('a', encoding='utf-8', newline='\n') as stream:
             for name, value in values.items():
                 stream.write(f'aux_{name}={str(value).lower()}\n')
+            browser_shards = '[1,2]' if len(plan['e2e_specs']) > 1 else '[1]'
+            stream.write(f'aux_browser_shards={browser_shards}\n')
             stream.write('aux_error=false\n')
     message = 'Targeted auxiliary scope: ' + ', '.join(
         f'{layer}={len(plan[field])}' for layer, field in
