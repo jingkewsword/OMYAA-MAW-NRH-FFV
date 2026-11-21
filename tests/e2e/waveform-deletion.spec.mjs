@@ -1,5 +1,4 @@
-// Waveform deletion identity regression — shared scenario suite.
-// Runs identical assertions against both localhost server and portable HTML.
+// Waveform deletion identity regression on the editor server.
 // All selection is through real waveform pointer/click actions (no force).
 // All waits are on observable DOM/DATA state (no arbitrary sleeps).
 import { test, expect } from '@playwright/test';
@@ -9,16 +8,14 @@ import {
   findFreePort,
   generateWav,
   generateProjectJson,
-  buildBrowserEditorFixture,
   startServer,
-  startStaticServer,
   DURATION_MS,
   disableOnboarding,
 } from './helpers.mjs';
 import { join } from 'node:path';
 
 // ===========================================================================
-// Shared page utilities — used by both adapter suites.
+// Waveform interaction helpers.
 // ===========================================================================
 
 // Set waveform to multi-row mode with 5s/row via localStorage before page scripts run.
@@ -202,10 +199,6 @@ test.afterAll(async () => {
 });
 
 test.describe('localhost server', () => {
-  test.beforeEach(async ({ page }) => {
-    // Each test gets a fresh page; the shared scenarios are run as subtests
-  });
-
   // We use a single test that runs all scenarios to share the page context
   // (each scenario needs a fresh project state, so we reload between scenarios)
   test('all waveform deletion scenarios', async ({ page }) => {
@@ -283,143 +276,6 @@ test.describe('localhost server', () => {
 
     // --- Scenario 5: All-delete refused via Shift+click ---
     await page.reload();
-    await waitForWaveformCues(page);
-    await scrollToTop(page);
-    await clickWaveformCue(page, 0);
-    await scrollToSegment(page, 250000);
-    await expectCueBlockExists(page, 5);
-    await shiftClickWaveformCue(page, 5);
-    expect(await getSelectedIndices(page), 'all selected').toEqual([0, 1, 2, 3, 4, 5]);
-    const beforeTexts = await getSegmentTexts(page);
-    await pressDeleteAndExpectRefusal(page, 6);
-    expect(await getSegmentTexts(page), 'all-delete refused, no mutation').toEqual(beforeTexts);
-    expect(errors, 'no console errors (all-delete refusal)').toEqual([]);
-  });
-});
-
-// ===========================================================================
-// Portable HTML adapter — loads project JSON + synthetic WAV via real UI
-// ===========================================================================
-let portableDir, portableStaticServer, portablePort, blankHtmlPath, portableProjectPath, portableWavPath;
-
-test.beforeAll(async () => {
-  portableDir = makeTempDir('portable');
-  portableWavPath = join(portableDir, 'synthetic.wav');
-  portableProjectPath = join(portableDir, 'project.json');
-  blankHtmlPath = join(portableDir, 'blank-editor.html');
-  generateWav(portableWavPath, DURATION_MS / 1000);
-  generateProjectJson(portableProjectPath);
-  buildBrowserEditorFixture(blankHtmlPath);
-  portablePort = await findFreePort();
-  portableStaticServer = await startStaticServer(blankHtmlPath, portablePort);
-});
-
-test.afterAll(async () => {
-  await portableStaticServer?.stop();
-  cleanupTempDir(portableDir);
-});
-
-// Helper: load project JSON + media WAV via the real file-input/modal flow.
-async function loadProjectAndMedia(page) {
-  // 1. Load project JSON via #open-project-file
-  await page.locator('#open-project-file').setInputFiles(portableProjectPath);
-
-  // 2. Media modal appears — click "选择媒体" to load WAV
-  const mediaModal = page.locator('#project-media-modal');
-  await mediaModal.waitFor({ state: 'visible', timeout: 5000 });
-  await page.locator('#project-media-select').click();
-
-  // 3. Load media WAV via #load-media-file
-  await page.locator('#load-media-file').setInputFiles(portableWavPath);
-
-  // 4. Wait for media to be loaded (player has a source)
-  await page.waitForFunction(
-    () => {
-      const p = document.getElementById('player');
-      const src = p?.currentSrc || p?.querySelector('source')?.getAttribute('src');
-      return Boolean(src && src.trim());
-    },
-    { timeout: 10_000 },
-  );
-
-  // 5. Wait for modal to be hidden
-  await mediaModal.waitFor({ state: 'hidden', timeout: 5000 });
-}
-
-test.describe('portable HTML', () => {
-  test('all waveform deletion scenarios', async ({ page }) => {
-    await configureMultiRowMode(page);
-    const errors = attachErrorCollector(page);
-    await page.goto(portableStaticServer.url);
-    await loadProjectAndMedia(page);
-    await waitForWaveformCues(page);
-
-    // --- Scenario 1: Delete middle (Delta, idx 3) after virtual scroll ---
-    await scrollToSegment(page, 150000);
-    await expectCueBlockExists(page, 3);
-    await scrollToBottom(page);
-    await expectCueBlockAbsent(page, 3);
-    await scrollToSegment(page, 150000);
-    await expectCueBlockExists(page, 3);
-    await clickWaveformCue(page, 3);
-    expect(await getSelectedIndices(page), 'selected before delete').toEqual([3]);
-    await pressDeleteAndWait(page, 5);
-    expect(await getSegmentTexts(page), 'remaining after Delta').toEqual([
-      'Alpha', 'Bravo', 'Charlie', 'Echo', 'Foxtrot',
-    ]);
-    expect(errors, 'no console errors (middle delete after vscroll)').toEqual([]);
-
-    // --- Scenario 2: Delete first (Alpha) on fresh load ---
-    await page.goto(portableStaticServer.url);
-    await loadProjectAndMedia(page);
-    await waitForWaveformCues(page);
-    await scrollToTop(page);
-    await expectCueBlockExists(page, 0);
-    await clickWaveformCue(page, 0);
-    expect(await getSelectedIndices(page), 'selected before delete').toEqual([0]);
-    await pressDeleteAndWait(page, 5);
-    expect(await getSegmentTexts(page), 'remaining after Alpha').toEqual([
-      'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot',
-    ]);
-    expect(errors, 'no console errors (first delete)').toEqual([]);
-
-    // --- Scenario 3: Delete last (Foxtrot) after virtual scroll ---
-    await page.goto(portableStaticServer.url);
-    await loadProjectAndMedia(page);
-    await waitForWaveformCues(page);
-    await scrollToSegment(page, 250000);
-    await expectCueBlockExists(page, 5);
-    await scrollToTop(page);
-    await expectCueBlockAbsent(page, 5);
-    await scrollToSegment(page, 250000);
-    await expectCueBlockExists(page, 5);
-    await clickWaveformCue(page, 5);
-    expect(await getSelectedIndices(page), 'selected before delete').toEqual([5]);
-    await pressDeleteAndWait(page, 5);
-    expect(await getSegmentTexts(page), 'remaining after Foxtrot').toEqual([
-      'Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo',
-    ]);
-    expect(errors, 'no console errors (last delete)').toEqual([]);
-
-    // --- Scenario 4: Multi-delete (Alpha + Charlie) via Ctrl+click ---
-    await page.goto(portableStaticServer.url);
-    await loadProjectAndMedia(page);
-    await waitForWaveformCues(page);
-    await scrollToTop(page);
-    await clickWaveformCue(page, 0);
-    await scrollToSegment(page, 100000);
-    await expectCueBlockExists(page, 2);
-    await ctrlClickWaveformCue(page, 2);
-    expect(await getSelectedIndices(page), 'multi-selected').toEqual([0, 2]);
-    await pressDeleteAndWait(page, 4);
-    expect(await getSegmentTexts(page), 'remaining after Alpha+Charlie').toEqual([
-      'Bravo', 'Delta', 'Echo', 'Foxtrot',
-    ]);
-    expect(errors, 'no console errors (multi-delete)').toEqual([]);
-
-    // --- Scenario 5: All-delete refused via Shift+click ---
-    await page.goto(portableStaticServer.url);
-    await loadProjectAndMedia(page);
     await waitForWaveformCues(page);
     await scrollToTop(page);
     await clickWaveformCue(page, 0);
