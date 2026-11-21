@@ -29,19 +29,20 @@ test.afterAll(async () => {
   cleanupTempDir(tempDir);
 });
 
-test('subtitle toolbar label returns after the pane is widened', async ({ page }, testInfo) => {
+test('subtitle toolbar keeps its label on one line while the window is resized', async ({ page }, testInfo) => {
   await page.goto(server.url);
   const toolbar = page.locator('.cues-container > .cue-list-toolbar');
   const label = toolbar.locator(':scope > .layout-toolbar-label');
-  await toolbar.evaluate(element => { element.style.width = '180px'; });
-  await expect(label).toBeHidden();
-  await toolbar.evaluate(element => { element.style.width = '1100px'; });
-  await expect(label).toBeVisible();
-  await toolbar.evaluate(element => { element.style.width = '180px'; });
-  await expect(label).toBeHidden();
-  await toolbar.evaluate(element => { element.style.width = '1100px'; });
-  await expect(label).toBeVisible();
-  await toolbar.screenshot({ path: testInfo.outputPath('subtitle-label-restored.png') });
+  const settings = toolbar.locator('#cue-list-settings-toggle');
+  for (const width of [480, 1100, 480, 1100]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(label).toBeVisible();
+    await expect(label).toBeInViewport();
+    await expect(label).toHaveCSS('white-space', 'nowrap');
+    await expect(settings).toBeVisible();
+    await expect(settings).toBeInViewport({ ratio: 1 });
+  }
+  await toolbar.screenshot({ path: testInfo.outputPath('subtitle-toolbar-resized.png') });
 });
 
 test('checked sticker column stays collapsed until the project contains a sticker', async ({ page }) => {
