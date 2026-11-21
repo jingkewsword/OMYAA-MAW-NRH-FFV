@@ -55,7 +55,7 @@ export function initMaweJsonRepair() {
   // One pure projection drives both save and content checkpoints. Preserve all
   // source metadata and extension fields on every role; runtime views stay out.
   function projectSnapshot() {
-    const out = window.AsrEditorUtils.snapshotProjectContent(MaweBoot.DATA);
+    const out = { ...MaweBoot.DATA };
     // rows is the legacy default view; omit it so switching the timed-text
     // view back to rows leaves the project byte-identical (and not dirty),
     // exactly like the pre-v2 serializer did.
@@ -88,7 +88,9 @@ export function initMaweJsonRepair() {
       preview.extension_subtitle = { ...out.preview?.extension_subtitle, ...MaweAppearance.getStoredExtensionSubtitleAppearance() };
     }
     out.preview = preview;
-    return MaweState.persistenceSnapshot(out);
+    // Copy after applying the editor fields, so the tracks and word timings
+    // only need to be copied once and runtime settings remain detached.
+    return window.AsrEditorUtils.snapshotProjectContent(out);
   }
 
   function captureCleanupNormalization(segments, project) {

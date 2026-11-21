@@ -41,6 +41,7 @@ test('the real editor projection preserves every track and extension field witho
     track._dirty = true; track.segments[0]._dirty = true;
   }
   data._dirty = true; data.waveform = { cache: true };
+  data.tracks[2].segments[0].items = null;
   const source = plain(data);
   const utils = { window: {}, TextDecoder };
   loadEditorModule(utils, 'shared/editor-utils.js');
@@ -59,7 +60,9 @@ test('the real editor projection preserves every track and extension field witho
   run(context, 'boot/editor-runtime');
   run(context, 'state/editor-state');
   run(context, 'io/editor-json-repair');
-  const snapshot = plain(context.MaweJsonRepair.projectSnapshot());
+  context.MaweState.setSnapshotReader(context.MaweJsonRepair.projectSnapshot);
+  const savedProjection = context.MaweJsonRepair.projectSnapshot();
+  const snapshot = plain(savedProjection);
   assert.deepEqual(plain(data), source);
   assert.equal(snapshot._dirty, undefined);
   assert.equal(snapshot.waveform, undefined);
@@ -74,9 +77,20 @@ test('the real editor projection preserves every track and extension field witho
   }
   assert.deepEqual(snapshot.tracks[1].custom_overlay, []);
   assert.equal(snapshot.tracks[2].custom_track, false);
+  assert.equal(Object.hasOwn(snapshot.tracks[2].segments[0], 'items'), false);
   assert.deepEqual(snapshot.bindings, data.bindings);
   assert.deepEqual(snapshot.subtitle_groups, data.subtitle_groups);
   assert.deepEqual(tracks.validateTracksProject(snapshot).errors, []);
+
+  const state = context.MaweState;
+  assert.equal(state.projectFingerprint(), state.projectFingerprint(snapshot));
+  state.noteSavedSegments(state.projectFingerprint(snapshot));
+  const cue = data.tracks[2].segments[0];
+  cue.text += '编辑';
+  assert.equal(state.hasProjectChanges(), true);
+  assert.equal(savedProjection.tracks[2].segments[0].text, snapshot.tracks[2].segments[0].text);
+  cue.text = snapshot.tracks[2].segments[0].text;
+  assert.equal(state.hasProjectChanges(), false);
 });
 
 test('importing project subtitles keeps cue metadata and a detached source group table', async () => {

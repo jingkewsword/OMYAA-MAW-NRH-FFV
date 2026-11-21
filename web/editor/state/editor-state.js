@@ -203,7 +203,7 @@ export function createEditorState(project) {
 
   // The serializer owns persistence. Readers must not repair or mutate the project.
   // The fallback also keeps this state owner usable before editor wiring is ready.
-  let snapshotReader = () => project;
+  let snapshotReader = () => persistenceSnapshot(project);
   let projectEpoch = 0;
   let importNeedsSave = false;
   function persistenceSnapshot(value) {
@@ -219,9 +219,12 @@ export function createEditorState(project) {
     for (const track of out.tracks || []) clear(track);
     return out;
   }
-  function projectFingerprint(value = snapshotReader()) {
+  function projectFingerprint(value) {
+    // The reader already returns clean saved content. Explicit inputs may
+    // still contain runtime fields, so normalize those before comparing.
+    const snapshot = value === undefined ? snapshotReader() : persistenceSnapshot(value);
     // Sort object keys, not arrays: reordered extension keys are not an edit.
-    return JSON.stringify(persistenceSnapshot(value), (_key, item) =>
+    return JSON.stringify(snapshot, (_key, item) =>
       item && typeof item === 'object' && !Array.isArray(item)
         ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item);
   }
