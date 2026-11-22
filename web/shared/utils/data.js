@@ -131,9 +131,14 @@ export function createUtilsModule(dependencies) {
   }
 
 
-  function cloneJsonValue(value) {
+  function cloneJsonValue(value, onSerialized = undefined) {
     if (value === undefined) return undefined;
-    try { return JSON.parse(JSON.stringify(value)); } catch (_) { return null; }
+    try {
+      const json = JSON.stringify(value);
+      const clone = JSON.parse(json);
+      if (typeof onSerialized === 'function') onSerialized(json);
+      return clone;
+    } catch (_) { return null; }
   }
 
   return Object.freeze({ PROJECT_SCHEMA, normalizeAssOverride, clampInteger, cloneJsonValue, countTextUnits, detectSubtitleSplitMode, effectiveColorName, ensureStableSegmentIds, stableId, supportsProjectSchema, uniqueStableSegmentId });

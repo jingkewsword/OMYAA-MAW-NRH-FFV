@@ -73,8 +73,14 @@ export function initMaweCommands() {
   window.MaweCommands = createEditorCommands({
     capture(label, options) {
       MaweCueListAnchor.rememberCueListMutation();
-      const record = MaweHistory.captureSegmentsRecord(label, options);
-      return { record, fingerprint: fingerprint(record.segs), selection: MaweHistory.snapshotEditorSelection() };
+      let snapshotJson;
+      const record = MaweHistory.captureSegmentsRecord(label, {
+        ...options, onSerialized(json) { snapshotJson = json; },
+      });
+      // 没有脏标记键时，深拷贝使用的 JSON 已与指纹相同。
+      const baseline = snapshotJson !== undefined && !snapshotJson.includes('"_dirty":')
+        ? snapshotJson : fingerprint(record.segs);
+      return { record, fingerprint: baseline, selection: record.view ?? MaweHistory.snapshotEditorSelection() };
     },
     hasChanges: snapshot => {
       window.AsrEditorUtils.refreshSubtitleGroupViews(MaweState.project);

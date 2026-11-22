@@ -150,8 +150,10 @@ MaweDom.cuePanelText?.addEventListener('keydown', (event) => {
 MaweDom.cuePanelText?.addEventListener('input', () => {
   const target = MaweCuePanel.getCurrentCuePanelTarget();
   if (!target) return;
-  const cueListAnchor = MaweCueListAnchor.captureCueListRenderAnchor();
-  MaweCuePanel.ensureCuePanelUndo(target.kind === 'extension' ? '编辑副字幕' : '编辑当前字幕');
+  const beganUndo = MaweCuePanel.ensureCuePanelUndo(target.kind === 'extension' ? '编辑副字幕' : '编辑当前字幕');
+  // 首键使用命令钩子执行后捕获的列表位置。已有撤销事务时按当前视口捕获。
+  const cueListAnchor = beganUndo ? MaweCueListAnchor.cueListScroll.mutationAnchor
+    : MaweCueListAnchor.captureCueListRenderAnchor();
   const seg = target.segment;
   MaweProjectSave.batchDirtyIndicatorUpdates(() => {
     seg.text = MaweDom.cuePanelText.value.replace(/\r\n?/g, '\n');

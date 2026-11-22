@@ -2,14 +2,16 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import test from 'node:test';
+import { createUtilsModule as createHistory } from '../web/shared/utils/history.js';
+import { createUtilsModule as createData } from '../web/shared/utils/data.js';
+import { runtimeProject } from './helpers/runtime-project.mjs';
 
 // 命令与视图更新已转 ESM 模块（register/resolve 注册表退役）：
 // 源码在 vm 里还原为可执行文本后直调工厂。
 const COMMANDS_SRC = readFileSync(new URL('../web/editor/state/editor-commands.js', import.meta.url), 'utf8');
 const VIEWS_SRC = readFileSync(new URL('../web/editor/state/editor-view-updates.js', import.meta.url), 'utf8');
 
-function moduleExports(source, names) {
-  const context = { window: {} };
+function moduleExports(source, names, context = { window: {} }) {
   const stripped = source
     .replace(/^import .*$/gm, '')
     .replace(/^export function/gm, 'function');
@@ -18,6 +20,68 @@ function moduleExports(source, names) {
 
 const { createEditorCommands } = moduleExports(COMMANDS_SRC, 'createEditorCommands');
 const { createViewUpdates } = moduleExports(VIEWS_SRC, 'createViewUpdates');
+
+function runtimeCommandFixture(project) {
+  const { cloneJsonValue } = createData({});
+  const history = createHistory({ cloneJsonValue });
+  const published = [];
+  const view = { selection: { refs: [{ track_id: 'main', segment_id: 'one' }] } };
+  let captures = 0;
+  let restored;
+  const context = {
+    window: { AsrEditorUtils: { refreshSubtitleGroupViews() {} } },
+    MaweState: { project, changes: {}, markProjectDirty() {} },
+    MaweCueListAnchor: { rememberCueListMutation() {} },
+    MaweViewUpdates: { invalidate() {} },
+    MaweHistory: {
+      snapshotEditorSelection() { captures++; return view; },
+      captureSegmentsRecord(label, { captureView = true, onSerialized }) {
+        const segments = history.buildSegmentsHistorySnapshot(project, onSerialized);
+        return history.buildHistoryRecord('segments', label, segments,
+          captureView ? this.snapshotEditorSelection() : null, { clone: false });
+      },
+      commitRecord(record) { published.push(record); },
+      applyHistoryRecord(record) { restored = record; },
+    },
+  };
+  moduleExports(COMMANDS_SRC, 'initMaweCommands', context).initMaweCommands();
+  return { commands: context.window.MaweCommands, published, view, selectionCaptures: () => captures,
+    restored: () => restored };
+}
+
+test('command fingerprints ignore nested dirty flags and preserve metadata key order', () => {
+  const segment = { id: 'one', text: 'same', vendor: { alpha: 1, beta: 2 } };
+  const fixture = runtimeCommandFixture(runtimeProject([segment]));
+  const pristine = fixture.commands.begin('edit');
+  assert.equal(fixture.selectionCaptures(), 1);
+  segment.vendor._dirty = true;
+  assert.equal(pristine.commit(), false);
+  assert.equal(Object.hasOwn(segment.vendor, '_dirty'), false);
+  assert.equal(fixture.published.length, 0);
+
+  segment.vendor._dirty = { old: true };
+  const dirty = fixture.commands.begin('same edit');
+  segment.vendor._dirty = { later: true };
+  assert.equal(dirty.commit(), false);
+  assert.deepEqual(segment.vendor._dirty, { old: true });
+  const reordered = fixture.commands.begin('reorder metadata');
+  delete segment.vendor.alpha;
+  segment.vendor.alpha = 1;
+  assert.equal(reordered.commit(), true);
+  assert.deepEqual(Object.keys(fixture.published[0].segs.tracks[0].segments[0].vendor), ['alpha', 'beta', '_dirty']);
+});
+
+test('a command without a saved view still captures selection for cancellation', () => {
+  const segment = { id: 'one', text: 'before' };
+  const fixture = runtimeCommandFixture(runtimeProject([segment]));
+  const command = fixture.commands.begin('move', { captureView: false });
+  assert.equal(fixture.selectionCaptures(), 1);
+  segment.text = 'after';
+  assert.equal(command.cancel(), true);
+  assert.equal(fixture.restored().view, fixture.view);
+  assert.equal(fixture.restored().segs.tracks[0].segments[0].text, 'before');
+  assert.equal(fixture.published.length, 0);
+});
 
 function commandFixture() {
   const data = { value: 0, dirty: false };

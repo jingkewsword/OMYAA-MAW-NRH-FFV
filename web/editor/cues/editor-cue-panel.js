@@ -293,7 +293,9 @@ export function initMaweCuePanel() {
         label || (target?.kind === 'extension' ? '编辑副字幕' : '编辑当前字幕'),
       );
       MaweCuePanelState.cuePanelUndoPushed = true;
+      return true;
     }
+    return false;
   }
 
 

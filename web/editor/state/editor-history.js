@@ -31,10 +31,10 @@ export function initMaweHistory() {
 
 
 
-  function snapshotSegments() {
+  function snapshotSegments(onSerialized) {
   // 会话高亮可随快照保留，但不参与保存检查点；多字幕数据与主轨
   // 必须处于同一条记录中，绑定/成对删除/联动拆分才能原子撤销。
-  return window.AsrEditorUtils.buildSegmentsHistorySnapshot(MaweBoot.DATA);
+  return window.AsrEditorUtils.buildSegmentsHistorySnapshot(MaweBoot.DATA, onSerialized);
 }
 
 
@@ -51,11 +51,11 @@ export function initMaweHistory() {
 }
 
 
-  function captureSegmentsRecord(label, { captureView = true } = {}) {
+  function captureSegmentsRecord(label, { captureView = true, onSerialized } = {}) {
     // snapshotSegments() 已是深克隆；让 buildHistoryRecord 跳过二次克隆，
     // 长工程下省掉一遍 O(工程体积) 的 JSON 序列化。
     const record = window.AsrEditorUtils.buildHistoryRecord(
-      'segments', label, snapshotSegments(), captureView ? snapshotEditorSelection() : null,
+      'segments', label, snapshotSegments(onSerialized), captureView ? snapshotEditorSelection() : null,
       { clone: false },
     );
     record.projectChanges = { projectImportDirty: MaweState.changes.projectImportDirty };

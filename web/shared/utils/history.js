@@ -8,11 +8,11 @@ export function createUtilsModule(dependencies) {
     segments: '编辑', layout: '调整工作区', gap_remove: '空隙移除', preview: '预览', markers: '标记',
   });
 
-  function buildSegmentsHistorySnapshot(project) {
+  function buildSegmentsHistorySnapshot(project, onSerialized = undefined) {
     return cloneJsonValue({ tracks: project.tracks, bindings: project.bindings,
       bilingual: project.bilingual, subtitle_groups: project.subtitle_groups,
       ...Object.fromEntries(['styles', 'speakers', 'annotation_mode', 'palette_size', 'speaker_shortcuts']
-        .filter(field => Object.hasOwn(project, field)).map(field => [field, project[field]])) });
+        .filter(field => Object.hasOwn(project, field)).map(field => [field, project[field]])) }, onSerialized);
   }
 
   function restoreSegmentsHistorySnapshot(project, snapshot) {
