@@ -26,10 +26,12 @@ class AuxiliaryPlanTests(CompactContainerAssertions, TestCase):
         self.assertTrue(aux_film['preparation']['real_media'])
 
     def test_browser_shards_follow_selected_file_count(self):
-        specs = ['tests/e2e/filmstrip-real.spec.mjs', 'tests/e2e/settings-structure.spec.mjs']
+        specs = ['tests/e2e/cue-list-count-layout.spec.mjs', 'tests/e2e/multi-subtitle.spec.mjs',
+                 'tests/e2e/settings-structure.spec.mjs']
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            for count, expected in ((0, [1]), (1, [1]), (2, [1, 2])):
+            for count, groups in ((0, []), (1, [specs[:1]]), (2, [specs[:2]]),
+                                  (3, [specs[::2], specs[1::2]])):
                 with self.subTest(count=count):
                     output = root / f'outputs-{count}'
                     plan = {'python_tests': ['tests/test_asr_presets.py'], 'node_tests': [],
@@ -38,7 +40,9 @@ class AuxiliaryPlanTests(CompactContainerAssertions, TestCase):
                     with mock.patch.dict(os.environ, env):
                         ci_auxiliary.write_plan(plan, root / 'plan.json')
                     values = dict(line.split('=', 1) for line in output.read_text(encoding='utf-8').splitlines())
-                    self.assertEqual(json.loads(values['aux_browser_shards']), expected)
+                    self.assertEqual(json.loads(values['aux_browser_shards']), [1, 2] if count == 3 else [1])
+                    written = json.loads((root / 'plan.json').read_text(encoding='utf-8'))
+                    self.assertEqual(written['browser_file_groups'], groups)
                     self.assertEqual(values['aux_python'], 'true')
                     self.assertEqual(values['aux_browser'], str(bool(count)).lower())
 
