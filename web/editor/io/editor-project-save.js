@@ -91,11 +91,12 @@ return true;
 // 工程「未保存」指示：右上角文件名前加琥珀色圆点（CSS ::before，不进 textContent，
 // 不影响点击复制），title 提示有未保存的修改。#json-name 在 i18n 的属性跳过名单里，
 // title 需在此处按当前语言手动翻译；调用方为 markProjectDirty 事件回调（即时）、
-// 保存完成的直接刷新与 O(1) 轮询兜底（见文件底部），回调内部按当前工程状态整体重算。
-function updateProjectDirtyIndicator() {
+// 保存完成的直接刷新与 O(1) 轮询兜底（见文件底部）。
+function updateProjectDirtyIndicator({ editedMainCueIndex } = {}) {
 const jsonEl = document.getElementById('json-name');
 if (!jsonEl || jsonEl.classList.contains('empty')) return;
-const dirty = Boolean(MaweServerSave?.hasUnsavedProjectChanges?.());
+const changedText = Number.isInteger(editedMainCueIndex) && MaweState.savedMainCueTextDiffers(editedMainCueIndex);
+const dirty = changedText || Boolean(MaweServerSave?.hasUnsavedProjectChanges?.());
 jsonEl.classList.toggle('dirty', dirty);
 const filename = String(jsonEl.textContent || '').trim();
 if (!filename) return;
@@ -106,7 +107,7 @@ jsonEl.title = window.MAWE_I18N?.translateText?.(text) || text;
   // 面板的一次同步编辑可多次标记脏态。保留各次 epoch 和其它订阅者，
   // 只让未保存指示器在编辑结束时按最终内容比较一次。
   let batchDirtyIndicator = false;
-  function batchDirtyIndicatorUpdates(edit) {
+  function batchDirtyIndicatorUpdates(edit, options) {
     if (batchDirtyIndicator) return edit();
     const epochBeforeEdit = MaweState.getProjectDirtyEpoch();
     batchDirtyIndicator = true;
@@ -115,7 +116,7 @@ jsonEl.title = window.MAWE_I18N?.translateText?.(text) || text;
     } finally {
       batchDirtyIndicator = false;
       if (MaweState.getProjectDirtyEpoch() !== epochBeforeEdit) {
-        try { updateProjectDirtyIndicator(); } catch (error) {
+        try { updateProjectDirtyIndicator(options); } catch (error) {
           window.console?.error?.('editor-project-save: project dirty indicator failed', error);
         }
       }

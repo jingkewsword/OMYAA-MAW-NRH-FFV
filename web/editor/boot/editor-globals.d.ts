@@ -326,6 +326,7 @@ interface MaweStateApi {
   restoreSessionHighlights(): void;
   segmentsFingerprint(): string;
   noteSavedSegments(fingerprint?: string): void;
+  savedMainCueTextDiffers(index: number): boolean;
   markSaved(): void;
   reconcileSegmentsDirty(): void;
   markProjectDirty(): void;

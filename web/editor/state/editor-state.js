@@ -228,9 +228,42 @@ export function createEditorState(project) {
       item && typeof item === 'object' && !Array.isArray(item)
         ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item);
   }
-  function setSnapshotReader(reader) { snapshotReader = reader; }
   let savedProject = projectFingerprint();
-  function noteSavedSegments(fingerprint = projectFingerprint()) { savedProject = fingerprint; }
+  // undefined 表示当前保存检查点尚未建索引，null 表示没有可用证据。
+  let savedMainCueTexts = null;
+  function setSnapshotReader(reader) {
+    snapshotReader = reader;
+    savedMainCueTexts = null;
+  }
+  function noteSavedSegments(fingerprint = projectFingerprint()) {
+    savedProject = fingerprint;
+    savedMainCueTexts = undefined;
+  }
+  function indexSavedMainCueTexts() {
+    let snapshot;
+    try { snapshot = JSON.parse(savedProject); } catch { return null; }
+    if (!Array.isArray(snapshot?.tracks)) return null;
+    const mainTracks = snapshot.tracks.filter(track => track?.role === 'main');
+    if (mainTracks.length !== 1) return null;
+    const { id: trackId, segments } = mainTracks[0];
+    if (typeof trackId !== 'string' || !trackId || !Array.isArray(segments)) return null;
+    const texts = new Map();
+    for (const cue of segments) {
+      if (typeof cue?.id !== 'string' || !cue.id || typeof cue.text !== 'string' || texts.has(cue.id)) return null;
+      texts.set(cue.id, cue.text);
+    }
+    return { trackId, texts };
+  }
+  function savedMainCueTextDiffers(index) {
+    const track = trackForKind('main');
+    const cue = track?.segments?.[index];
+    if (typeof cue?.text !== 'string') return false;
+    if (savedMainCueTexts === undefined) savedMainCueTexts = indexSavedMainCueTexts();
+    if (!savedMainCueTexts || savedMainCueTexts.trackId !== track.id) return false;
+    const savedText = savedMainCueTexts.texts.get(cue.id);
+    // 工程快照原样保留主字幕文字。相同或未知时仍需检查工程的其它内容。
+    return typeof savedText === 'string' && savedText !== cue.text;
+  }
   function subtitleTracks() {
     return (project.tracks || []).map(track => [track.id, track]);
   }
@@ -264,6 +297,7 @@ export function createEditorState(project) {
   }
   function beginProjectSession() {
     projectEpoch += 1;
+    savedMainCueTexts = null;
     selection.reset();
     panelRef = null; panelKind = 'main'; panelTrackId = null;
     sessionHighlights.clear();
@@ -309,7 +343,7 @@ export function createEditorState(project) {
     projectFingerprint, persistenceSnapshot, setSnapshotReader, beginProjectSession, establishProjectCheckpoint,
     rememberSessionHighlights, restoreSessionHighlights, get projectEpoch() { return projectEpoch; },
     // Kept as narrow compatibility aliases for existing command/history callers.
-    segmentsFingerprint: projectFingerprint, noteSavedSegments, markSaved, reconcileSegmentsDirty,
+    segmentsFingerprint: projectFingerprint, noteSavedSegments, savedMainCueTextDiffers, markSaved, reconcileSegmentsDirty,
     beginProjectLoad, finishProjectLoad, observeProjectLoad, waitForProjectLoad,
     get projectLoadGeneration() { return projectLoadGeneration; },
     get projectLoadPending() { return projectLoadPending; },

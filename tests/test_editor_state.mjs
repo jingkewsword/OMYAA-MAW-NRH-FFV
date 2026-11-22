@@ -230,6 +230,51 @@ test('actual import repairs remain unsaved until successful save acknowledgement
   assert.equal(state.hasProjectChanges(), false);
 });
 
+test('saved main text evidence follows the acknowledged checkpoint, even for empty text', () => {
+  const project = runtimeProject([{ id: 'one', text: '' }, { id: 'other', text: 'second' }]);
+  const main = projectModel.getMainTrack(project);
+  main.id = 'custom-main';
+  const cue = main.segments[0];
+  const state = loadState(project);
+  state.establishProjectCheckpoint();
+  cue.text = 'sent';
+  assert.equal(state.savedMainCueTextDiffers(0), true);
+  const sent = state.projectFingerprint();
+  cue.text = 'later';
+  state.noteSavedSegments(sent);
+  assert.equal(state.savedMainCueTextDiffers(0), true);
+  cue.text = 'sent';
+  project.custom_project = { changed: true };
+  assert.equal(state.savedMainCueTextDiffers(0), false);
+  assert.equal(state.hasProjectChanges(), true);
+  main.segments.reverse();
+  main.segments[0].text = 'edited second';
+  assert.equal(state.savedMainCueTextDiffers(0), true);
+  main.id = 'replacement-main';
+  assert.equal(state.savedMainCueTextDiffers(0), false);
+});
+
+test('the main text evidence stays unavailable until a valid new checkpoint is established', () => {
+  const project = runtimeProject([{ id: 'one', text: 'original' }]);
+  const cue = projectModel.getMainTrack(project).segments[0];
+  const state = loadState(project);
+  state.establishProjectCheckpoint();
+  cue.text = 'changed';
+  assert.equal(state.savedMainCueTextDiffers(0), true);
+  state.beginProjectSession();
+  assert.equal(state.savedMainCueTextDiffers(0), false);
+  state.establishProjectCheckpoint();
+  cue.text = 'changed again';
+  assert.equal(state.savedMainCueTextDiffers(0), true);
+  state.setSnapshotReader(() => state.persistenceSnapshot(project));
+  assert.equal(state.savedMainCueTextDiffers(0), false);
+  state.noteSavedSegments('invalid checkpoint');
+  assert.equal(state.savedMainCueTextDiffers(0), false);
+  state.establishProjectCheckpoint();
+  cue.text = 'changed once more';
+  assert.equal(state.savedMainCueTextDiffers(0), true);
+});
+
 test('markProjectDirty increments the epoch and notifies registered listeners exactly once', () => {
   const state = loadState();
   assert.equal(state.getProjectDirtyEpoch(), 0);

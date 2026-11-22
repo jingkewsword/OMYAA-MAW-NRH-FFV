@@ -174,6 +174,63 @@ test('cue panel dirty indicator follows revert, Escape and an in-flight autosave
   expect(await indicatorDirty()).toBe(true);
 });
 
+test('main cue typing uses the acknowledged text while other project changes still count', async ({ page }) => {
+  const project = structuredClone(canonical);
+  Object.assign(project.tracks[0].segments[0], {
+    text: '甲乙', items: [{ start: 1000, end: 2000, text: '甲乙' }],
+  });
+  expect(await install(page, project)).toBe(true);
+  await page.locator('.multi-dual-cue[data-main-idx="0"] .multi-cue-column.main').click();
+  const field = page.locator('#cue-panel-text');
+  const name = page.locator('#json-name');
+  const dirty = () => name.evaluate(element => element.classList.contains('dirty'));
+  const blocksDeparture = () => page.evaluate(() => !window.dispatchEvent(new Event('beforeunload', { cancelable: true })));
+
+  await field.fill('甲丙');
+  expect(await dirty()).toBe(true);
+  expect(await blocksDeparture()).toBe(true);
+  await page.evaluate(() => { MaweBoot.DATA.custom_project.test_change = true; });
+  await field.fill('甲乙');
+  expect(await dirty()).toBe(true);
+  await page.evaluate(() => { delete MaweBoot.DATA.custom_project.test_change; });
+  await field.fill('甲丙');
+  await field.fill('甲乙');
+  expect(await dirty()).toBe(false);
+  await field.press('Tab');
+  expect(await page.evaluate(() => MaweHistory.editorHistory.undoLength())).toBe(0);
+
+  await page.evaluate(() => {
+    MaweServerSave.projectFileHandle = {
+      name: 'main-cue-ack.mosp',
+      async createWritable() {
+        return { async write(blob) {
+          window.__mainCueSent = JSON.parse(await blob.text());
+          await new Promise(resolve => { window.__mainCueAck = resolve; });
+        }, async close() {} };
+      },
+    };
+    MaweSettings.updateEditorSettings({ autoSaveProject: true });
+  });
+  await field.fill('甲丙');
+  await page.waitForFunction(() => typeof window.__mainCueAck === 'function');
+  const sent = await page.evaluate(() => AsrEditorUtils.getMainTrack(window.__mainCueSent).segments[0]);
+  expect([sent.text, sent.items[0].text]).toEqual(['甲丙', '甲丙']);
+  await expect(field).toBeFocused();
+  await page.evaluate(() => MaweSettings.updateEditorSettings({ autoSaveProject: false }));
+  await field.fill('甲丁');
+  await page.evaluate(() => window.__mainCueAck());
+  await expect(name).toHaveText('main-cue-ack.mosp');
+  expect(await dirty()).toBe(true);
+  await field.fill('甲丙');
+  expect(await dirty()).toBe(false);
+  expect(await blocksDeparture()).toBe(false);
+  await field.fill('甲丁');
+  await field.press('Tab');
+  await page.locator('#undo-btn').click();
+  await expect(field).toHaveValue('甲丙');
+  expect(await dirty()).toBe(false);
+});
+
 test('preview extension fields survive edits, undo, redo, save and reopen', async ({ page }) => {
   const project = structuredClone(canonical);
   const vendor = { flag: false, zero: 0, empty: [], nested: { keep: 'custom' } };

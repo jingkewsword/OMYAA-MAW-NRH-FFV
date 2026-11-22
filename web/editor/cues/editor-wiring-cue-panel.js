@@ -147,7 +147,7 @@ MaweDom.cuePanelText?.addEventListener('input', () => {
     seg._dirty = true;
     MaweState.markProjectDirty();
     if (target.kind === 'extension') MaweMultiSubtitleCore.markMultiSubtitleDirty();
-  });
+  }, { editedMainCueIndex: target.kind === 'main' ? target.index : undefined });
   MaweViewUpdates.invalidate({ save: true });
   const splitMode = target.kind === 'extension'
     ? MaweMultiSubtitleCore.getExtensionSubtitleSplitMode(target.track, seg)
