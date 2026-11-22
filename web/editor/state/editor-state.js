@@ -229,6 +229,8 @@ export function createEditorState(project) {
         ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item);
   }
   let savedProject = projectFingerprint();
+  let savedProjectWithStyleDefaults = savedProject;
+  const projectStyleDefaults = [];
   // undefined 表示当前保存检查点尚未建索引，null 表示没有可用证据。
   let savedMainCueTexts = null;
   function setSnapshotReader(reader) {
@@ -236,8 +238,19 @@ export function createEditorState(project) {
     savedMainCueTexts = null;
   }
   function noteSavedSegments(fingerprint = projectFingerprint()) {
-    savedProject = fingerprint;
+    savedProject = savedProjectWithStyleDefaults = fingerprint;
     savedMainCueTexts = undefined;
+    if (!projectStyleDefaults.length) return;
+    const snapshot = JSON.parse(fingerprint);
+    let defaultsAdded = false;
+    for (const applyDefaults of projectStyleDefaults) defaultsAdded = applyDefaults(snapshot) || defaultsAdded;
+    if (defaultsAdded) savedProjectWithStyleDefaults = projectFingerprint(snapshot);
+  }
+  // Style-library loading can finish after the initial checkpoint or during a
+  // save. Only missing styles on those tracks belong to the initial defaults.
+  function includeProjectStyleDefaults(applyDefaults) {
+    projectStyleDefaults.push(applyDefaults);
+    noteSavedSegments(savedProject);
   }
   function indexSavedMainCueTexts() {
     let snapshot;
@@ -298,6 +311,8 @@ export function createEditorState(project) {
   function beginProjectSession() {
     projectEpoch += 1;
     savedMainCueTexts = null;
+    projectStyleDefaults.length = 0;
+    savedProjectWithStyleDefaults = savedProject;
     selection.reset();
     panelRef = null; panelKind = 'main'; panelTrackId = null;
     sessionHighlights.clear();
@@ -312,7 +327,9 @@ export function createEditorState(project) {
     changes.projectImportDirty = hasProjectChanges();
   }
   function hasProjectChanges(pendingText = false) {
-    return Boolean(pendingText || importNeedsSave || projectFingerprint() !== savedProject);
+    if (pendingText || importNeedsSave) return true;
+    const current = projectFingerprint();
+    return current !== savedProject && current !== savedProjectWithStyleDefaults;
   }
 
   let projectLoadGeneration = 0;
@@ -341,6 +358,7 @@ export function createEditorState(project) {
 
   return Object.freeze({ project, selection, preferences, runtime, panel, editing, changes, hasProjectChanges,
     projectFingerprint, persistenceSnapshot, setSnapshotReader, beginProjectSession, establishProjectCheckpoint,
+    includeProjectStyleDefaults,
     rememberSessionHighlights, restoreSessionHighlights, get projectEpoch() { return projectEpoch; },
     // Kept as narrow compatibility aliases for existing command/history callers.
     segmentsFingerprint: projectFingerprint, noteSavedSegments, savedMainCueTextDiffers, markSaved, reconcileSegmentsDirty,
