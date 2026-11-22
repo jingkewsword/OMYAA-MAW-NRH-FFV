@@ -299,6 +299,8 @@ export function initMaweCuePanel() {
 
 
   function commitCuePanelEdit() {
+    // During a held waveform gesture the panel still has pre-drag timing.
+    if (MaweCoreState.waveformEditor?.drag) return false;
     return MaweProjectSave.batchDirtyIndicatorUpdates(applyCuePanelEdit);
   }
 
