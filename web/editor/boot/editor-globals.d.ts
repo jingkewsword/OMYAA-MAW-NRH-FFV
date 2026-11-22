@@ -339,7 +339,7 @@ interface Window {
 }
 
 interface ViewInvalidation {
-  cueList?: boolean; waveform?: 'none' | 'overlay' | 'full'; preserveCueListScroll?: boolean; cueListAnchor?: unknown;
+  cueList?: boolean | 'panelText'; waveform?: 'none' | 'overlay' | 'full'; preserveCueListScroll?: boolean; cueListAnchor?: unknown;
   cueListPatch?: { mainIndices?: readonly number[]; overlayIndices?: readonly number[] } | null;
   preview?: false | 'update' | 'refresh'; save?: boolean;
 }

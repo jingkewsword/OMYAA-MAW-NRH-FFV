@@ -1,4 +1,4 @@
-import { applyCharCount, buildCueEl, buildDualCueEl, buildExtensionCueEl, fmtShort, speakerName } from './editor-cue-elements.js';
+import { applyCharCount, buildCueEl, buildDualCueEl, buildExtensionCueEl, fmtShort, setTextHtml, speakerName } from './editor-cue-elements.js';
 import { captureCueListRenderAnchor, invalidateCueListVisualAnchorRestore, restoreCueListRenderAnchor, scrollCueToCenter } from './editor-cue-list-anchor.js';
 import { startEdit } from './editor-inline-edit.js';
 import { openExtensionSplitModal, splitAtCursor, splitTimeForTextOffset } from './editor-split-core.js';
@@ -23,15 +23,7 @@ export function initMaweCuePanel() {
 
 
   // === 渲染 ===
-  function renderAll({ waveform = 'overlay', preserveCueListScroll = true, cueListAnchor } = {}) {
-    MaweMultiSubtitleCore.invalidateSegmentPresentation?.();
-  // 其它编辑入口仍以毫秒修改工程对象；在重绘前把它们投影回当前时间基准，
-  // 保证帧模式下保存的数据和下一次帧操作保持一致。
-  syncProjectTimebaseAndBindingOffsets(MaweBoot.DATA, { preferFrames: false });
-  cueListAnchor = preserveCueListScroll
-    ? cueListAnchor || MaweCueListAnchor.cueListScroll.mutationAnchor || captureCueListRenderAnchor() : null;
-  invalidateCueListVisualAnchorRestore();
-  MaweStickerOverlay.stickerOverlayDataVersion += 1;
+  function rebuildCueList() {
   // cues-container 同时是字幕列表和停靠模块；重绘列表时不要把布局编辑模式
   // 下的顶部拖拽栏一起清掉。
   const dockHandle = MaweCoreState.container.querySelector(':scope > .dock-handle');
@@ -79,8 +71,19 @@ export function initMaweCuePanel() {
   MaweDom.totalCountEl.textContent = multiVisible && displayMode === 'extension'
     ? (MaweMultiSubtitleCore.getActiveExtensionTrack()?.segments.length || 0) + overlaySegments.length
     : window.AsrEditorUtils.getMainTrack(MaweBoot.DATA).segments.length + overlaySegments.length;
-  // buildCueEl/buildMultiCueColumn 已经按当前搜索词生成了文本；这里仅
-  // 计算隐藏状态和数量，避免长工程 renderAll() 再逐行重建一遍文本节点。
+}
+
+  function renderAll({ waveform = 'overlay', preserveCueListScroll = true, cueListAnchor, panelTextOnly = false } = {}) {
+  MaweMultiSubtitleCore.invalidateSegmentPresentation?.();
+  // 其它编辑入口仍以毫秒修改工程对象；在重绘前把它们投影回当前时间基准，
+  // 保证帧模式下保存的数据和下一次帧操作保持一致。
+  syncProjectTimebaseAndBindingOffsets(MaweBoot.DATA, { preferFrames: false });
+  cueListAnchor = preserveCueListScroll
+    ? cueListAnchor || MaweCueListAnchor.cueListScroll.mutationAnchor || captureCueListRenderAnchor() : null;
+  invalidateCueListVisualAnchorRestore();
+  MaweStickerOverlay.stickerOverlayDataVersion += 1;
+  if (!panelTextOnly || !patchPanelTextRow(getCurrentCuePanelTarget())) rebuildCueList();
+  // 文字节点已按搜索词更新；这里只重算隐藏状态及数量，处理文字改为空或跨越过滤阈值。
   applySearch(MaweDom.searchEl.value, { refreshText: false, preserveCueListScroll: false });
   // 重新应用选中样式（idx 不变时还有效；如果有 splice 改了顺序就先 clearSelection）。
   // 长工程下逐选中项 querySelector 是 O(选中数 × 行数)，全选几千条会冻结
@@ -196,6 +199,33 @@ export function initMaweCuePanel() {
       + `.cue[data-idx="${target.index}"] > .text`,
   );
 }
+
+  function patchPanelTextRow(target) {
+    const textEl = getCuePanelTextElement(target);
+    const row = textEl?.closest('.cue');
+    if (!row || row.parentElement !== MaweCoreState.container || textEl.isContentEditable
+        || MaweCoreState.waveformEditor?.drag) return false;
+
+    const { segment, kind } = target;
+    const extension = kind === 'extension';
+    // 下标相同的行可能来自另一条副轨或已经被替换的字幕。
+    const renderedId = extension ? row.dataset.extId : row.dataset.mainId;
+    if (renderedId !== segment.id || (extension && row.dataset.trackId !== target.trackId)) return false;
+
+    const splitMode = extension ? MaweMultiSubtitleCore.getExtensionSubtitleSplitMode(target.track, segment)
+      : MaweMultiSubtitleCore.getMainSubtitleSplitMode(segment);
+    setTextHtml(textEl, segment.text, MaweDom.searchEl.value.trim());
+    applyCharCount(row.querySelector('.charcount'), segment.text, splitMode);
+    textEl.closest('.multi-cue-column, .cue')?.classList.toggle('dirty', Boolean(segment._dirty));
+
+    // 提交主/副字幕时 markMultiSubtitleDirty 会将全部副字幕标为已修改。
+    if (kind !== 'overlay') {
+      MaweCoreState.container.querySelectorAll(
+        ':scope > .multi-extension-cue:not(.dirty), :scope > .multi-dual-cue > .extension[data-ext-idx]:not(.dirty)',
+      ).forEach(element => element.classList.add('dirty'));
+    }
+    return true;
+  }
 
 
 
@@ -359,7 +389,8 @@ export function initMaweCuePanel() {
   MaweViewUpdates.invalidate({ save: true });
   MaweCuePanelState.resetCuePanelEditState();
   if (document.activeElement === MaweDom.cuePanelText) captureCuePanelTextEditSnapshot();
-  MaweViewUpdates.invalidate({ cueList: true, preview: 'update' });
+  const cueList = hasMatchingTextSnapshot && !timingRequested ? 'panelText' : true;
+  MaweViewUpdates.invalidate({ cueList, preview: 'update' });
   return true;
 }
 

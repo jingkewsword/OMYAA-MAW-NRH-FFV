@@ -9,7 +9,10 @@ export function createViewUpdates(dependencies) {
   function invalidate({ cueList = false, waveform = 'overlay', preserveCueListScroll = true,
     cueListAnchor, cueListPatch = null, preview = false, save = false } = {}) {
     if (cueListPatch) MaweCuePanel.patchCueRows(cueListPatch);
-    else if (cueList) renderCues({ waveform, preserveCueListScroll, cueListAnchor });
+    else if (cueList) renderCues({
+      waveform, preserveCueListScroll, cueListAnchor,
+      ...(cueList === 'panelText' ? { panelTextOnly: true } : {}),
+    });
     if (preview === 'update') updatePreview();
     else if (preview === 'refresh') refreshPreview();
     if (save) scheduleSave();

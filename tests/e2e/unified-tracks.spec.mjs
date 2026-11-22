@@ -31,6 +31,94 @@ async function projectContent(page) {
   return page.evaluate(() => JSON.parse(MaweJsonRepair.buildJson()));
 }
 
+async function rememberCueRows(page) {
+  const rows = await page.evaluateHandle(() => [...MaweCoreState.container.querySelectorAll(':scope > .cue')]);
+  return async () => {
+    expect(await rows.evaluate(before => {
+      const current = [...MaweCoreState.container.querySelectorAll(':scope > .cue')];
+      return before.length > 0 && before.length === current.length && before.every((row, i) => row === current[i]);
+    })).toBe(true);
+    await rows.dispose();
+  };
+}
+
+test('cue panel text commit keeps bilingual rows and updates search, word timings and history', async ({ page }) => {
+  const project = structuredClone(canonical);
+  Object.assign(project.tracks[0].segments[0], {
+    text: '甲丁', items: [{ start: 1000, end: 2000, text: '甲丁' }],
+  });
+  Object.assign(project.tracks[0].segments[1], { text: '甲乙', disabled: false });
+  project.tracks[2].segments.push({ id: 'translation-tail', start: 3100, end: 4000, text: 'B' });
+  expect(await install(page, project)).toBe(true);
+  const before = await projectContent(page);
+
+  const row = page.locator('.multi-dual-cue[data-main-idx="0"]');
+  const main = row.locator('.multi-cue-column.main');
+  const search = page.locator('#search');
+  await search.fill(' 甲 ');
+  await expect(main.locator('mark')).toHaveText('甲');
+  await expect(page.locator('#visible-count')).toHaveText('2');
+  await main.click();
+  const sameRows = await rememberCueRows(page);
+  const text = page.locator('#cue-panel-text');
+  await text.fill('甲丙');
+  await text.press('Tab');
+  await expect(main.locator('mark')).toHaveText('甲');
+  await text.fill('丙丁');
+  await text.press('Tab');
+
+  await sameRows();
+  await expect(row).toHaveClass(/\bhidden\b/);
+  await expect(page.locator('#visible-count')).toHaveText('1');
+  await expect(row.locator('.multi-cue-column.extension .text')).toHaveText('A');
+  await expect(page.locator('.multi-cue-column.extension[data-ext-idx="1"]')).toHaveClass(/\bdirty\b/);
+  await expect(page.locator('.multi-cue-empty.dirty')).toHaveCount(0);
+  await search.fill('');
+  await expect(row).toBeVisible();
+  await expect(main.locator('.text')).toHaveText('丙丁');
+
+  const saved = await projectContent(page);
+  expect(saved.tracks[0].segments[0].items).toEqual([{ ...before.tracks[0].segments[0].items[0], text: '丙丁' }]);
+  expect(saved.bindings).toEqual(before.bindings);
+  await page.locator('#undo-btn').click();
+  await expect(main.locator('.text')).toHaveText('甲丙');
+  await page.locator('#redo-btn').click();
+  await expect(main.locator('.text')).toHaveText('丙丁');
+  expect(await install(page, saved, 'panel-text-reopened.mosp')).toBe(true);
+  await expect(main.locator('.text')).toHaveText('丙丁');
+});
+
+test('cue panel text commit refreshes the secondary export and updates the overlay row in place', async ({ page }) => {
+  const project = structuredClone(canonical);
+  project.tracks[1].enabled = true;
+  project.bilingual.display_mode = 'extension';
+  expect(await install(page, project)).toBe(true);
+  const exportSecondary = page.locator('#download-multi-srt');
+  await expect(exportSecondary).toHaveAttribute('aria-disabled', 'false');
+  const extension = page.locator('.multi-extension-cue[data-ext-idx="0"]');
+  await extension.click();
+  const text = page.locator('#cue-panel-text');
+  await expect(text).toHaveValue('A');
+  const sameRows = await rememberCueRows(page);
+  await text.press('ControlOrMeta+a');
+  await text.press('Backspace');
+  await text.press('Tab');
+  await sameRows();
+  await expect(extension).toHaveClass(/\bhidden\b/);
+  await expect(exportSecondary).toHaveAttribute('aria-disabled', 'true');
+
+  const overlay = page.locator('.overlay-track-cue[data-overlay-idx="0"]');
+  await overlay.click();
+  const sameOverlayRows = await rememberCueRows(page);
+  await text.fill('叠加修改');
+  await text.press('Tab');
+  await sameOverlayRows();
+  await expect(overlay.locator('.text')).toHaveText('叠加修改');
+  expect((await projectContent(page)).tracks[1].segments[0]).toMatchObject({
+    id: 'overlay-1', start: 1200, end: 1800, text: '叠加修改',
+  });
+});
+
 test('preview extension fields survive edits, undo, redo, save and reopen', async ({ page }) => {
   const project = structuredClone(canonical);
   const vendor = { flag: false, zero: 0, empty: [], nested: { keep: 'custom' } };
