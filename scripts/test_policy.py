@@ -3,6 +3,23 @@ from __future__ import annotations
 
 import os
 
+SYMLINK_PRIVILEGE_REASON = "Windows symlink creation requires a privilege unavailable to this process (WinError 1314)"
+SYMLINK_TESTS = {
+    "test_asr_presets.RecognitionPresetTests.test_symbolic_links_are_unavailable_and_cannot_be_loaded",
+    "test_editor_manifest.EditorManifestTests.test_accepts_symlink_within_web_directory",
+    "test_editor_manifest.EditorManifestTests.test_rejects_symlink_escape",
+    "test_thumbnail_cache.ThumbnailCacheTests.test_symlink_registration_matches_resolved_source_namespace",
+}
+
+
+def environment_limited(test_id: str, reason: str) -> bool:
+    return os.name == "nt" and reason == SYMLINK_PRIVILEGE_REASON and test_id.removeprefix("tests.") in SYMLINK_TESTS
+
+
+def blocking_skip(skip: dict) -> bool:
+    return not (skip["platform_not_applicable"] or skip.get("environment_limited", False))
+
+
 PYTHON_PACKS = ("common", "media", "long-media", "tools", "manual")
 WINDOWS_FFMPEG_TESTS = (
     "tests.test_ffmpeg.FfmpegResolverTests.test_windows_python_module_does_not_shadow_path_executables",

@@ -8,6 +8,7 @@ from unittest.mock import patch
 from maw.asr_presets import BOOL_FIELDS, SCHEMA, TEXT_FIELDS, create_preset, list_presets, read_preset, read_preset_document, write_preset
 from maw.gui_config import load_env, save_env
 from maw.gui_web import ASR_PRESET_ROOT_ENV, LauncherApi, LauncherPaths
+from tests.symlink_fixture import create_file_symlink
 
 
 class RecognitionPresetTests(unittest.TestCase):
@@ -212,10 +213,7 @@ class RecognitionPresetTests(unittest.TestCase):
         target = self.library / "valid.json"
         write_preset(target, self.options)
         link = self.library / "linked.json"
-        try:
-            link.symlink_to(target)
-        except (OSError, NotImplementedError) as error:
-            self.skipTest(f"symbolic links unavailable: {error}")
+        create_file_symlink(link, target)
         items = {item["name"]: item for item in list_presets(self.library)}
         self.assertFalse(items["linked"]["valid"])
         self.assertIn("symbolic link", items["linked"]["detail"])

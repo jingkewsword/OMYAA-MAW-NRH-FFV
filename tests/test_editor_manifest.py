@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import edit
+from tests.symlink_fixture import create_file_symlink
 
 
 class EditorManifestTests(unittest.TestCase):
@@ -66,19 +67,13 @@ class EditorManifestTests(unittest.TestCase):
         outside = self.root / "outside.js"
         outside.write_text("// outside\n", encoding="utf-8")
         link = self.web / "escape.js"
-        try:
-            link.symlink_to(outside)
-        except OSError as error:
-            self.skipTest(f"Symlink creation is unavailable: {error}")
+        create_file_symlink(link, outside)
         with self.assertRaisesRegex(ValueError, "escapes web directory"):
             self.manifest("escape.js\n")
 
     def test_accepts_symlink_within_web_directory(self) -> None:
         link = self.web / "alias.js"
-        try:
-            link.symlink_to(self.web / "shared/core.js")
-        except OSError as error:
-            self.skipTest(f"Symlink creation is unavailable: {error}")
+        create_file_symlink(link, self.web / "shared/core.js")
         self.assertEqual(self.manifest("alias.js\n"), ("alias.js",))
 
 

@@ -39,9 +39,9 @@ from pathlib import Path
 from typing import Any, cast
 
 if __package__:
-    from .test_policy import PYTHON_PACKS, allowed_platform_skip, python_pack
+    from .test_policy import PYTHON_PACKS, allowed_platform_skip, blocking_skip, environment_limited, python_pack
 else:
-    from test_policy import PYTHON_PACKS, allowed_platform_skip, python_pack
+    from test_policy import PYTHON_PACKS, allowed_platform_skip, blocking_skip, environment_limited, python_pack
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MAX_CHARS = 4000
@@ -173,7 +173,8 @@ def result_report(result, selected_ids):
     return {"selected_ids": selected_ids, "run": result.testsRun,
             "failures": len(result.failures), "errors": len(result.errors),
             "skips": [{"id": test.id(), "reason": reason,
-                       "platform_not_applicable": allowed_platform_skip(test.id(), reason)}
+                       "platform_not_applicable": allowed_platform_skip(test.id(), reason),
+                       "environment_limited": environment_limited(test.id(), reason)}
                       for test, reason in result.skipped],
             "expected_failures": len(result.expectedFailures),
             "unexpected_successes": len(result.unexpectedSuccesses),
@@ -188,14 +189,17 @@ def result_report(result, selected_ids):
 def report_code(report, required):
     return int(bool(report["failures"] or report["errors"] or report["unexpected_successes"]
                     or required and (report["expected_failures"]
-                                     or any(not skip["platform_not_applicable"] for skip in report["skips"]))))
+                                     or any(map(blocking_skip, report["skips"])))))
 
 
 def write_report(args, report):
     if args.report:
         args.report.parent.mkdir(parents=True, exist_ok=True)
         args.report.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    if args.required and any(not skip["platform_not_applicable"] for skip in report["skips"]):
+    limited = sum(skip.get("environment_limited", False) for skip in report["skips"])
+    if limited:
+        print(f"[run_tests] environment limited: {limited} skipped (Windows symlink privilege)")
+    if args.required and any(map(blocking_skip, report["skips"])):
         print("[run_tests] required gate failed: unsupported skips; inspect report")
     if args.required and report["expected_failures"]:
         print("[run_tests] required gate failed: expected failures remain unverified")

@@ -14,6 +14,7 @@ from unittest import mock
 
 from maw import thumbnail_cache as c
 from maw.thumbnails import FrameResult, ThumbnailCancelled, ThumbnailError, VideoInfo
+from tests.symlink_fixture import create_file_symlink
 
 
 def jpeg(width=160, height=90, suffix=b"a"):
@@ -570,10 +571,7 @@ class ThumbnailCacheTests(unittest.TestCase):
 
     def test_symlink_registration_matches_resolved_source_namespace(self):
         alias = self.root / "alias.mkv"
-        try:
-            alias.symlink_to(self.media)
-        except OSError:
-            self.skipTest("symlink creation is unavailable")
+        create_file_symlink(alias, self.media)
         expected = c.source_signature(alias)
         self.assertEqual(expected, c.source_signature(self.media))
         self.assertEqual(c.identity_key(alias), c.identity_key(self.media))

@@ -120,8 +120,9 @@ GitHub Actions 的 **Re-run failed jobs** 和 **Re-run all jobs** 都会重新�
 expected failure、unexpected success、退出码及完整日志位置；并行另有文件、PID 和耗时。
 完整日志包含成功与失败测试、加载阶段以及子进程输出；终端仅打印有界摘要。
 `--full-log` 可指定日志位置，未指定时报告旁生成同名 `.log`。
-`--required` 将缺工具、缺依赖、缺夹具或 expected failure 视为失败；仅准确匹配的
-异平台测试 ID 和 skip 原因可豁免。空集合返回失败。分组是显式执行入口，不自动缩减 CI。
+`--required` 将缺工具、缺依赖、缺夹具或 expected failure 视为失败。异平台测试按 ID 和跳过原因识别。
+四项符号链接测试在 Windows 创建夹具遇到 `WinError 1314` 时记为 `environment_limited`，保留跳过记录，门禁可继续。有建链权限时照常执行。空集合返回失败。
+分组是显式执行入口，不自动缩减 CI。
 
 ## 清理投影缓存诊断
 

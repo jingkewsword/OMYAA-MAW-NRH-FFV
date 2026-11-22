@@ -8,8 +8,10 @@ import xml.etree.ElementTree as ET
 
 if __package__:
     from .browser_results import collection
+    from .test_policy import blocking_skip
 else:
     from browser_results import collection
+    from test_policy import blocking_skip
 
 
 def _python(report, required):
@@ -18,7 +20,7 @@ def _python(report, required):
         if kind != "expected_failure" or required:
             yield detail["id"], kind, detail["traceback"]
     for skip in report["skips"]:
-        if required and not skip["platform_not_applicable"]:
+        if required and blocking_skip(skip):
             yield skip["id"], "skip", skip["reason"]
 
 

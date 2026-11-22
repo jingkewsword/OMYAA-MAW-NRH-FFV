@@ -17,6 +17,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+from unittest.mock import Mock, patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -29,7 +30,45 @@ from scripts.run_tests import (  # noqa: E402
     pack_suite,
     cases,
     compact_text,
+    report_code,
+    result_report,
 )
+from scripts.test_policy import SYMLINK_PRIVILEGE_REASON
+from tests.symlink_fixture import create_file_symlink
+
+
+class SymlinkGateTests(unittest.TestCase):
+    def test_only_missing_windows_privilege_skips_link_creation(self):
+        link = Mock(spec=pathlib.Path)
+        target = pathlib.Path("target")
+        for host, code, expected in (("nt", 1314, unittest.SkipTest), ("nt", 5, OSError), ("posix", 1314, OSError)):
+            with self.subTest(host=host, code=code), patch.object(os, "name", host):
+                error = OSError()
+                error.winerror = code
+                link.symlink_to.side_effect = error
+                with self.assertRaises(expected) as caught:
+                    create_file_symlink(link, target)
+                if expected is unittest.SkipTest:
+                    self.assertEqual(str(caught.exception), SYMLINK_PRIVILEGE_REASON)
+                else:
+                    self.assertIs(caught.exception, error)
+
+    def test_required_gate_distinguishes_environment_limit_from_failure(self):
+        identity = "tests.test_editor_manifest.EditorManifestTests.test_accepts_symlink_within_web_directory"
+        with patch.object(os, "name", "nt"):
+            for case_id, reason, limited in ((identity, SYMLINK_PRIVILEGE_REASON, True),
+                                             (identity, "missing fixture", False),
+                                             ("tests.other.Case.test_other", SYMLINK_PRIVILEGE_REASON, False)):
+                with self.subTest(case_id=case_id, reason=reason):
+                    case = Mock()
+                    case.id.return_value = case_id
+                    result = unittest.TestResult()
+                    result.addSkip(case, reason)
+                    report = result_report(result, [case_id])
+                    self.assertEqual(report["skips"][0]["environment_limited"], limited)
+                    self.assertEqual(report_code(report, required=True), int(not limited))
+                    report["failures"] = 1
+                    self.assertEqual(report_code(report, required=True), 1)
 
 
 class CompactTextTests(unittest.TestCase):
