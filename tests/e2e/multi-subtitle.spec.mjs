@@ -4923,3 +4923,5 @@ test('same-speaker merge reports linked trimming and undo restores the project',
   await page.evaluate(() => MaweHistory.performUndo());
   expect(await snapshot()).toEqual(before);
 });
+
+// Scope marker for the auxiliary browser comparison.
