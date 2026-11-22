@@ -347,13 +347,14 @@ test('save-as picker completing after a project switch cannot write or take its 
   assert.equal(calls.saved, 0);
 });
 
-// 脏态指示器事件层：模拟浏览器环境（window/document/setInterval 存在），
-// 验证 markProjectDirty 事件即时刷新指示器，且 1s 轮询退化为 O(1) epoch 比较。
+// 模拟浏览器的脏态通知与定时补查。
 function indicatorFixture() {
   const listeners = new Set();
-  const state = {epoch: 0, unsaved: false};
+  const state = {epoch: 0, unsaved: false, textDiffers: false};
+  const textChecks = [];
   let tick = null;
   let recomputes = 0;
+  let fullChecks = 0;
   const jsonEl = {
     classList: {
       contains: name => name === 'empty' ? false : jsonEl._classes.has(name),
@@ -384,13 +385,24 @@ function indicatorFixture() {
       projectEpoch: 0,
       noteSavedSegments() {},
       markSaved() {},
+      savedMainCueTextDiffers(index, {cachedOnly}) {
+        textChecks.push({index, cachedOnly});
+        return state.textDiffers;
+      },
       onProjectDirtyChange(listener) {
         listeners.add(listener);
         return () => listeners.delete(listener);
       },
       getProjectDirtyEpoch: () => state.epoch,
     },
-    MaweServerSave: {serverProjectSavingEnabled: () => true, showProjectSaveError() {}, hasUnsavedProjectChanges: () => state.unsaved},
+    MaweServerSave: {
+      serverProjectSavingEnabled: () => true,
+      showProjectSaveError() {},
+      hasUnsavedProjectChanges() {
+        fullChecks += 1;
+        return state.unsaved;
+      },
+    },
     MaweJsonRepair: {buildJson: () => JSON.stringify(project)},
     MaweHost: {server: {fetch: async () => ({ok: true, json: async () => ({ok: true, filename: 'captions.mosp'})})}},
     MaweHint: {flashHint() {}},
@@ -401,11 +413,13 @@ function indicatorFixture() {
     listeners,
     jsonEl,
     state,
+    textChecks,
     fireDirtyEvent() { state.epoch += 1; for (const listener of [...listeners]) listener(state.epoch); },
     bumpEpochOnly() { state.epoch += 1; },
     runTick() { assert.ok(tick, 'poll must be scheduled in a browser-like environment'); tick(); },
     recomputeCount: () => recomputes,
-    batch: edit => context.MaweProjectSave.batchDirtyIndicatorUpdates(edit),
+    fullCheckCount: () => fullChecks,
+    batch: (edit, options) => context.MaweProjectSave.batchDirtyIndicatorUpdates(edit, options),
     save: options => context.MaweProjectSave.saveProjectToServer(options),
     markSaved: () => context.MaweProjectSave.markProjectSaved('captions.mosp', null),
   };
@@ -431,6 +445,38 @@ test('the O(1) poll self-heals when an epoch bump was missed by the event path',
   assert.equal(view.recomputeCount(), 1, 'epoch change without an event must still trigger one recompute');
   view.runTick();
   assert.equal(view.recomputeCount(), 1, 'second tick with the same epoch stays idle');
+});
+
+test('the poll checks live main text once using the existing saved index', () => {
+  const view = indicatorFixture();
+  view.state.textDiffers = true;
+  view.batch(() => view.fireDirtyEvent(), {editedMainCueIndex: 4});
+  assert.equal(view.jsonEl._classes.has('dirty'), true);
+  assert.equal(view.fullCheckCount(), 0);
+  view.state.unsaved = true;
+  view.fireDirtyEvent();
+  assert.equal(view.fullCheckCount(), 1);
+  view.runTick();
+  assert.equal(view.recomputeCount(), 3);
+  assert.equal(view.fullCheckCount(), 1);
+  view.bumpEpochOnly();
+  view.runTick();
+  assert.equal(view.fullCheckCount(), 2);
+  assert.deepEqual(view.textChecks, [{index: 4, cachedOnly: false}, {index: 4, cachedOnly: true}]);
+});
+
+test('the poll checks the full project if the hinted text no longer proves an edit', () => {
+  for (const unsaved of [false, true]) {
+    const view = indicatorFixture();
+    view.state.textDiffers = true;
+    view.batch(() => view.fireDirtyEvent(), {editedMainCueIndex: 0});
+    assert.equal(view.fullCheckCount(), 0);
+    view.state.textDiffers = false;
+    view.state.unsaved = unsaved;
+    view.runTick();
+    assert.equal(view.fullCheckCount(), 1);
+    assert.equal(view.jsonEl._classes.has('dirty'), unsaved);
+  }
 });
 
 test('nested panel edits refresh the indicator once without deferring other dirty listeners', () => {

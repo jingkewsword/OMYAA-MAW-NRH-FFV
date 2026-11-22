@@ -238,10 +238,13 @@ test('saved main text evidence follows the acknowledged checkpoint, even for emp
   const state = loadState(project);
   state.establishProjectCheckpoint();
   cue.text = 'sent';
+  assert.equal(state.savedMainCueTextDiffers(0, { cachedOnly: true }), false);
   assert.equal(state.savedMainCueTextDiffers(0), true);
+  assert.equal(state.savedMainCueTextDiffers(0, { cachedOnly: true }), true);
   const sent = state.projectFingerprint();
   cue.text = 'later';
   state.noteSavedSegments(sent);
+  assert.equal(state.savedMainCueTextDiffers(0, { cachedOnly: true }), false);
   assert.equal(state.savedMainCueTextDiffers(0), true);
   cue.text = 'sent';
   project.custom_project = { changed: true };

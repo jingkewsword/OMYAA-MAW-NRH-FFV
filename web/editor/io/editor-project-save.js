@@ -82,12 +82,19 @@ return true;
 // 工程「未保存」指示：右上角文件名前加琥珀色圆点（CSS ::before，不进 textContent，
 // 不影响点击复制），title 提示有未保存的修改。#json-name 在 i18n 的属性跳过名单里，
 // title 需在此处按当前语言手动翻译；调用方为 markProjectDirty 事件回调（即时）、
-// 保存完成的直接刷新与 O(1) 轮询兜底（见文件底部）。
-function updateProjectDirtyIndicator({ editedMainCueIndex } = {}) {
+// 保存完成的直接刷新与定时补查（见文件底部）。
+let mainCueIndexForPoll;
+function updateProjectDirtyIndicator({ editedMainCueIndex, cachedTextOnly = false } = {}) {
 const jsonEl = document.getElementById('json-name');
-if (!jsonEl || jsonEl.classList.contains('empty')) return;
-const changedText = Number.isInteger(editedMainCueIndex) && MaweState.savedMainCueTextDiffers(editedMainCueIndex);
+if (!jsonEl || jsonEl.classList.contains('empty')) {
+  mainCueIndexForPoll = undefined;
+  return;
+}
+const hasCueHint = Number.isInteger(editedMainCueIndex);
+const changedText = hasCueHint && MaweState.savedMainCueTextDiffers(editedMainCueIndex, { cachedOnly: cachedTextOnly });
+if (hasCueHint && !cachedTextOnly) mainCueIndexForPoll = changedText ? editedMainCueIndex : undefined;
 const dirty = changedText || Boolean(MaweServerSave?.hasUnsavedProjectChanges?.());
+if (!dirty) mainCueIndexForPoll = undefined;
 jsonEl.classList.toggle('dirty', dirty);
 const filename = String(jsonEl.textContent || '').trim();
 if (!filename) return;
@@ -347,11 +354,7 @@ return markProjectSaved(handle.name, null, { silent, contentFingerprint, epoch: 
     return window.MAWE_I18N?.translateText?.(text) || text;
   }
 
-  // 脏态指示：事件驱动 + O(1) 轮询兜底 + 语言切换重译标题。dirty 事件由
-  // editor-state 的 markProjectDirty() 触发（changes 标志与各编辑路径收口），
-  // 保存完成走 markProjectSaved 的直接刷新（清洁态即时）。轮询只比较
-  // projectDirtyEpoch（O(1) 自愈），绝不在此做 hasProjectChanges 的 O(N) 扫描；
-  // 指纹等重判定只允许出现在事件回调驱动的 updateProjectDirtyIndicator 里。
+  // 未保存指示随编辑、保存和语言切换刷新。定时器只在编辑序号变化后补查。
   // 仅浏览器页面环境启动（vm 单测环境无定时器/document 事件全局，恢复/保存
   // 流程测试不依赖；编辑器页面常驻，无需清除）。
   if (typeof window !== 'undefined' && typeof MaweState?.onProjectDirtyChange === 'function') {
@@ -366,7 +369,10 @@ return markProjectSaved(handle.name, null, { silent, contentFingerprint, epoch: 
       const epoch = MaweState.getProjectDirtyEpoch();
       if (epoch === lastSeenDirtyEpoch) return;
       lastSeenDirtyEpoch = epoch;
-      updateProjectDirtyIndicator();
+      // 用已有保存索引重查当前字幕。保存索引失效或文字已回改时再检查全工程。
+      const editedMainCueIndex = mainCueIndexForPoll;
+      mainCueIndexForPoll = undefined;
+      updateProjectDirtyIndicator({ editedMainCueIndex, cachedTextOnly: true });
     }, 1000);
     document.addEventListener('mawe:languagechange', updateProjectDirtyIndicator);
   }

@@ -157,10 +157,8 @@ export function createEditorState(project) {
   });
   const editing = Object.seal({ editingState: null, extensionEditingState: null });
 
-  // 工程脏态事件层：散落的脏标记写入收口为 markProjectDirty()，以递增的
-  // projectDirtyEpoch 通知订阅者。消费者（未保存指示器）经 onProjectDirtyChange
-  // 即时刷新；轮询兜底只允许比较 epoch（O(1)），指纹等 O(N) 判定只能出现在
-  // 本事件路径驱动的回调里。
+  // markProjectDirty() 递增编辑序号并通知订阅者。未保存指示器立即刷新，
+  // 定时器也会在序号改变后补查。
   let projectDirtyEpoch = 0;
   const projectDirtyListeners = new Set();
   function markProjectDirty() {
@@ -267,11 +265,11 @@ export function createEditorState(project) {
     }
     return { trackId, texts };
   }
-  function savedMainCueTextDiffers(index) {
+  function savedMainCueTextDiffers(index, { cachedOnly = false } = {}) {
     const track = trackForKind('main');
     const cue = track?.segments?.[index];
     if (typeof cue?.text !== 'string') return false;
-    if (savedMainCueTexts === undefined) savedMainCueTexts = indexSavedMainCueTexts();
+    if (savedMainCueTexts === undefined && !cachedOnly) savedMainCueTexts = indexSavedMainCueTexts();
     if (!savedMainCueTexts || savedMainCueTexts.trackId !== track.id) return false;
     const savedText = savedMainCueTexts.texts.get(cue.id);
     // 工程快照原样保留主字幕文字。相同或未知时仍需检查工程的其它内容。
