@@ -142,10 +142,12 @@ MaweDom.cuePanelText?.addEventListener('input', () => {
   const cueListAnchor = MaweCueListAnchor.captureCueListRenderAnchor();
   MaweCuePanel.ensureCuePanelUndo(target.kind === 'extension' ? '编辑副字幕' : '编辑当前字幕');
   const seg = target.segment;
-  seg.text = MaweDom.cuePanelText.value.replace(/\r\n?/g, '\n');
-  seg._dirty = true;
-  MaweState.markProjectDirty();
-  if (target.kind === 'extension') MaweMultiSubtitleCore.markMultiSubtitleDirty();
+  MaweProjectSave.batchDirtyIndicatorUpdates(() => {
+    seg.text = MaweDom.cuePanelText.value.replace(/\r\n?/g, '\n');
+    seg._dirty = true;
+    MaweState.markProjectDirty();
+    if (target.kind === 'extension') MaweMultiSubtitleCore.markMultiSubtitleDirty();
+  });
   MaweViewUpdates.invalidate({ save: true });
   const splitMode = target.kind === 'extension'
     ? MaweMultiSubtitleCore.getExtensionSubtitleSplitMode(target.track, seg)

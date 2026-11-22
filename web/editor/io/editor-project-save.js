@@ -103,6 +103,25 @@ const text = dirty ? `有未保存的修改；点击复制工程文件名：${fi
 jsonEl.title = window.MAWE_I18N?.translateText?.(text) || text;
 }
 
+  // 面板的一次同步编辑可多次标记脏态。保留各次 epoch 和其它订阅者，
+  // 只让未保存指示器在编辑结束时按最终内容比较一次。
+  let batchDirtyIndicator = false;
+  function batchDirtyIndicatorUpdates(edit) {
+    if (batchDirtyIndicator) return edit();
+    const epochBeforeEdit = MaweState.getProjectDirtyEpoch();
+    batchDirtyIndicator = true;
+    try {
+      return edit();
+    } finally {
+      batchDirtyIndicator = false;
+      if (MaweState.getProjectDirtyEpoch() !== epochBeforeEdit) {
+        try { updateProjectDirtyIndicator(); } catch (error) {
+          window.console?.error?.('editor-project-save: project dirty indicator failed', error);
+        }
+      }
+    }
+  }
+
 
 
   // v2 validation runs before any I/O. Surface its cue/word repair actions
@@ -325,7 +344,9 @@ return markProjectSaved(handle.name, null, { silent, contentFingerprint, epoch: 
   // 仅浏览器页面环境启动（vm 单测环境无定时器/document 事件全局，恢复/保存
   // 流程测试不依赖；编辑器页面常驻，无需清除）。
   if (typeof window !== 'undefined' && typeof MaweState?.onProjectDirtyChange === 'function') {
-    MaweState.onProjectDirtyChange(() => updateProjectDirtyIndicator());
+    MaweState.onProjectDirtyChange(() => {
+      if (!batchDirtyIndicator) updateProjectDirtyIndicator();
+    });
   }
   if (typeof window !== 'undefined' && typeof window.setInterval === 'function'
       && typeof MaweState?.getProjectDirtyEpoch === 'function') {
@@ -347,6 +368,7 @@ saveCurrentProject,
 saveProjectAsToFile,
 inlineEditHasUncommittedText,
 updateProjectDirtyIndicator,
+batchDirtyIndicatorUpdates,
 mediaNameEl,
 jsonNameEl,
 translatedEditorText

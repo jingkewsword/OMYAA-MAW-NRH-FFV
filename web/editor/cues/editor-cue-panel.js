@@ -297,6 +297,10 @@ export function initMaweCuePanel() {
 
 
   function commitCuePanelEdit() {
+    return MaweProjectSave.batchDirtyIndicatorUpdates(applyCuePanelEdit);
+  }
+
+  function applyCuePanelEdit() {
   const target = getCurrentCuePanelTarget();
   const seg = target?.segment;
   if (!target || !seg) { MaweCuePanelState.resetCuePanelEditState(); return false; }

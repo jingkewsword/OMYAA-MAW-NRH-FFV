@@ -278,6 +278,7 @@ function indicatorFixture() {
     bumpEpochOnly() { state.epoch += 1; },
     runTick() { assert.ok(tick, 'poll must be scheduled in a browser-like environment'); tick(); },
     recomputeCount: () => recomputes,
+    batch: edit => context.MaweProjectSave.batchDirtyIndicatorUpdates(edit),
     save: options => context.MaweProjectSave.saveProjectToServer(options),
     markSaved: () => context.MaweProjectSave.markProjectSaved('captions.mosp', null),
   };
@@ -303,6 +304,40 @@ test('the O(1) poll self-heals when an epoch bump was missed by the event path',
   assert.equal(view.recomputeCount(), 1, 'epoch change without an event must still trigger one recompute');
   view.runTick();
   assert.equal(view.recomputeCount(), 1, 'second tick with the same epoch stays idle');
+});
+
+test('nested panel edits refresh the indicator once without deferring other dirty listeners', () => {
+  const view = indicatorFixture();
+  const observed = [];
+  view.listeners.add(epoch => observed.push(epoch));
+  const result = view.batch(() => {
+    view.fireDirtyEvent();
+    view.batch(() => {
+      view.fireDirtyEvent();
+      view.state.unsaved = true;
+    });
+    view.fireDirtyEvent();
+    assert.deepEqual(observed, [1, 2, 3]);
+    assert.equal(view.recomputeCount(), 0);
+    return 'committed';
+  });
+  assert.equal(result, 'committed');
+  assert.equal(view.recomputeCount(), 1);
+  assert.equal(view.jsonEl._classes.has('dirty'), true);
+  view.batch(() => {});
+  assert.equal(view.recomputeCount(), 1);
+});
+
+test('a failed panel edit flushes its dirty event and releases the indicator batch', () => {
+  const view = indicatorFixture();
+  const failure = new Error('edit failed');
+  assert.throws(() => view.batch(() => {
+    view.fireDirtyEvent();
+    throw failure;
+  }), error => error === failure);
+  assert.equal(view.recomputeCount(), 1);
+  view.fireDirtyEvent();
+  assert.equal(view.recomputeCount(), 2);
 });
 
 test('the indicator dot reflects the dirty state reported by the save module on every refresh', () => {

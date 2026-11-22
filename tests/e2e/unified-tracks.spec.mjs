@@ -119,6 +119,61 @@ test('cue panel text commit refreshes the secondary export and updates the overl
   });
 });
 
+test('cue panel dirty indicator follows revert, Escape and an in-flight autosave', async ({ page }) => {
+  expect(await install(page, structuredClone(canonical))).toBe(true);
+  await page.evaluate(() => MaweSettings.updateEditorSettings({ cueEditorCancelOnEscape: true }));
+  await page.locator('.multi-dual-cue[data-ext-idx="0"] .multi-cue-column.extension').click();
+  const text = page.locator('#cue-panel-text');
+  const name = page.locator('#json-name');
+  const indicatorDirty = () => name.evaluate(element => element.classList.contains('dirty'));
+  const blocksDeparture = () => page.evaluate(() => !window.dispatchEvent(new Event('beforeunload', { cancelable: true })));
+  expect(await indicatorDirty()).toBe(false);
+  await expect(text).toHaveValue('A');
+  await text.fill('B');
+  expect(await indicatorDirty()).toBe(true);
+  expect(await blocksDeparture()).toBe(true);
+  await text.fill('A');
+  expect(await indicatorDirty()).toBe(false);
+  await text.press('Tab');
+  expect(await page.evaluate(() => MaweHistory.editorHistory.undoLength())).toBe(0);
+  await text.fill('B');
+  await text.press('Escape');
+  await expect(text).toHaveValue('A');
+  expect(await indicatorDirty()).toBe(false);
+  expect(await blocksDeparture()).toBe(false);
+
+  await page.evaluate(() => {
+    MaweServerSave.projectFileHandle = {
+      name: 'panel-autosave.mosp',
+      async createWritable() {
+        return { async write(blob) {
+          window.__pendingPanelSave = JSON.parse(await blob.text());
+          await new Promise(resolve => { window.__finishPanelSave = resolve; });
+        }, async close() {} };
+      },
+    };
+    MaweSettings.updateEditorSettings({ autoSaveProject: true });
+  });
+  await text.fill('B');
+  await page.waitForFunction(() => typeof window.__finishPanelSave === 'function');
+  expect(await page.evaluate(() => window.__pendingPanelSave.tracks[2].segments[0].text)).toBe('B');
+  await expect(text).toBeFocused();
+  await page.evaluate(() => MaweSettings.updateEditorSettings({ autoSaveProject: false }));
+  await text.fill('C');
+  await text.press('Tab');
+  await page.evaluate(() => window.__finishPanelSave());
+  await expect(name).toHaveText('panel-autosave.mosp');
+  expect(await indicatorDirty()).toBe(true);
+  expect(await blocksDeparture()).toBe(true);
+  await page.locator('#undo-btn').click();
+  await expect(text).toHaveValue('B');
+  expect(await indicatorDirty()).toBe(false);
+  expect(await blocksDeparture()).toBe(false);
+  await page.locator('#redo-btn').click();
+  await expect(text).toHaveValue('C');
+  expect(await indicatorDirty()).toBe(true);
+});
+
 test('preview extension fields survive edits, undo, redo, save and reopen', async ({ page }) => {
   const project = structuredClone(canonical);
   const vendor = { flag: false, zero: 0, empty: [], nested: { keep: 'custom' } };
