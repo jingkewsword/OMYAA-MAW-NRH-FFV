@@ -18,6 +18,25 @@
 
 Launcher 是转写与工具箱入口；MAWE 是编辑器。当前日常编辑使用本机 Server，MOSE 桌面目录的定位见 [MOSE](../engineering/MOSE.md)。
 
+### Linux AppImage
+
+Linux 下载该版本的 `MAW-Linux-x86_64-*.AppImage`。它内置 FFmpeg / FFprobe，给文件添加执行权限后运行（替换下面的版本号）：
+
+```sh
+chmod +x MAW-Linux-x86_64-vX.Y.Z.AppImage
+./MAW-Linux-x86_64-vX.Y.Z.AppImage
+```
+
+当前 Linux 包面向 x86_64 桌面，使用 Ubuntu 22.04（glibc 2.35）构建基线；需要可用的 X11 或 XWayland、系统图形驱动和正常的 FUSE 挂载环境。更低 glibc 的系统不在该构建基线内。新包采用官方静态 AppImage runtime，不需要单独安装 libfuse2，但静态外壳不会消除内部 Qt 等组件的系统要求。
+
+如果双击没有窗口，先在终端运行同一文件，保留实际错误。FUSE 挂载不可用时，可直接尝试免 FUSE 的临时解压运行；此方式需要额外磁盘空间和解压时间，不修改系统：
+
+```sh
+./MAW-Linux-x86_64-vX.Y.Z.AppImage --appimage-extract-and-run
+```
+
+旧版本若明确报 `libfuse.so.2` 缺失，可参考 [AppImage 官方 FUSE 排错](https://docs.appimage.org/user-guide/troubleshooting/fuse.html)：Ubuntu 22.04 的兼容库包名为 `libfuse2`，Ubuntu 24.04 为 `libfuse2t64`。这只针对旧包的对应错误，不应把所有启动失败都当成缺少 FUSE2。
+
 ### 从源码运行
 
 需要 Python 3.11+、[uv 0.13.4+](https://docs.astral.sh/uv/)、Node.js 22.23.4+（22.x）、24.22.1+（24.x）或 26.12.1+、pnpm 和 FFmpeg / FFprobe。在仓库根目录执行：
